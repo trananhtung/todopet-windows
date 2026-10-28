@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+src-tauri/target/
+src-tauri/gen/schemas/
+*.log
+.DS_Store
+gan-harness/screenshots/
+test-results/
+playwright-report/
