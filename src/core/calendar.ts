@@ -24,16 +24,23 @@ interface Interval {
 
 const MEETING_HOSTS = ["zoom.us", "meet.google.com", "teams.microsoft.com", "teams.live.com", "webex.com", "whereby.com"];
 
+/** https links to a known video-call service, or the Teams / Zoom app links those services use. */
 const isMeetingHost = (url: string) => {
+  if (/^msteams:\/l\/meetup-join\//i.test(url) || /^zoommtg:\/\/([a-z0-9-]+\.)?zoom\.us\/join\?/i.test(url)) return true;
   try {
-    const host = new URL(url).hostname.toLowerCase();
+    const u = new URL(url);
+    if (u.protocol !== "https:") return false;
+    const host = u.hostname.toLowerCase();
     return MEETING_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
   } catch {
     return false;
   }
 };
 
-/** Finds a video-call link in the event URL, location or notes; falls back to the event URL. */
+/**
+ * Finds a video-call link in the event URL, location or notes. Only known meeting services qualify: anyone can
+ * put an invite in your calendar, so an arbitrary link must never end up behind the pet's "Join" button.
+ */
 export function joinUrl(url: string | null, texts: (string | null | undefined)[]): string | null {
   if (url && isMeetingHost(url)) return url;
   for (const text of texts) {
@@ -42,7 +49,7 @@ export function joinUrl(url: string | null, texts: (string | null | undefined)[]
       if (isMeetingHost(m[0])) return m[0];
     }
   }
-  return url;
+  return null;
 }
 
 const propText = (c: ICAL.Component, name: string): string | null => {
@@ -58,6 +65,8 @@ export function eventsOnDay(icsTexts: string[], day: Date): CalEvent[] {
   const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
   const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
   const out: CalEvent[] = [];
+  // One budget for all calendars, so a feed full of long recurring series can't freeze the pet.
+  let budget = 50_000;
 
   for (const text of icsTexts) {
     let root: ICAL.Component;
@@ -109,7 +118,7 @@ export function eventsOnDay(icsTexts: string[], day: Date): CalEvent[] {
           continue;
         }
         const it = event.iterator();
-        for (let next = it.next(), guard = 0; next && guard < 20_000; next = it.next(), guard++) {
+        for (let next = it.next(); next && budget > 0; next = it.next(), budget--) {
           const d = event.getOccurrenceDetails(next);
           if (d.startDate.toJSDate().getTime() >= dayEnd) break;
           consider(d.item, d.startDate, d.endDate);

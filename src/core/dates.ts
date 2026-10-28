@@ -61,10 +61,10 @@ export function dayKey(date: Date): string {
   return `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-/** A copy of `date` set to hour:minute:00 (hour clamped to 0…23) on the same local day. */
+/** A copy of `date` set to hour:minute:00 on the same local day; hour 24 is the next midnight (work ending at 24:00). */
 export function atHour(hour: number, minute: number, date: Date): Date {
   const result = new Date(date.getTime());
-  result.setHours(Math.min(Math.max(hour, 0), 23), minute, 0, 0);
+  result.setHours(Math.min(Math.max(hour, 0), 24), minute, 0, 0);
   return result;
 }
 

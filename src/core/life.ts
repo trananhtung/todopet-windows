@@ -55,15 +55,15 @@ export function accessoryRequirement(a: Accessory): string {
     case "bow":
       return L("Xong việc đầu tiên", "Finish your first task");
     case "scarf":
-      return L("Chuỗi 3 ngày đạt mục tiêu", "A 3-day streak");
+      return L("Đạt mục tiêu 3 ngày liền", "Hit your daily goal 3 days in a row");
     case "sunglasses":
-      return L("Combo ×3", "A ×3 combo");
+      return L("Xong 3 việc, mỗi việc cách nhau dưới 30 phút", "Finish 3 tasks, each within 30 minutes of the last");
     case "tophat":
       return L("Xong 25 việc", "Finish 25 tasks");
     case "crown":
-      return L("Chuỗi 7 ngày đạt mục tiêu", "A 7-day streak");
+      return L("Đạt mục tiêu 7 ngày liền", "Hit your daily goal 7 days in a row");
     case "gradcap":
-      return L("Lớn tới giai đoạn Trưởng thành", "Grow up to Grown-up");
+      return L("Lớn tới giai đoạn Trưởng thành", "Reach the Grown-up stage");
   }
 }
 
@@ -246,12 +246,13 @@ export function feed(s: LifeState, now: number, roll: number, pick: number): Fee
   return { food, combo: s.combo, golden, kind, unlocked, levelUp: after !== before ? after : null, cleaned };
 }
 
-/** Reverses one feed (when you undo a completion). */
-export function unfeed(s: LifeState): void {
+/** Reverses one feed (when you undo a completion), taking back the XP and golden treat it gave when known. */
+export function unfeed(s: LifeState, gained: { xp: number; golden: boolean } = { xp: 10, golden: false }): void {
   s.totalDone = Math.max(0, s.totalDone - 1);
-  s.xp = Math.max(0, s.xp - 10);
+  s.xp = Math.max(0, s.xp - gained.xp);
   s.satiety = Math.max(0, s.satiety - 25);
   s.combo = Math.max(0, s.combo - 1);
+  if (gained.golden) s.goldens = Math.max(0, s.goldens - 1);
 }
 
 /** Hunger grows during work hours only (at most one hour per step, so sleep or lunch doesn't starve the pet). */

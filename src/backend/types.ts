@@ -92,6 +92,8 @@ export interface TodoistApi {
 export interface SecretsStatus {
   todoist: boolean;
   anthropic: boolean;
+  /** Hosts of the saved calendar links ("calendar.google.com"); the links themselves never come back. */
+  calendarHosts: string[];
 }
 
 export interface SecretsApi {
@@ -101,6 +103,11 @@ export interface SecretsApi {
   clearTodoistToken(): Promise<void>;
   /** null removes the key. */
   setAnthropicKey(key: string | null): Promise<void>;
+  /**
+   * Replaces the saved ICS links (https:// or webcal://, at most 10). Calendar "secret addresses" are bearer
+   * secrets, so they live in Credential Manager like the tokens. An empty list removes them all.
+   */
+  setCalendarLinks(links: string[]): Promise<void>;
 }
 
 // ---------- Claude (optional, only when the user presses Ask Claude) ----------
@@ -120,15 +127,16 @@ export interface ClaudeApi {
 // ---------- Calendar (ICS links) ----------
 
 export interface IcsResult {
-  url: string;
+  /** Host of the link, never the full (secret) address. */
+  host: string;
   ok: boolean;
   text?: string;
   error?: string;
 }
 
 export interface CalendarApi {
-  /** Fetches each https:// or webcal:// link (max 5 MB, 20 s timeout). Never rejects: failures come back per link. */
-  fetchIcs(urls: string[]): Promise<IcsResult[]>;
+  /** Fetches every saved link (max 5 MB each, 20 s timeout). Never rejects: failures come back per link. */
+  fetchIcs(): Promise<IcsResult[]>;
 }
 
 // ---------- System (Win32 watchers, overlay window, tray) ----------
@@ -188,6 +196,8 @@ export interface SystemApi {
   setClickThrough(ignore: boolean): Promise<void>;
   /** Gives the overlay keyboard focus (board opened, add field). */
   focusOverlay(): Promise<void>;
+  /** Makes the overlay unfocusable again (board closed), so it never keeps your keystrokes. */
+  releaseOverlayFocus(): Promise<void>;
   /** Tray tooltip, e.g. "TodoPet — 😊 2/3" or "🍅 18:42". */
   setTrayStatus(tooltip: string): Promise<void>;
   setTrayLabels(labels: TrayLabels): Promise<void>;

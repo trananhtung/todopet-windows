@@ -7,7 +7,7 @@ import { L, langFromLocale, pick, setLang } from "./l10n";
 import * as life from "./life";
 import { actionable, buildDay, dueTime, nextTask, planned, ranked, statsFromRaw, taskFromRaw, uiPriority, type TodoTask } from "./models";
 import { defaultMoodInputs, evaluateMood } from "./mood";
-import { calendarLinks, defaultPrefs, isWorkday, prefsFromJson } from "./prefs";
+import { defaultPrefs, isWorkday, prefsFromJson } from "./prefs";
 import { appRules, currentDistraction, hostOf, matchSite, siteRules } from "./sites";
 import { findStuck, recordSeen, stuckDays } from "./stuck";
 
@@ -298,6 +298,11 @@ describe("calendar", () => {
     expect(s[0].start).toEqual(at(11, 30));
     expect(s[1].start).toEqual(at(12, 40));
     expect(joinUrl("https://example.com/e", ["call: https://us02web.zoom.us/j/1"])).toBe("https://us02web.zoom.us/j/1");
+    // Anyone can put an invite in your calendar: arbitrary links never reach the "Join" button.
+    expect(joinUrl("https://evil.example/login", ["no link here"])).toBeNull();
+    expect(joinUrl("http://meet.google.com/abc", [])).toBeNull();
+    expect(joinUrl("msteams:/l/meetup-join/19%3ameeting", [])).toBe("msteams:/l/meetup-join/19%3ameeting");
+    expect(joinUrl("msteams:/l/app/evil", [])).toBeNull();
   });
 });
 
@@ -311,7 +316,6 @@ describe("prefs", () => {
     expect(p.petName).toBe("Mochi");
     expect(prefsFromJson({ species: "trex" }).species).toBe("mochi");
     expect(isWorkday(defaultPrefs(), new Date(2026, 9, 31))).toBe(false);
-    expect(calendarLinks({ ...defaultPrefs(), calendarUrls: "webcal://a.b/c.ics\nfile:///etc/passwd, https://x.y/z.ics" })).toEqual(["webcal://a.b/c.ics", "https://x.y/z.ics"]);
   });
 });
 

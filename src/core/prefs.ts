@@ -30,8 +30,6 @@ export interface Prefs {
   workSunday: boolean;
   petScale: number;
   chaseWhenAngry: boolean;
-  /** ICS links, one per line. */
-  calendarUrls: string;
   useCalendar: boolean;
   /** Lower the daily target on meeting-heavy days. */
   adaptTarget: boolean;
@@ -81,7 +79,6 @@ export function defaultPrefs(now = Date.now()): Prefs {
     workSunday: false,
     petScale: 1,
     chaseWhenAngry: true,
-    calendarUrls: "",
     useCalendar: true,
     adaptTarget: true,
     meetingLead: 5,
@@ -128,7 +125,6 @@ export function prefsFromJson(raw: unknown, now = Date.now()): Prefs {
     workSunday: bool("workSunday"),
     petScale: typeof r.petScale === "number" && r.petScale >= 0.6 && r.petScale <= 1.8 ? r.petScale : d.petScale,
     chaseWhenAngry: bool("chaseWhenAngry"),
-    calendarUrls: str("calendarUrls"),
     useCalendar: bool("useCalendar"),
     adaptTarget: bool("adaptTarget"),
     meetingLead: clampInt(r.meetingLead, 1, 30, d.meetingLead),
@@ -153,13 +149,4 @@ export function isWorkday(p: Prefs, date: Date): boolean {
   if (wd === 6) return p.workSaturday;
   if (wd === 0) return p.workSunday;
   return true;
-}
-
-/** ICS links from the settings text (one per line or comma-separated), only https:// and webcal://. */
-export function calendarLinks(p: Prefs): string[] {
-  return p.calendarUrls
-    .split(/[\n,]/)
-    .map((s) => s.trim())
-    .filter((s) => /^(https|webcal):\/\//i.test(s))
-    .slice(0, 10);
 }

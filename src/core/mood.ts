@@ -1,5 +1,7 @@
 // Turns "how is my day going" into a 0–100 happiness score and a mood (MoodEngine.swift). Pure.
 import { L } from "./l10n";
+
+const n = (count: number, noun: string, nouns = `${noun}s`) => `${count} ${count === 1 ? noun : nouns}`;
 import type { Mood } from "./types";
 
 export function moodEmoji(m: Mood): string {
@@ -98,7 +100,7 @@ export function evaluateMood(i: MoodInputs): MoodResult {
   };
 
   if (i.completed > 0) {
-    add(Math.min(i.completed, 5) * 8, L(`đã xong ${i.completed} việc hôm nay`, `${i.completed} task(s) done today`));
+    add(Math.min(i.completed, 5) * 8, L(`đã xong ${i.completed} việc hôm nay`, `${n(i.completed, "task")} done today`));
   }
   if (i.completed > 0 && i.remaining === 0 && i.overdue === 0 && i.planned >= i.target) {
     add(30, L("xong hết kế hoạch hôm nay", "today's plan is complete"));
@@ -107,19 +109,19 @@ export function evaluateMood(i: MoodInputs): MoodResult {
     add(15 * (1 - i.minutesSinceCelebration / 30), L("vừa hoàn thành một việc", "just finished something"));
   }
   if (i.overdue > 0) {
-    add(-Math.min(i.overdue, 5) * 7, L(`${i.overdue} việc quá hạn`, `${i.overdue} overdue task(s)`));
+    add(-Math.min(i.overdue, 5) * 7, L(`${i.overdue} việc quá hạn`, n(i.overdue, "overdue task")));
   }
   if (i.late > 0) {
-    add(-Math.min(i.late, 3) * 4, L(`${i.late} việc đã trễ giờ`, `${i.late} task(s) past their time`));
+    add(-Math.min(i.late, 3) * 4, L(`${i.late} việc đã trễ giờ`, `${n(i.late, "task")} past ${i.late === 1 ? "its" : "their"} time`));
   }
   if (i.satiety < 30) {
     add(-(30 - i.satiety) / 2, L(`đang đói (no ${Math.trunc(i.satiety)}%)`, `hungry (${Math.trunc(i.satiety)}% full)`));
   }
   if (i.dirt > 0) {
-    add(-i.dirt * 5, L(`bẩn vì ${i.dirt} ngày lười`, `dirty after ${i.dirt} lazy day(s)`));
+    add(-i.dirt * 5, L(`bẩn vì ${i.dirt} ngày lười`, `dirty after ${n(i.dirt, "lazy day")}`));
   }
   if (i.stuck > 0) {
-    add(-Math.min(i.stuck, 3) * 3, L(`${i.stuck} việc bị dời mãi`, `${i.stuck} task(s) keep getting postponed`));
+    add(-Math.min(i.stuck, 3) * 3, L(`${i.stuck} việc bị dời mãi`, `${n(i.stuck, "task")} ${i.stuck === 1 ? "keeps" : "keep"} getting postponed`));
   }
   if (i.workday && i.inWorkHours && !i.inMeeting) {
     if (i.hoursAfterPlanDeadline >= 0 && i.planned < i.target) {

@@ -50,7 +50,12 @@ export const taskTitle = (t: TodoTask): string => plainText(t.content);
 /** Priority as the Todoist UI shows it: 1 = P1 … 4 = P4. */
 export const uiPriority = (t: TodoTask): number => 5 - Math.min(Math.max(t.priority, 1), 4);
 export const isRecurring = (t: TodoTask): boolean => t.due?.isRecurring ?? false;
-export const dueDay = (t: TodoTask): string | null => (t.due ? t.due.date.slice(0, 10) : null);
+/** Local calendar day the task is due ("yyyy-MM-dd"), also for fixed-timezone tasks given in UTC. */
+export function dueDay(t: TodoTask): string | null {
+  if (!t.due) return null;
+  const time = dueTime(t);
+  return time ? dayKey(time) : t.due.date.slice(0, 10);
+}
 
 /** Exact due time if the task has one ("3pm"), else null for all-day tasks. */
 export function dueTime(t: TodoTask): Date | null {

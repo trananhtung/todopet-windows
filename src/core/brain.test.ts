@@ -53,7 +53,7 @@ describe("Brain with the demo backend", () => {
     expect(b?.text).toContain("Good morning");
     // Overdue tasks don't count as planned: 2/3, so it asks for one more, then sums up the calendar.
     expect(b?.text).toContain("Only 2/3 planned");
-    expect(b?.text).toContain("2 meeting(s) today");
+    expect(b?.text).toContain("2 meetings today");
     expect(b?.actions[0].title).toBe("＋ Add tasks");
     expect(b?.reminder).toBe(true);
   });

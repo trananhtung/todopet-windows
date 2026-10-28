@@ -10,7 +10,7 @@ export function siteRules(list: string): string[] {
       for (const prefix of ["https://", "http://", "www."]) if (r.startsWith(prefix)) r = r.slice(prefix.length);
       return r;
     })
-    .filter((r) => r.length > 0);
+    .filter((r, i, all) => r.length > 0 && all.indexOf(r) === i);
 }
 
 /** "TikTok, Netflix" → ["tiktok", "netflix"]. */

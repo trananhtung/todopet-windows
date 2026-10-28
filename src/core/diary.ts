@@ -85,7 +85,7 @@ export function summarize(entries: DiaryEntry[]): DiarySummary {
 export function summaryLine(s: DiarySummary): string {
   return L(
     `${s.reminders} lời nhắc · ${s.picked} lần bấm · ${s.closed} lần đóng · ${s.ignored} lần bỏ qua · ${s.held} lần giữ lại · ${s.focusMinutes}' vào guồng · ${s.distractedMinutes}' xao nhãng`,
-    `${s.reminders} reminders · ${s.picked} tapped · ${s.closed} closed · ${s.ignored} ignored · ${s.held} held back · ${s.focusMinutes}' in the zone · ${s.distractedMinutes}' distracted`,
+    `${s.reminders} ${s.reminders === 1 ? "reminder" : "reminders"} · ${s.picked} tapped · ${s.closed} closed · ${s.ignored} ignored · ${s.held} held back · ${s.focusMinutes}' in the zone · ${s.distractedMinutes}' distracted`,
   );
 }
 
@@ -109,6 +109,11 @@ export class Diary {
     private readonly now: () => number = Date.now,
     private readonly onWritten?: () => void,
   ) {}
+
+  dispose(): void {
+    if (this.notifyTimer) clearTimeout(this.notifyTimer);
+    this.notifyTimer = null;
+  }
 
   private notifySoon(): void {
     if (!this.onWritten || this.notifyTimer) return;

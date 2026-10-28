@@ -12,6 +12,7 @@ import type {
   SystemSample,
   Unsubscribe,
 } from "./types";
+import { getLang } from "../core/l10n";
 import { BackendError } from "./types";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -56,7 +57,8 @@ export function sampleTasks(now: Date): RawTask[] {
   const soon = new Date(now);
   soon.setHours(now.getHours() + 1, 0, 0, 0);
   const threeDaysAgo = localDay(new Date(now.getTime() - 3 * 86_400_000));
-  const vi = typeof navigator !== "undefined" && navigator.language?.toLowerCase().startsWith("vi");
+  // In the app's language (set by the Brain before the first sync), not the browser's.
+  const vi = getLang() === "vi";
   return [
     { id: "1", content: vi ? "Viết báo cáo tuần" : "Write the weekly report", priority: 4, due: { date: today, string: "today" } },
     { id: "2", content: vi ? "Gọi cho khách hàng ABC" : "Call client ABC", priority: 3, due: { date: localStamp(soon), string: "today", datetime: null } },
@@ -77,9 +79,10 @@ export function demoIcs(now: Date): string {
     return d;
   };
   const h = now.getHours();
+  const vi = getLang() === "vi";
   const events = [
-    { uid: "demo-1", title: "Team sync", start: at(h + 1), end: at(h + 2), desc: "Join: https://meet.google.com/abc-defg-hij" },
-    { uid: "demo-2", title: "Client meeting", start: at(h + 4), end: at(h + 4, 45), desc: "" },
+    { uid: "demo-1", title: vi ? "Họp nhóm" : "Team sync", start: at(h + 1), end: at(h + 2), desc: "Join: https://meet.google.com/abc-defg-hij" },
+    { uid: "demo-2", title: vi ? "Gặp khách hàng" : "Client meeting", start: at(h + 4), end: at(h + 4, 45), desc: "" },
   ];
   const body = events
     .filter((e) => e.start.getDate() === now.getDate())
@@ -106,12 +109,14 @@ const pause = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 export function createDemoBackend(opts: { now?: () => number; persist?: boolean } = {}): DemoBackend {
   const now = opts.now ?? Date.now;
   const persist = (opts.persist ?? true) && storageAvailable;
-  let active: RawTask[] = sampleTasks(new Date(now()));
+  // Created on the first sync, once the Brain has picked the app language.
+  let active: RawTask[] | null = null;
+  const tasksNow = () => (active ??= sampleTasks(new Date(now())));
   let done: RawTask[] = [];
   let counter = 100;
   let autostart = false;
   // The demo starts connected; Settings can disconnect and reconnect to try those flows.
-  const secrets = { todoist: true, anthropic: true };
+  const secrets = { todoist: true, anthropic: true, calendarHosts: ["demo.todopet"] };
   const memoryStore = new Map<string, unknown>();
   const memoryDiary = new Map<string, string[]>();
 
@@ -150,14 +155,14 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
     }, 1000);
   }
 
-  const find = (id: string) => active.findIndex((t) => t.id === id);
+  const find = (id: string) => tasksNow().findIndex((t) => t.id === id);
 
   const backend: DemoBackend = {
     kind: "demo",
     todoist: {
       async tasks() {
         await pause();
-        return structuredClone(active);
+        return structuredClone(tasksNow());
       },
       async completed() {
         await pause();
@@ -173,7 +178,7 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
         const day = dueString === "today" ? localDay(d) : dueString === "tomorrow" ? localDay(new Date(d.getTime() + 86_400_000)) : null;
         const t: RawTask = { id: String(counter), content, priority, parent_id: parentId, due: day ? { date: day, string: dueString } : null };
         // Tomorrow's tasks don't match "today | overdue"; undated sub-steps stay visible like Todoist's filter would not.
-        if (day === localDay(d)) active.push(t);
+        if (day === localDay(d)) tasksNow().push(t);
         return structuredClone(t);
       },
       async quickAdd(text) {
@@ -183,7 +188,7 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
         await pause();
         const i = find(id);
         if (i < 0) return;
-        const [t] = active.splice(i, 1);
+        const [t] = tasksNow().splice(i, 1);
         done.push({ ...t, checked: true, completed_at: new Date(now()).toISOString() });
       },
       async reopen(id) {
@@ -191,29 +196,30 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
         const i = done.findIndex((t) => t.id === id);
         if (i < 0) return;
         const [t] = done.splice(i, 1);
-        active.push({ ...t, checked: false, completed_at: null });
+        tasksNow().push({ ...t, checked: false, completed_at: null });
       },
       async reschedule(id, dueString) {
         await pause();
         const i = find(id);
         if (i < 0) return;
         const d = new Date(now());
+        const list = tasksNow();
         if (dueString === "tomorrow" || dueString === "no date") {
-          active.splice(i, 1);
+          list.splice(i, 1);
         } else if (dueString.startsWith("today at ")) {
-          active[i] = { ...active[i], due: { date: `${localDay(d)}T${dueString.split(" ").pop()}:00`, string: dueString } };
+          list[i] = { ...list[i], due: { date: `${localDay(d)}T${dueString.split(" ").pop()}:00`, string: dueString } };
         } else {
-          active[i] = { ...active[i], due: { date: localDay(d), string: dueString } };
+          list[i] = { ...list[i], due: { date: localDay(d), string: dueString } };
         }
       },
       async remove(id) {
         await pause();
-        active = active.filter((t) => t.id !== id && t.parent_id !== id);
+        active = tasksNow().filter((t) => t.id !== id && t.parent_id !== id);
       },
     },
     secrets: {
       async status() {
-        return { ...secrets };
+        return { ...secrets, calendarHosts: [...secrets.calendarHosts] };
       },
       async setTodoistToken(token) {
         if (token.trim().length < 8) throw new BackendError({ kind: "unauthorized", message: "invalid token" });
@@ -225,18 +231,32 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
       async setAnthropicKey(key) {
         secrets.anthropic = key !== null && key.trim().length > 0;
       },
+      async setCalendarLinks(links) {
+        const hosts: string[] = [];
+        for (const raw of links.slice(0, 10)) {
+          try {
+            const u = new URL(raw.trim().replace(/^webcal:/i, "https:"));
+            if (u.protocol !== "https:") throw new Error("https only");
+            if (!hosts.includes(u.hostname)) hosts.push(u.hostname);
+          } catch {
+            throw new BackendError({ kind: "invalid", message: `Not a calendar link: ${raw.slice(0, 40)}` });
+          }
+        }
+        secrets.calendarHosts = hosts;
+      },
     },
     claude: {
-      async splitTask({ lang }) {
+      async splitTask({ title, lang }) {
         await pause(900);
+        const t = title.length > 40 ? `${title.slice(0, 39)}…` : title;
         return lang === "vi"
-          ? ["Mở email và đọc lại câu hỏi", "Ghi 3 ý chính cần trả lời", "Viết nháp câu trả lời", "Đọc lại và gửi"]
-          : ["Open the email and reread the question", "Jot down the 3 points to answer", "Write a rough draft", "Proofread and send"];
+          ? [`Mở “${t}” và ghi ra cần những gì`, "Làm 15 phút đầu tiên, phần dễ nhất", "Làm tiếp phần chính trong 25 phút", "Rà lại và ghi bước tiếp theo"]
+          : [`Open “${t}” and list what it needs`, "Do the easiest 15 minutes first", "Work on the main part for 25 minutes", "Review and note the next step"];
       },
     },
     calendar: {
-      async fetchIcs(urls) {
-        return urls.map((url) => ({ url, ok: true, text: demoIcs(new Date(now())) }));
+      async fetchIcs() {
+        return secrets.calendarHosts.map((host) => ({ host, ok: true, text: demoIcs(new Date(now())) }));
       },
     },
     system: {
@@ -245,6 +265,7 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
       onCommand: (cb) => commands.on(cb),
       async setClickThrough() {},
       async focusOverlay() {},
+      async releaseOverlayFocus() {},
       async setTrayStatus(tooltip) {
         if (typeof document !== "undefined" && document.body.classList.contains("overlay")) document.title = tooltip;
       },

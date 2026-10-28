@@ -1,7 +1,7 @@
 // The pet's brain (Brain.swift): Todoist sync, mood, reminder rules, focus timer, pet life and mischief.
 // It never touches the OS directly: everything goes through the Backend, so it runs in Tauri, in the
 // browser demo and in unit tests with a fake clock.
-import { BackendError, type AppCommand, type Backend, type ForegroundApp, type SystemSample } from "../backend/types";
+import { BackendError, type AppCommand, type Backend, type ForegroundApp, type SecretsStatus, type SystemSample } from "../backend/types";
 import * as calm from "./calm";
 import {
   adaptiveTarget,
@@ -15,7 +15,7 @@ import {
 } from "./calendar";
 import { atHour, dayKey, parseDate, shortText, startOfDay, timeString, utcString } from "./dates";
 import { Diary } from "./diary";
-import { L, langFromLocale, setLang } from "./l10n";
+import { L, langFromLocale, plural, setLang } from "./l10n";
 import * as life from "./life";
 import * as lines from "./lines";
 import {
@@ -36,7 +36,7 @@ import {
   type TodoTask,
 } from "./models";
 import { defaultMoodInputs, evaluateMood, moodEmoji, moodLabel, type MoodReason } from "./mood";
-import { calendarLinks, effectiveClaudeModel, effectiveFilter, isWorkday, prefsFromJson, type Prefs } from "./prefs";
+import { effectiveClaudeModel, effectiveFilter, isWorkday, prefsFromJson, type Prefs } from "./prefs";
 import { appRules, currentDistraction, siteRules } from "./sites";
 import { findStuck, pretendSeen, recordSeen, type SeenLog, type StuckTask } from "./stuck";
 import type { Accessory, CelebrationKind, Lang, Mood, SpeciesId } from "./types";
@@ -91,6 +91,8 @@ export type Chime = "chatter" | "important" | "celebrate" | "big" | "grumble";
 
 export interface BrainState {
   hasToken: boolean;
+  /** Todoist refused the saved token: the board shows the connect form again. */
+  authError: boolean;
   isDemo: boolean;
   hasClaudeKey: boolean;
   day: DaySnapshot;
@@ -189,8 +191,29 @@ export class Brain {
   private timer: ReturnType<typeof setInterval> | null = null;
   private unsubs: (() => void)[] = [];
   private bubbleSeq = 0;
-  private syncing = false;
-  private lifeSaveQueued = false;
+  private inflight: Promise<void> | null = null;
+  private syncQueued = false;
+  /** Sync backoff after failures (Infinity while Todoist refuses the token). */
+  private nextSyncAt = 0;
+  private syncFailures = 0;
+  /** An action just failed: a background sync must not wipe its error message right away. */
+  private opErrorAt = NEVER;
+  /** Close/reopen requests in flight: kept as the user left them until Todoist confirms. */
+  private closing = new Set<string>();
+  private reopening = new Map<string, TodoTask>();
+  /** What each feed gave, so Undo takes back exactly that. */
+  private feeds = new Map<string, { xp: number; golden: boolean }>();
+  private lifeSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private lifeSaveBroadcast = false;
+  /** False after a failed read at startup: never overwrite what's on disk with defaults. */
+  private persistLife = true;
+  private timeouts = new Set<ReturnType<typeof setTimeout>>();
+  private stopped = false;
+  private bubbleAt = 0;
+  private calendarHosts: string[] = [];
+  /** Demo controls: a mood shown for a few seconds while a stunt plays. */
+  private demoMood: { mood: Mood; until: number } | null = null;
+  private filterTimer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(
     readonly backend: Backend,
@@ -208,6 +231,7 @@ export class Brain {
     this.diary.enabled = prefs.keepLog;
     this.state = {
       hasToken: false,
+      authError: false,
       isDemo: opts.demo ?? false,
       hasClaudeKey: false,
       day: emptyDay(),
@@ -240,18 +264,25 @@ export class Brain {
   /** Loads prefs, the pet's life and the postponed-task log, then picks the language. */
   static async create(backend: Backend, opts: BrainOptions = {}): Promise<Brain> {
     const now = (opts.now ?? Date.now)();
-    const [rawPrefs, rawLife, rawSeen, locale] = await Promise.all([
-      backend.storage.load<unknown>("prefs").catch(() => null),
-      backend.storage.load<unknown>("life").catch(() => null),
-      backend.storage.load<SeenLog>("stuck").catch(() => null),
+    const [p, l, st, locale] = await Promise.all([
+      loadRetrying<unknown>(backend, "prefs"),
+      loadRetrying<unknown>(backend, "life"),
+      loadRetrying<SeenLog>(backend, "stuck"),
       backend.system.systemLocale().catch(() => "en"),
     ]);
-    const prefs = prefsFromJson(rawPrefs, now);
-    if (rawPrefs === null && !opts.demo) await backend.storage.save("prefs", prefs).catch(() => undefined);
+    const prefs = prefsFromJson(p.ok ? p.value : null, now);
+    // A failed read (antivirus scanning at logon…) is not a missing file: only a missing file gets defaults saved.
+    if (p.ok && p.value === null && !opts.demo) await backend.storage.save("prefs", prefs).catch(() => undefined);
     setLang(prefs.lang ?? langFromLocale(locale));
-    const lifeState = opts.demo ? life.demoLife() : life.lifeFromJson(rawLife);
-    const seen = !opts.demo && rawSeen && typeof rawSeen === "object" ? rawSeen : {};
-    return new Brain(backend, prefs, lifeState, seen, opts);
+    const storedLife = l.ok ? l.value : null;
+    const lifeState = storedLife ? life.lifeFromJson(storedLife) : opts.demo ? life.demoLife() : life.newLife();
+    const seen = !opts.demo && st.ok && st.value && typeof st.value === "object" ? st.value : {};
+    const brain = new Brain(backend, prefs, lifeState, seen, opts);
+    brain.persistLife = l.ok;
+    if (!p.ok || !l.ok) {
+      brain.diary.add("system", L("Không đọc được dữ liệu đã lưu — phiên này sẽ không ghi đè lên nó", "Couldn't read saved data — this session won't overwrite it"));
+    }
+    return brain;
   }
 
   // ---------- React glue ----------
@@ -264,6 +295,7 @@ export class Brain {
   getSnapshot = (): BrainState => this.state;
 
   private set(patch: Partial<BrainState>): void {
+    if (patch.bubble) this.bubbleAt = this.now();
     this.state = { ...this.state, ...patch };
     for (const fn of this.listeners) fn();
   }
@@ -272,24 +304,49 @@ export class Brain {
     return this.state.prefs;
   }
 
-  private mutateLife<T>(change: (s: life.LifeState) => T): T {
+  /**
+   * Changes the pet's life. `routine` changes (hunger ticking, seconds on a distraction) are saved at most once
+   * a minute and not broadcast; everything else is saved right away and tells other windows.
+   */
+  private mutateLife<T>(change: (s: life.LifeState) => T, routine = false): T {
     const s = structuredClone(this.state.life);
     const result = change(s);
-    if (JSON.stringify(s) !== JSON.stringify(this.state.life)) {
+    const sameApartFromClock = JSON.stringify({ ...s, lastDecayAt: null }) === JSON.stringify({ ...this.state.life, lastDecayAt: null });
+    if (sameApartFromClock) {
+      // Only the hunger clock moved: keep it, without a render or a disk write.
+      this.state = { ...this.state, life: s };
+    } else {
       this.set({ life: s });
-      this.saveLifeSoon();
+      this.saveLife(routine);
     }
     return result;
   }
 
-  private saveLifeSoon(): void {
-    if (this.state.isDemo || this.lifeSaveQueued) return;
-    this.lifeSaveQueued = true;
-    queueMicrotask(() => {
-      this.lifeSaveQueued = false;
-      this.backend.storage.save("life", this.state.life).catch(() => undefined);
-      this.backend.bus.emit({ type: "life-changed" }).catch(() => undefined);
-    });
+  private saveLife(routine: boolean): void {
+    if (!this.persistLife) return;
+    if (!routine) this.lifeSaveBroadcast = true;
+    if (this.lifeSaveTimer) {
+      if (routine) return;
+      clearTimeout(this.lifeSaveTimer);
+    }
+    this.lifeSaveTimer = setTimeout(() => this.flushLife(), routine ? 60_000 : 0);
+  }
+
+  private flushLife(): void {
+    if (this.lifeSaveTimer) clearTimeout(this.lifeSaveTimer);
+    this.lifeSaveTimer = null;
+    this.backend.storage.save("life", this.state.life).catch(() => undefined);
+    if (this.lifeSaveBroadcast) this.backend.bus.emit({ type: "life-changed" }).catch(() => undefined);
+    this.lifeSaveBroadcast = false;
+  }
+
+  /** setTimeout that dies with the brain. */
+  private later(fn: () => void, ms: number): void {
+    const id = setTimeout(() => {
+      this.timeouts.delete(id);
+      if (!this.stopped) fn();
+    }, ms);
+    this.timeouts.add(id);
   }
 
   // ---------- Lifecycle ----------
@@ -306,23 +363,31 @@ export class Brain {
     );
     this.pushTrayLabels();
     await this.reloadSecrets(false);
+    if (this.stopped) return;
     if (this.state.isDemo) this.prepareDemo();
     this.timer = setInterval(() => this.tick(), 15_000);
     this.recompute();
     if (this.state.hasToken) {
-      await this.refresh();
+      if (!this.didLoadOnce) await this.refresh();
       await this.refreshCalendar(true);
       if (this.state.isDemo) this.say({ text: lines.demoHello(), seconds: 10, urgent: true });
     } else {
-      setTimeout(() => this.askForToken(), 1500);
+      this.fired.set("token", this.now());
+      this.later(() => this.askForToken(), 1500);
     }
   }
 
   stop(): void {
+    this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    for (const id of this.timeouts) clearTimeout(id);
+    this.timeouts.clear();
     for (const u of this.unsubs) u();
     this.unsubs = [];
+    this.diary.dispose();
+    if (this.filterTimer) clearTimeout(this.filterTimer);
+    if (this.lifeSaveTimer) this.flushLife();
   }
 
   private prepareDemo(): void {
@@ -332,22 +397,32 @@ export class Brain {
   }
 
   private async reloadSecrets(announce: boolean): Promise<void> {
+    let s: SecretsStatus;
     try {
-      const s = await this.backend.secrets.status();
-      const gained = s.todoist && !this.state.hasToken;
-      this.set({ hasToken: s.todoist, hasClaudeKey: s.anthropic });
-      if (!s.todoist) {
-        this.active = [];
-        this.completed = [];
-        this.recompute();
-      } else if (gained) {
-        this.resetDay();
-        await this.refresh();
-        if (announce) this.say({ text: lines.connected(), seconds: 6 });
-      }
+      s = await this.backend.secrets.status();
     } catch {
-      // Credential Manager unavailable: behave as if not connected.
+      return; // Credential Manager unavailable: keep what we had.
     }
+    const gained = s.todoist && !this.state.hasToken;
+    const retryAuth = announce && this.state.authError;
+    const hostsChanged = s.calendarHosts.join("\n") !== this.calendarHosts.join("\n");
+    this.calendarHosts = s.calendarHosts;
+    // Any change of secrets (a new token…) lifts the sync backoff.
+    if (announce) {
+      this.nextSyncAt = 0;
+      this.syncFailures = 0;
+    }
+    this.set({ hasToken: s.todoist, hasClaudeKey: s.anthropic, authError: s.todoist && this.state.authError && !announce });
+    if (!s.todoist) {
+      this.active = [];
+      this.completed = [];
+      this.recompute();
+    } else if (gained || retryAuth) {
+      this.resetDay();
+      await this.refresh();
+      if (announce && !this.state.authError) this.say({ text: lines.connected(), seconds: 6 });
+    }
+    if (hostsChanged && announce) void this.refreshCalendar(true);
   }
 
   private async reloadPrefs(): Promise<void> {
@@ -359,8 +434,15 @@ export class Brain {
     this.diary.enabled = prefs.keepLog;
     this.set({ prefs });
     this.pushTrayLabels();
-    if (before.filterQuery !== prefs.filterQuery) void this.refresh();
-    if (before.calendarUrls !== prefs.calendarUrls || before.useCalendar !== prefs.useCalendar) void this.refreshCalendar(true);
+    if (before.filterQuery !== prefs.filterQuery) {
+      // Typing a filter saves on every pause; sync once the user has stopped.
+      if (this.filterTimer) clearTimeout(this.filterTimer);
+      this.filterTimer = setTimeout(() => {
+        this.filterTimer = null;
+        if (!this.stopped) void this.refresh();
+      }, 1500);
+    }
+    if (before.useCalendar !== prefs.useCalendar) void this.refreshCalendar(true);
     this.recompute();
   }
 
@@ -410,7 +492,7 @@ export class Brain {
         this.quiet(60);
         break;
       case "show":
-        this.set({ hiddenUntil: null });
+        this.hide(null);
         break;
     }
   }
@@ -491,9 +573,30 @@ export class Brain {
 
   // ---------- Sync ----------
 
+  /**
+   * Syncs with Todoist. Calls during a sync don't get dropped: one more sync runs right after the current one
+   * (so the caller's change is included) and the returned promise resolves after it.
+   */
   async refresh(): Promise<void> {
-    if (!this.state.hasToken || this.syncing) return;
-    this.syncing = true;
+    if (!this.state.hasToken) return;
+    if (this.inflight) {
+      this.syncQueued = true;
+      return this.inflight;
+    }
+    this.inflight = (async () => {
+      try {
+        do {
+          this.syncQueued = false;
+          await this.syncOnce();
+        } while (this.syncQueued && this.state.hasToken && !this.stopped);
+      } finally {
+        this.inflight = null;
+      }
+    })();
+    return this.inflight;
+  }
+
+  private async syncOnce(): Promise<void> {
     this.set({ loading: true });
     const now = this.now();
     try {
@@ -515,12 +618,19 @@ export class Brain {
         this.lastStatsAt = now;
       }
       this.apply(act, done);
-      this.set({ errorText: null, lastSync: this.now() });
+      this.syncFailures = 0;
+      this.nextSyncAt = 0;
+      const keepOpError = this.now() - this.opErrorAt < 10_000;
+      this.set({ lastSync: this.now(), authError: false, ...(keepOpError ? {} : { errorText: null }) });
     } catch (e) {
       const msg = errorMessage(e);
-      this.set({ errorText: msg });
+      const auth = e instanceof BackendError && (e.kind === "unauthorized" || e.kind === "no_token");
+      this.syncFailures += 1;
+      // Back off 15 s, 30 s, 1 min … 5 min; a refused token waits until the user changes it.
+      this.nextSyncAt = auth ? Infinity : this.now() + Math.min(5 * MIN, 15_000 * 2 ** (this.syncFailures - 1));
+      this.set({ errorText: msg, authError: auth });
       this.diary.add("sync", L("Lỗi đồng bộ Todoist: ", "Todoist sync failed: ") + msg, { throttle: "sync-error", every: 30 });
-      if (e instanceof BackendError && (e.kind === "unauthorized" || e.kind === "no_token")) {
+      if (auth && this.every("auth-error", 60)) {
         this.say({
           text: lines.error(msg),
           actions: [{ title: L("Nhập token mới", "Enter a new token"), primary: true, run: () => this.effects.openBoard?.(false) }],
@@ -528,12 +638,15 @@ export class Brain {
         });
       }
     } finally {
-      this.syncing = false;
       this.set({ loading: false });
     }
   }
 
-  private apply(act: TodoTask[], done: TodoTask[] | null): void {
+  private apply(fetched: TodoTask[], fetchedDone: TodoTask[] | null): void {
+    // Close/reopen requests still in flight win over a snapshot taken before they landed.
+    let act = fetched.filter((t) => !this.closing.has(t.id));
+    for (const t of this.reopening.values()) if (!act.some((a) => a.id === t.id)) act = [...act, t];
+    const done = fetchedDone?.filter((t) => !this.reopening.has(t.id)) ?? null;
     this.active = act;
     const today = dayKey(new Date(this.now()));
     if (done) {
@@ -562,22 +675,18 @@ export class Brain {
     this.recompute();
   }
 
+  /** Fetches the saved ICS links every 15 minutes (parsing is costly, so only after a fetch). */
   async refreshCalendar(force = false): Promise<void> {
     const now = this.now();
-    if (!force && now - this.lastCalendarAt < 15 * MIN) {
-      this.recomputeEvents();
-      return;
-    }
+    if (!force && now - this.lastCalendarAt < 15 * MIN) return;
     this.lastCalendarAt = now;
-    const p = this.state.prefs;
-    const links = calendarLinks(p);
-    if (!p.useCalendar || (links.length === 0 && !this.state.isDemo)) {
+    if (!this.state.prefs.useCalendar || this.calendarHosts.length === 0) {
       this.icsTexts = [];
     } else {
-      const results = await this.backend.calendar.fetchIcs(this.state.isDemo ? ["https://demo.todopet/calendar.ics"] : links);
+      const results = await this.backend.calendar.fetchIcs();
       this.icsTexts = results.filter((r) => r.ok && r.text).map((r) => r.text as string);
       for (const r of results) {
-        if (!r.ok) this.diary.add("sync", L("Không tải được lịch: ", "Couldn't load a calendar: ") + (r.error ?? r.url), { throttle: `ics-${r.url}`, every: 60 });
+        if (!r.ok) this.diary.add("sync", L(`Không tải được lịch ${r.host}: `, `Couldn't load the calendar at ${r.host}: `) + (r.error ?? ""), { throttle: `ics-${r.host}`, every: 60 });
       }
     }
     this.recomputeEvents();
@@ -604,11 +713,13 @@ export class Brain {
     const d = new Date(now);
     const h = d.getHours() + d.getMinutes() / 60;
     const p = this.state.prefs;
-    const workday = isWorkday(p, d);
+    // The demo is always a working day, so every behavior can be tried at any hour.
+    const demo = this.state.isDemo;
+    const workday = demo || isWorkday(p, d);
     return {
       workday,
-      inWork: workday && h >= p.workStart && h < p.workEnd,
-      night: h >= 23 || h < 6,
+      inWork: demo || (workday && h >= p.workStart && h < p.workEnd),
+      night: !demo && (h >= 23 || h < 6),
       hoursAfterPlanDeadline: h - p.planDeadline,
       reviewTime: atHour(p.workEnd, 0, d).getTime() - 30 * MIN,
     };
@@ -681,6 +792,7 @@ export class Brain {
     i.satiety = this.state.life.satiety;
     i.dirt = this.state.life.dirt;
     const r = evaluateMood(i);
+    if (this.demoMood && nowMs < this.demoMood.until && r.mood !== "celebrating") r.mood = this.demoMood.mood;
     const old = this.state.mood;
     if (old !== r.mood && old !== "celebrating" && r.mood !== "celebrating") {
       const why = r.reasons
@@ -801,8 +913,13 @@ export class Brain {
     this.effects.chime?.(c);
   }
 
+  private get outOfTheWay(): boolean {
+    const s = this.state;
+    return s.hiddenUntil !== null || (s.fullscreen && s.prefs.hideInFullscreen);
+  }
+
   private speak(text: string): void {
-    if (this.state.prefs.voiceOn) this.effects.speak?.(text, this.state.prefs.lang ?? langFromLocale(null));
+    if (this.state.prefs.voiceOn && !this.outOfTheWay) this.effects.speak?.(text, this.state.prefs.lang ?? langFromLocale(null));
   }
 
   private once(key: string): boolean {
@@ -834,7 +951,11 @@ export class Brain {
   hide(minutes: number | null): void {
     const until = minutes === null ? null : this.now() + minutes * MIN;
     this.set({ hiddenUntil: until, ...(until ? { bubble: null, antic: null } : {}) });
-    if (until) this.diary.add("hold", L(`Bạn ẩn pet tới ${timeString(new Date(until))}`, `You hid the pet until ${timeString(new Date(until))}`));
+    if (!until) return;
+    const at = timeString(new Date(until));
+    this.diary.add("hold", L(`Bạn ẩn pet tới ${at}`, `You hid the pet until ${at}`));
+    // Urgent, so it shows while the pet is away: the only way back besides the tray.
+    this.say({ text: L(`Mình trốn tới ${at} nhé 🙈`, `Hiding until ${at} 🙈`), actions: [{ title: L("Hiện lại", "Show me now"), run: () => this.hide(null) }], seconds: 8, urgent: true });
   }
 
   // ---------- The 15-second heartbeat ----------
@@ -850,14 +971,18 @@ export class Brain {
     if (this.state.hiddenUntil !== null && nowMs >= this.state.hiddenUntil) this.set({ hiddenUntil: null });
     const f = this.state.focus;
     if (f && nowMs >= f.end) this.finishFocus();
-    if (this.state.hasToken && !this.state.loading && (this.state.lastSync === null || nowMs - this.state.lastSync > 3 * MIN)) void this.refresh();
+    const stale = this.state.lastSync === null || nowMs - this.state.lastSync > 3 * MIN;
+    if (this.state.hasToken && !this.state.loading && stale && nowMs >= this.nextSyncAt) void this.refresh();
+    // A bubble the overlay never got to show (pet hidden, full-screen app) must not block reminders forever.
+    const b = this.state.bubble;
+    if (b && nowMs - this.bubbleAt > (b.seconds + 60) * 1000) this.dismissBubble(b.id, "ignored");
     void this.refreshCalendar();
     // Hunger grows during work hours (not during meetings or while you're away).
     const ctx = this.context(nowMs);
     const working = this.state.hasToken && ctx.inWork && currentEvent(this.state.events, now) === null && this.sample.idleSeconds < 300;
-    this.mutateLife((s) => life.decay(s, nowMs, working));
+    this.mutateLife((s) => life.decay(s, nowMs, working), true);
     const d = this.currentDistraction();
-    if (this.state.hasToken && ctx.inWork && d) this.mutateLife((s) => life.addDistraction(s, d.app, 15));
+    if (this.state.hasToken && ctx.inWork && d) this.mutateLife((s) => life.addDistraction(s, d.app, 15), true);
     // Left the distracting app or site: the pet gets out of the way.
     if (this.state.antic?.kind.type === "block" && !d) this.set({ antic: null });
     this.trackDistraction(nowMs);
@@ -925,7 +1050,9 @@ export class Brain {
         const until = this.now() + 15 * MIN;
         this.anticSnoozedUntil = until;
         this.distractionSnoozedUntil = until;
+        this.demoMood = null;
         this.set({ antic: null });
+        this.recompute();
       },
     };
   }
@@ -1040,7 +1167,8 @@ export class Brain {
         return;
       }
     }
-    if (s.hiddenUntil !== null) return;
+    // Hidden or a full-screen app in front: only the timed reminders above get through.
+    if (this.outOfTheWay) return;
     if (this.state.bubble) return;
 
     // Distracting apps and sites come first: there's no concentration to protect right then.
@@ -1282,9 +1410,11 @@ export class Brain {
   // ---------- Actions ----------
 
   /** Feeds the pet once per finished task, then dances with a random (sometimes rare golden) celebration. */
-  private celebrate(task: TodoTask | null, viaPet: boolean, feeds = 1, sound = "yay"): void {
+  /** Returns what the feeding gave (XP, golden), so Undo can take back exactly that. */
+  private celebrate(task: TodoTask | null, viaPet: boolean, feeds = 1, sound = "yay"): { xp: number; golden: boolean } | null {
     const nowMs = this.now();
     this.lastCelebration = nowMs;
+    const xpBefore = this.state.life.xp;
     let result: life.FeedResult | null = null;
     const unlocked: Accessory[] = [];
     let levelUp: life.FeedResult["levelUp"] = null;
@@ -1294,7 +1424,7 @@ export class Brain {
       levelUp = r.levelUp ?? levelUp;
       result = r;
     }
-    if (!result) return;
+    if (!result) return null;
     const r = result;
     this.set({ antic: null, celebration: { id: ++this.bubbleSeq, kind: r.kind, food: r.food, golden: r.golden, combo: r.combo, start: nowMs } });
     const st = this.state.life;
@@ -1324,45 +1454,89 @@ export class Brain {
       this.set({ bubble: { id: ++this.bubbleSeq, text: parts.join("\n"), actions, seconds: unlocked.length === 0 && levelUp === null ? 8 : 14, urgent: true, reminder: false } });
       if (levelUp !== null || r.golden) this.speak(lines.voiceCheer());
     }
-    setTimeout(() => this.recompute(), 4200);
+    this.later(() => this.recompute(), 4200);
+    return { xp: this.state.life.xp - xpBefore, golden: r.golden };
   }
 
   /** What the species says when cheering; set by the UI from the species registry. */
   speciesSound = "yay";
 
+  /** Marks a task done (optimistically: the pet celebrates at once) and closes it in Todoist. */
   async complete(task: TodoTask): Promise<void> {
-    if (!this.state.hasToken) return;
+    // Idempotent: a stale "✓ Done" button for a task that's already done does nothing.
+    if (!this.state.hasToken || !this.active.some((t) => t.id === task.id)) return;
+    this.closing.add(task.id);
     this.active = this.active.filter((t) => t.id !== task.id);
     const done: TodoTask = { ...task, checked: true, completedAt: utcString(new Date(this.now())) };
     this.completed = [done, ...this.completed];
     this.completedViaPet.add(task.id);
     this.knownCompleted.add(task.id);
     if (this.state.focus && !this.state.focus.isBreak && this.state.focus.task?.id === task.id) this.set({ focus: null });
-    this.celebrate(done, true, 1, this.speciesSound);
+    const gained = this.celebrate(done, true, 1, this.speciesSound);
+    if (gained) this.feeds.set(task.id, gained);
     try {
       await this.backend.todoist.close(task.id);
     } catch (e) {
-      const msg = errorMessage(e);
       this.completed = this.completed.filter((t) => t.id !== task.id);
       this.completedViaPet.delete(task.id);
-      this.active = [...this.active, task];
-      this.mutateLife((s) => life.unfeed(s));
-      this.set({ errorText: msg });
+      this.knownCompleted.delete(task.id);
+      if (!this.active.some((t) => t.id === task.id)) this.active = [...this.active, task];
+      this.feeds.delete(task.id);
+      this.mutateLife((s) => life.unfeed(s, gained ?? undefined));
+      this.lastCelebration = NEVER;
+      this.celebrateUntil = NEVER;
+      this.set({ celebration: null });
       this.recompute();
-      this.say({ text: lines.error(msg), seconds: 10, urgent: true });
+      this.say({ text: lines.error(this.fail(e)), seconds: 10, urgent: true });
+    } finally {
+      this.closing.delete(task.id);
     }
+    void this.refresh();
   }
 
   async undoComplete(task: TodoTask): Promise<void> {
-    this.mutateLife((s) => life.unfeed(s));
+    if (!this.completed.some((t) => t.id === task.id)) return;
+    const gained = this.feeds.get(task.id);
+    this.feeds.delete(task.id);
+    this.mutateLife((s) => life.unfeed(s, gained));
+    const reopened: TodoTask = { ...task, checked: false, completedAt: null };
+    this.reopening.set(task.id, reopened);
     this.completed = this.completed.filter((t) => t.id !== task.id);
     this.completedViaPet.delete(task.id);
-    this.active = [...this.active, { ...task, checked: false, completedAt: null }];
+    this.knownCompleted.delete(task.id);
+    if (!this.active.some((t) => t.id === task.id)) this.active = [...this.active, reopened];
+    // Stop the dance right away: the stats are already back.
     this.lastCelebration = NEVER;
+    this.celebrateUntil = NEVER;
     this.set({ celebration: null });
     this.recompute();
-    await this.backend.todoist.reopen(task.id).catch(() => undefined);
+    try {
+      await this.backend.todoist.reopen(task.id);
+    } catch (e) {
+      this.fail(e);
+    } finally {
+      this.reopening.delete(task.id);
+    }
     await this.refresh();
+  }
+
+  /** Records a failed action so the next background sync doesn't hide its message. Returns the message. */
+  private fail(e: unknown): string {
+    const msg = errorMessage(e);
+    this.opErrorAt = this.now();
+    this.set({ errorText: msg });
+    return msg;
+  }
+
+  /** Reschedules several tasks at once; tells the user if some failed. Returns how many moved. */
+  private async rescheduleAll(tasks: TodoTask[], due: string): Promise<number> {
+    const results = await Promise.allSettled(tasks.map((t) => this.backend.todoist.reschedule(t.id, due)));
+    const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failed.length > 0) {
+      this.fail(failed[0].reason);
+      this.say({ text: L(`Không dời được ${failed.length} việc 😵 ${errorMessage(failed[0].reason)}`, `Couldn't move ${plural(failed.length, "", "task", "tasks").trim()} 😵 ${errorMessage(failed[0].reason)}`), seconds: 10, urgent: true });
+    }
+    return tasks.length - failed.length;
   }
 
   async add(text: string, due: DueChoice, priority: number): Promise<boolean> {
@@ -1376,7 +1550,7 @@ export class Brain {
         await this.backend.todoist.add({ content, dueString, priority, parentId: null });
       }
     } catch (e) {
-      this.set({ errorText: errorMessage(e) });
+      this.fail(e);
       return false;
     }
     this.lastPlanAction = this.now();
@@ -1398,7 +1572,7 @@ export class Brain {
     try {
       await this.backend.todoist.reschedule(task.id, dueString);
     } catch (e) {
-      this.set({ errorText: errorMessage(e) });
+      this.say({ text: lines.error(this.fail(e)), seconds: 10, urgent: true });
     }
     await this.refresh();
   }
@@ -1406,15 +1580,15 @@ export class Brain {
   async pullOverdueToToday(): Promise<void> {
     const tasks = this.state.day.overdue.filter((t) => !isRecurring(t));
     this.lastPlanAction = this.now();
-    for (const t of tasks) await this.backend.todoist.reschedule(t.id, "today").catch(() => undefined);
+    await this.rescheduleAll(tasks, "today");
     await this.refresh();
   }
 
   async moveTodayToTomorrow(): Promise<void> {
     const tasks = this.state.day.today.filter((t) => !isRecurring(t));
-    for (const t of tasks) await this.backend.todoist.reschedule(t.id, "tomorrow").catch(() => undefined);
+    const moved = await this.rescheduleAll(tasks, "tomorrow");
     await this.refresh();
-    this.say({ text: lines.movedToTomorrow(tasks.length), seconds: 8 });
+    if (moved > 0) this.say({ text: lines.movedToTomorrow(moved), seconds: 8 });
   }
 
   /** Gives a task the suggested time today, so the pet can remind you right on time. */
@@ -1423,7 +1597,7 @@ export class Brain {
     try {
       await this.backend.todoist.reschedule(s.task.id, `today at ${timeString(s.start)}`);
     } catch (e) {
-      this.set({ errorText: errorMessage(e) });
+      this.say({ text: lines.error(this.fail(e)), seconds: 10, urgent: true });
       return;
     }
     await this.refresh();
@@ -1439,9 +1613,7 @@ export class Brain {
     try {
       await this.backend.todoist.remove(task.id);
     } catch (e) {
-      const msg = errorMessage(e);
-      this.set({ errorText: msg });
-      this.say({ text: lines.error(msg), seconds: 10, urgent: true });
+      this.say({ text: lines.error(this.fail(e)), seconds: 10, urgent: true });
       await this.refresh();
       return;
     }
@@ -1455,7 +1627,7 @@ export class Brain {
     try {
       await this.backend.todoist.reschedule(task.id, "no date");
     } catch (e) {
-      this.set({ errorText: errorMessage(e) });
+      this.say({ text: lines.error(this.fail(e)), seconds: 10, urgent: true });
       return;
     }
     await this.refresh();
@@ -1472,13 +1644,20 @@ export class Brain {
     const clean = steps.map((s) => s.trim()).filter((s) => s.length > 0);
     if (clean.length === 0) return false;
     let firstId: string | null = null;
+    let created = 0;
     try {
       for (const [i, step] of clean.entries()) {
-        const created = await this.backend.todoist.add({ content: step, dueString: i === 0 && firstToday ? "today" : null, priority: task.priority, parentId: task.id });
-        if (i === 0) firstId = created?.id ?? null;
+        const t = await this.backend.todoist.add({ content: step, dueString: i === 0 && firstToday ? "today" : null, priority: task.priority, parentId: task.id });
+        if (i === 0) firstId = t?.id ?? null;
+        created += 1;
       }
     } catch (e) {
-      this.set({ errorText: errorMessage(e) });
+      const msg = this.fail(e);
+      if (created > 0) {
+        // Some steps exist now: show them, so a retry doesn't add them twice.
+        await this.refresh();
+        this.say({ text: L(`Mới thêm được ${created}/${clean.length} bước 😵 ${msg}`, `Only ${created} of ${clean.length} steps were added 😵 ${msg}`), seconds: 12, urgent: true });
+      }
       return false;
     }
     this.lastPlanAction = this.now();
@@ -1573,18 +1752,45 @@ export class Brain {
 
   /** Clicking the pet calls off any mischief. */
   petClicked(): void {
-    if (this.state.antic) this.set({ antic: null });
+    if (this.state.antic) this.endAntic();
   }
 
   endAntic(): void {
+    this.demoMood = null;
     this.set({ antic: null });
+    this.recompute();
   }
 
-  /** Dev hook (demo only): play a stunt right away. */
+  /**
+   * Demo controls: play a stunt exactly as the real rule would (mood, bubble, "Spare me"), right away.
+   * The table flip stays until "Spare me", a click on the pet, or leaving the distraction.
+   */
   demoAntic(kind: "parade" | "block" | "grumble"): void {
+    const now = this.now();
     const next = this.state.next;
-    if (kind === "parade") this.startAntic({ type: "parade", title: next ? taskTitle(next) : "Demo" }, this.now());
-    else this.startAntic(kind === "block" ? { type: "block" } : { type: "grumble" }, this.now());
+    this.demoMood = { mood: kind === "grumble" ? "annoyed" : "angry", until: now + (kind === "grumble" ? 8_000 : 30_000) };
+    const actions = [this.focusAction(next), this.spareAction()];
+    const why = L("bảng demo", "demo controls");
+    if (kind === "parade") {
+      this.startAntic({ type: "parade", title: next ? taskTitle(next) : L("Làm việc đi!", "Get to work!") }, now);
+      if (next) this.say({ text: lines.parade(next), actions, seconds: 25, urgent: true }, { chime: "grumble", why, antic: true });
+    } else if (kind === "block") {
+      this.startAntic({ type: "block" }, now);
+      this.say({ text: lines.block(this.currentDistraction()?.app ?? "YouTube", next), actions, seconds: 25, urgent: true }, { chime: "grumble", why, antic: true });
+    } else {
+      this.startAntic({ type: "grumble" }, now);
+      if (next) this.say({ text: lines.grumble(next), actions, seconds: 15, urgent: true }, { chime: "grumble", why, antic: true });
+    }
+    this.recompute();
+  }
+
+  /**
+   * Demo controls: pretend the distraction now in front (`label`, e.g. "youtube.com") started 3 minutes ago,
+   * so one click shows its effect on the mood and the reminders.
+   */
+  demoDistract(label: string): void {
+    this.distractionSince = { label, since: this.now() - 3 * MIN };
+    this.recompute();
   }
 
   /** Dev hook (demo only): celebrate as if a task was finished. */
@@ -1592,6 +1798,21 @@ export class Brain {
     const t = this.state.next;
     this.celebrate(t, true, 1, this.speciesSound);
   }
+}
+
+/**
+ * Reads a stored document, retrying a few times: right after logon, antivirus scans can briefly lock files.
+ * `ok: false` means the read failed (not that the document is missing, which is `ok: true, value: null`).
+ */
+async function loadRetrying<T>(backend: Backend, key: string): Promise<{ ok: true; value: T | null } | { ok: false }> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return { ok: true, value: await backend.storage.load<T>(key) };
+    } catch {
+      await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+    }
+  }
+  return { ok: false };
 }
 
 export function errorMessage(e: unknown): string {

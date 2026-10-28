@@ -2,6 +2,9 @@
 import type { CalEvent, SlotSuggestion } from "./calendar";
 import { hoursText, shortText, timeString } from "./dates";
 import { L, pick } from "./l10n";
+
+/** English noun with its count: n(1, "task") → "1 task", n(3, "task") → "3 tasks". */
+const n = (count: number, noun: string, nouns = `${noun}s`) => `${count} ${count === 1 ? noun : nouns}`;
 import { accessoryEmoji, accessoryName, stageName } from "./life";
 import { isRecurring, taskTitle, type TodoTask } from "./models";
 import type { StuckTask } from "./stuck";
@@ -89,7 +92,7 @@ export function nudge(mood: Mood, next: TodoTask, hoursIdle: number): string {
 
 export function overdue(mood: Mood, count: number): string {
   if (mood === "angry") return L(`${count} việc QUÁ HẠN kìa!! 💢 Làm hoặc dời đi chứ!`, `${count} OVERDUE tasks!! 💢 Do them or move them!`);
-  return L(`Có ${count} việc quá hạn 😬 Làm luôn hay dời vào hôm nay?`, `${count} overdue task(s) 😬 Do them or move to today?`);
+  return L(`Có ${count} việc quá hạn 😬 Làm luôn hay dời vào hôm nay?`, `${n(count, "overdue task")} 😬 Do them or move to today?`);
 }
 
 export function distraction(mood: Mood, app: string, left: number, next: TodoTask | null): string {
@@ -97,7 +100,7 @@ export function distraction(mood: Mood, app: string, left: number, next: TodoTas
     return L(`${app} nữa hả?!! Đóng lại đi, ${q(next)} đang chờ 😤`, `${app} AGAIN?! Close it, ${q(next)} is waiting 😤`);
   }
   return pick([
-    [`Ê! Đang ${app} đó hả? 👀 Còn ${left} việc kìa.`, `Hey! On ${app}? 👀 ${left} task(s) left.`],
+    [`Ê! Đang ${app} đó hả? 👀 Còn ${left} việc kìa.`, `Hey! On ${app}? 👀 ${n(left, "task")} left.`],
     [`Mình thấy bạn mở ${app} nha 👀 Quay lại làm việc chứ?`, `I see ${app} 👀 Back to work?`],
   ]);
 }
@@ -127,13 +130,13 @@ export const soon = (t: TodoTask, minutes: number) => L(`⏰ ${minutes} phút n�
 export const dueNow = (t: TodoTask) => L(`⏰ Đến giờ rồi: ${q(t)}!`, `⏰ It's time: ${q(t)}!`);
 
 export function focusStart(t: TodoTask | null, minutes: number): string {
-  if (t) return L(`Bắt đầu ${minutes} phút cho ${q(t)}. Mình sẽ ngồi im canh bạn 🤫`, `${minutes} minutes on ${q(t)}. I'll sit quietly and guard 🤫`);
-  return L(`Bắt đầu ${minutes} phút tập trung. Mình ngồi im canh nhé 🤫`, `${minutes} minutes of focus. I'll stay quiet 🤫`);
+  if (t) return L(`Bắt đầu ${minutes} phút cho ${q(t)}. Mình sẽ ngồi im canh bạn 🤫`, `${n(minutes, "minute")} on ${q(t)}. I'll sit quietly and guard 🤫`);
+  return L(`Bắt đầu ${minutes} phút tập trung. Mình ngồi im canh nhé 🤫`, `${n(minutes, "minute")} of focus. I'll stay quiet 🤫`);
 }
 
 export function focusEnd(t: TodoTask | null, minutes: number): string {
-  if (t) return L(`Hết ${minutes} phút rồi! ${q(t)} xong chưa?`, `${minutes} minutes up! Is ${q(t)} done?`);
-  return L(`Hết ${minutes} phút rồi! Nghỉ chút nhé?`, `${minutes} minutes up! Take a break?`);
+  if (t) return L(`Hết ${minutes} phút rồi! ${q(t)} xong chưa?`, `${minutes === 1 ? "Time's up" : `${minutes} minutes up`}! Is ${q(t)} done?`);
+  return L(`Hết ${minutes} phút rồi! Nghỉ chút nhé?`, `${minutes === 1 ? "Time's up" : `${minutes} minutes up`}! Take a break?`);
 }
 
 export const breakStart = (m: number) => L(`Nghỉ ${m} phút nhé ☕ Uống nước, vươn vai đi!`, `${m}-minute break ☕ Water and stretch!`);
@@ -150,8 +153,8 @@ export const error = (e: string) => L(`Mình không kết nối được Todoist
 export const connected = () => L("Kết nối Todoist thành công! 🎉", "Connected to Todoist! 🎉");
 export const demoHello = () =>
   L("Đang chạy demo với dữ liệu giả 🎭 Bấm vào mình để mở bảng việc nhé!", "Demo mode with sample tasks 🎭 Click me to open the task board!");
-export const movedToTomorrow = (n: number) =>
-  L(`Đã dời ${n} việc sang mai. Nghỉ ngơi nhé 🌙`, `Moved ${n} task(s) to tomorrow. Rest well 🌙`);
+export const movedToTomorrow = (count: number) =>
+  L(`Đã dời ${count} việc sang mai. Nghỉ ngơi nhé 🌙`, `Moved ${n(count, "task")} to tomorrow. Rest well 🌙`);
 
 // Calendar
 
@@ -164,9 +167,9 @@ export const meetingSoon = (e: CalEvent, minutes: number) =>
 export function calendarDay(meetings: number, busyMinutes: number, free: number, target: number, reduced: boolean): string {
   const base = L(
     `📅 Hôm nay ${meetings} cuộc họp (${hoursText(busyMinutes)}), còn ${hoursText(free)} trống`,
-    `📅 ${meetings} meeting(s) today (${hoursText(busyMinutes)}), ${hoursText(free)} free`,
+    `📅 ${n(meetings, "meeting")} today (${hoursText(busyMinutes)}), ${hoursText(free)} free`,
   );
-  return base + (reduced ? L(` → ${target} việc là vừa sức.`, ` → ${target} task(s) is realistic.`) : ".");
+  return base + (reduced ? L(` → ${target} việc là vừa sức.`, ` → ${n(target, "task")} ${target === 1 ? "is" : "are"} realistic.`) : ".");
 }
 
 export const timeBlock = (s: SlotSuggestion) =>
@@ -225,7 +228,7 @@ export const speciesUnlocked = (emoji: string, name: string) =>
   L(`🥚 Bạn mới mở khoá một bạn mới: ${emoji} ${name}! Đổi trong Cài đặt nhé.`, `🥚 New friend unlocked: ${emoji} ${name}! Switch in Settings.`);
 export const streak = (n: number) => L(`🔥 Chuỗi ${n} ngày đạt mục tiêu — giữ nhé!`, `🔥 ${n}-day streak — keep it going!`);
 export const dirty = (dirt: number) =>
-  L(`🪰 Mình bẩn quá… ${dirt} ngày rồi bạn không làm gì. Xong 1 việc để tắm cho mình nhé.`, `🪰 I'm filthy… ${dirt} lazy day(s). Finish a task to give me a bath.`);
+  L(`🪰 Mình bẩn quá… ${dirt} ngày rồi bạn không làm gì. Xong 1 việc để tắm cho mình nhé.`, `🪰 I'm filthy… ${n(dirt, "lazy day")}. Finish a task to give me a bath.`);
 
 export function hungry(satiety: number, next: TodoTask | null): string {
   const n = next ? L(` Xong ${q(next)} cho mình ăn với 🥺`, ` Finish ${q(next)} and feed me 🥺`) : "";
@@ -252,7 +255,7 @@ export function distractionSummary(d: Record<string, number>): string {
     .slice(0, 3)
     .map(([k, v]) => `${k} ${Math.trunc(v / 60)}'`)
     .join(", ");
-  return L(`Hôm nay bạn ở mấy chỗ xao nhãng ${total} phút đó 😒 (${top})`, `You spent ${total} minutes on distractions today 😒 (${top})`);
+  return L(`Hôm nay bạn ở mấy chỗ xao nhãng ${total} phút đó 😒 (${top})`, `You spent ${n(total, "minute")} on distractions today 😒 (${top})`);
 }
 
 // Spoken lines (short, no emoji).
