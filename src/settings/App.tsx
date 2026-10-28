@@ -27,12 +27,24 @@ interface Loaded {
   locale: string;
 }
 
-const NO_SECRETS: SecretsStatus = { todoist: false, anthropic: false };
+const NO_SECRETS: SecretsStatus = { todoist: false, anthropic: false, calendarHosts: [] };
+
+/** A missing file is fine (defaults); a file that can't be read is not: showing defaults would save them over it. */
+async function loadOrThrow(backend: Backend, key: string): Promise<unknown> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await backend.storage.load<unknown>(key);
+    } catch (e) {
+      if (attempt >= 2) throw e;
+      await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+    }
+  }
+}
 
 async function loadAll(backend: Backend): Promise<Loaded> {
   const [rawPrefs, rawLife, secrets, locale] = await Promise.all([
-    backend.storage.load<unknown>("prefs").catch(() => null),
-    backend.storage.load<unknown>("life").catch(() => null),
+    loadOrThrow(backend, "prefs"),
+    loadOrThrow(backend, "life"),
     backend.secrets.status().catch(() => NO_SECRETS),
     backend.system.systemLocale().catch(() => "en-US"),
   ]);
@@ -42,20 +54,35 @@ async function loadAll(backend: Backend): Promise<Loaded> {
 export function App() {
   const { backend, error } = useBackend();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!backend) return;
     let alive = true;
-    void loadAll(backend).then((d) => alive && setLoaded(d));
+    setLoadError(null);
+    loadAll(backend).then(
+      (d) => alive && setLoaded(d),
+      (e: unknown) => alive && setLoadError(e),
+    );
     return () => {
       alive = false;
     };
-  }, [backend]);
+  }, [backend, attempt]);
 
-  if (error) {
+  if (error || loadError) {
+    const e = error ?? loadError;
     return (
       <div className="boot-error" role="alert">
         <Icon name="warning" size={20} />
-        <p>{error instanceof Error ? error.message : String(error)}</p>
+        <p>
+          {loadError ? `${L("Không đọc được cài đặt đã lưu, nên chưa sửa gì được.", "Couldn't read your saved settings, so nothing can be changed yet.")} ` : ""}
+          {e instanceof Error ? e.message : String(e)}
+        </p>
+        {loadError !== null && (
+          <button className="btn" onClick={() => setAttempt((n) => n + 1)}>
+            {L("Thử lại", "Try again")}
+          </button>
+        )}
       </div>
     );
   }

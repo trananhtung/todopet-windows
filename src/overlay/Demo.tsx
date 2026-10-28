@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import type { DemoBackend } from "../backend/demo";
 import type { Backend } from "../backend/types";
 import type { Brain } from "../core/brain";
-import { L } from "../core/l10n";
+import { getLang, L } from "../core/l10n";
 import { meetsUnlock } from "../core/life";
 import { SPECIES_IDS, type SpeciesId } from "../core/types";
 import { speciesInfo } from "../pets";
@@ -42,10 +42,18 @@ export function DemoDesktop() {
 const isDemoBackend = (b: Backend): b is DemoBackend => "demo" in b;
 
 /** Demo controls: fake what Windows would report and trigger the pet's stunts right away. */
+const YOUTUBE = { name: "Google Chrome", exe: "chrome.exe", title: "Funny cats - YouTube - Google Chrome" };
+const YOUTUBE_URL = "https://www.youtube.com/watch?v=cats";
+
 export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }) {
   const s = useSyncExternalStore(brain.subscribe, brain.getSnapshot);
   const [open, setOpen] = useState(true);
   const fake = isDemoBackend(backend) ? backend.demo : null;
+  // Pretend you've been on YouTube for 3 minutes, so the mood drop and the reminder show at once.
+  const watchYouTube = () => {
+    fake?.setForeground(YOUTUBE, YOUTUBE_URL);
+    brain.demoDistract("youtube.com");
+  };
 
   return (
     <div className="demo-panel" data-hit="">
@@ -66,10 +74,7 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             </button>
             {fake && (
               <>
-                <button
-                  className="btn"
-                  onClick={() => fake.setForeground({ name: "Google Chrome", exe: "chrome.exe", title: "Funny cats - YouTube - Google Chrome" }, "https://www.youtube.com/watch?v=cats")}
-                >
+                <button className="btn" title={L("Giả vờ bạn đã xem YouTube 3 phút", "Pretend you've been on YouTube for 3 minutes")} onClick={watchYouTube}>
                   📺 YouTube
                 </button>
                 <button className="btn" onClick={() => fake.setForeground(null)}>
@@ -80,7 +85,13 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             <button className="btn" onClick={() => brain.demoAntic("parade")}>
               📢 {L("Diễu hành", "Parade")}
             </button>
-            <button className="btn" onClick={() => brain.demoAntic("block")}>
+            <button
+              className="btn"
+              onClick={() => {
+                watchYouTube();
+                brain.demoAntic("block");
+              }}
+            >
               ┻━┻ {L("Lật bàn", "Table flip")}
             </button>
             <button className="btn" onClick={() => brain.demoAntic("grumble")}>
@@ -97,6 +108,11 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             <button className="btn" onClick={() => brain.tick()}>
               ⏱ {L("Chạy luật", "Run rules")}
             </button>
+            {s.hiddenUntil !== null && (
+              <button className="btn" onClick={() => brain.hide(null)}>
+                🙈 {L("Hiện pet", "Show pet")}
+              </button>
+            )}
           </div>
           <label className="sr-only" htmlFor="demo-species">
             {L("Loài", "Species")}
@@ -112,7 +128,7 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
               const locked = !meetsUnlock(info.unlock, s.life);
               return (
                 <option key={id} value={id}>
-                  {info.emoji} {info.name.en}
+                  {info.emoji} {info.name[getLang()]}
                   {locked ? " 🔒" : ""}
                 </option>
               );

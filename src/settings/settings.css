@@ -700,3 +700,12 @@
   margin: 8px 0 0;
   color: var(--ink-2);
 }
+
+/* Calendar links: a multi-line box with its Save button underneath. */
+.inline-form.stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+.inline-form.stack .btn {
+  align-self: flex-end;
+}

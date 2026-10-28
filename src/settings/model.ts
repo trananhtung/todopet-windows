@@ -66,7 +66,7 @@ export function listItems(text: string): string[] {
 
 export const MAX_CALENDARS = 10;
 
-/** Splits the ICS box like `calendarLinks` does (lines or commas) and reports what will be ignored. */
+/** Splits the pasted ICS links (lines or commas) and reports what will be ignored. */
 export function checkCalendarText(text: string): { links: string[]; invalid: string[]; overLimit: number } {
   const parts = text
     .split(/[\n,]/)

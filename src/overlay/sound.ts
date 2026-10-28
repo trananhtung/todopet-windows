@@ -58,8 +58,10 @@ export function speak(text: string, lang: Lang): void {
   if (typeof speechSynthesis === "undefined") return;
   const u = new SpeechSynthesisUtterance(text);
   const voices = speechSynthesis.getVoices();
-  const voice = voices.find((v) => v.lang.toLowerCase().startsWith(lang)) ?? null;
-  if (voice) u.voice = voice;
+  // Only voices installed on this PC: an online voice would send the text to a server.
+  const voice = voices.find((v) => v.localService && v.lang.toLowerCase().startsWith(lang)) ?? null;
+  if (!voice) return;
+  u.voice = voice;
   u.lang = lang === "vi" ? "vi-VN" : "en-US";
   u.pitch = 1.35;
   u.rate = 1.05;
