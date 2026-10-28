@@ -1,5 +1,5 @@
-//! Pure helpers for the system sampler and overlay: exe names, browser detection, address-bar text to
-//! URL, full-screen geometry, cursor coordinate conversion.
+//! Pure helpers for the system sampler and windows: exe names, browser detection, address-bar text to
+//! URL, full-screen geometry, cursor coordinate conversion, window sizes.
 
 /// Browser families whose address bar we read with UI Automation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +128,24 @@ pub fn tray_tooltip(text: &str) -> String {
     out
 }
 
+/// Room left around a decorated window on small screens (title bar, a little air), in logical px.
+const SCREEN_MARGIN: f64 = 40.0;
+const MIN_WINDOW: (f64, f64) = (480.0, 480.0);
+/// Smallest size a window is ever shrunk to, however small the screen.
+const FLOOR: f64 = 320.0;
+
+/// The initial size and minimum size of a Settings/Diary/Gallery window: the designed `wanted` size,
+/// shrunk to fit the primary monitor's `work_area` (logical px) minus a margin, so a window never opens
+/// taller than a small or heavily scaled screen. The minimum never exceeds the size.
+pub fn fit_window_size(wanted: (f64, f64), work_area: Option<(f64, f64)>) -> ((f64, f64), (f64, f64)) {
+    let (mut width, mut height) = wanted;
+    if let Some((area_w, area_h)) = work_area {
+        width = width.min((area_w - SCREEN_MARGIN).max(FLOOR));
+        height = height.min((area_h - SCREEN_MARGIN).max(FLOOR));
+    }
+    ((width, height), (width.min(MIN_WINDOW.0), height.min(MIN_WINDOW.1)))
+}
+
 /// Converts a global physical cursor position into CSS pixels relative to the overlay's client area.
 pub fn cursor_to_css(cursor: (f64, f64), inner_origin: (i32, i32), scale_factor: f64) -> (f64, f64) {
     let scale = if scale_factor.is_finite() && scale_factor > 0.0 { scale_factor } else { 1.0 };
@@ -230,6 +248,21 @@ mod tests {
         assert_eq!(cut.chars().count(), 63);
         assert!(cut.encode_utf16().count() <= 127);
         assert_eq!(tray_tooltip(&"x".repeat(200)).len(), 127);
+    }
+
+    #[test]
+    fn window_sizes_fit_the_work_area() {
+        // Plenty of room: as designed.
+        assert_eq!(fit_window_size((600.0, 760.0), Some((1920.0, 1040.0))), ((600.0, 760.0), (480.0, 480.0)));
+        // 1366x768 at 125 %: about 1093x582 logical px of work area.
+        assert_eq!(fit_window_size((600.0, 760.0), Some((1092.8, 582.4))), ((600.0, 542.4), (480.0, 480.0)));
+        let ((w, h), (min_w, min_h)) = fit_window_size((1100.0, 800.0), Some((1024.0, 500.0)));
+        assert_eq!((w, h), (984.0, 460.0));
+        assert_eq!((min_w, min_h), (480.0, 460.0), "minimum never exceeds the size");
+        // Absurdly small screens still get a usable window.
+        assert_eq!(fit_window_size((600.0, 760.0), Some((200.0, 200.0))).0, (320.0, 320.0));
+        // Unknown monitor: as designed.
+        assert_eq!(fit_window_size((760.0, 720.0), None), ((760.0, 720.0), (480.0, 480.0)));
     }
 
     #[test]

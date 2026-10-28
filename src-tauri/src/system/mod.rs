@@ -23,6 +23,7 @@ const SAMPLE_EVERY: Duration = Duration::from_secs(1);
 pub struct ForegroundApp {
     name: String,
     exe: String,
+    /// Window title of a browser (the page title); empty for every other app.
     title: String,
 }
 
@@ -77,6 +78,7 @@ impl Sampler {
                 self.app = None;
                 self.url = None;
             } else {
+                // `fg.title` is empty for anything but a browser (see `foreground`).
                 self.url = browser_of(&fg.exe).and_then(|browser| self.urls.read(fg.hwnd, &fg.title, browser));
                 self.app = Some(ForegroundApp {
                     name: self.names.friendly(&fg.exe_path, &fg.exe),
@@ -96,11 +98,11 @@ impl Sampler {
     }
 }
 
-/// Starts the keyboard hook and the 1 Hz sampler thread.
+/// Starts the key-press watcher and the 1 Hz sampler thread.
 pub fn start(app: AppHandle) {
-    input::start_keyboard_hook();
+    input::start_key_watcher();
     let spawned = thread::Builder::new().name("system-sampler".into()).spawn(move || {
-        // Created on this thread: the UI Automation client is a COM object bound to it.
+        // The browser address reader starts its own UI Automation worker thread from here.
         let mut sampler = Sampler::new();
         loop {
             events::emit_to_overlay(&app, SYSTEM_SAMPLE, sampler.sample());

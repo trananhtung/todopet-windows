@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "diary",
+  "description": "Diary: reads diary days and prefs, UI language, and opens Settings from the 'diary is off' banner. Copying to the clipboard is done by the browser. Events: the cross-window bus.",
+  "windows": [
+    "diary"
+  ],
+  "permissions": [
+    "core:event:default",
+    "allow-diary-read",
+    "allow-diary-days",
+    "allow-store-load",
+    "allow-system-locale",
+    "allow-open-window"
+  ]
+}

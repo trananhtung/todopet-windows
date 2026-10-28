@@ -1,0 +1,37 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "The overlay runs the Brain: Todoist sync and actions, secrets status and the token/key changes the board offers, Ask Claude, calendar fetches, the overlay window, tray, links, extra windows, storage and diary writes. Events: the cross-window bus and the Rust samples/commands.",
+  "windows": [
+    "overlay"
+  ],
+  "permissions": [
+    "core:event:default",
+    "allow-todoist-tasks",
+    "allow-todoist-completed",
+    "allow-todoist-stats",
+    "allow-todoist-add",
+    "allow-todoist-quick-add",
+    "allow-todoist-close",
+    "allow-todoist-reopen",
+    "allow-todoist-reschedule",
+    "allow-todoist-delete",
+    "allow-secrets-status",
+    "allow-todoist-set-token",
+    "allow-todoist-clear-token",
+    "allow-anthropic-set-key",
+    "allow-claude-split",
+    "allow-calendar-fetch",
+    "allow-set-click-through",
+    "allow-focus-overlay",
+    "allow-release-overlay-focus",
+    "allow-set-tray-status",
+    "allow-set-tray-labels",
+    "allow-open-url",
+    "allow-open-window",
+    "allow-system-locale",
+    "allow-store-load",
+    "allow-store-save",
+    "allow-diary-append"
+  ]
+}

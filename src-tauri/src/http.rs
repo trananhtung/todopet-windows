@@ -1,4 +1,4 @@
-//! Response handling shared by the Todoist, Anthropic and calendar clients.
+//! Response handling shared by the Todoist and Anthropic clients.
 
 use reqwest::Response;
 use serde_json::Value;

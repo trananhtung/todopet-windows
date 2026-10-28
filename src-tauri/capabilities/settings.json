@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "Settings: prefs and pet life documents, Todoist token, Anthropic key and calendar links (write-only, plus status), start with Windows, help links, UI language. Events: the cross-window bus.",
+  "windows": [
+    "settings"
+  ],
+  "permissions": [
+    "core:event:default",
+    "allow-store-load",
+    "allow-store-save",
+    "allow-secrets-status",
+    "allow-todoist-set-token",
+    "allow-todoist-clear-token",
+    "allow-anthropic-set-key",
+    "allow-calendar-set-links",
+    "allow-get-autostart",
+    "allow-set-autostart",
+    "allow-open-url",
+    "allow-system-locale"
+  ]
+}

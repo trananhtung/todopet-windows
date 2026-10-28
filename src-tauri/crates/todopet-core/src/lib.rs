@@ -4,9 +4,12 @@
 //! (`cargo test -p todopet-core`). The app crate (`src-tauri/src`) does the I/O: HTTP, Credential Manager,
 //! windows, and calls into this crate for validation, request building and response parsing.
 
+pub mod calendar;
 pub mod claude;
 pub mod diary;
 pub mod error;
+pub mod net;
+pub mod ratelimit;
 pub mod store;
 pub mod system;
 pub mod todoist;

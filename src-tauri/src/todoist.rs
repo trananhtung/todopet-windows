@@ -26,6 +26,7 @@ async fn send(
     path: &str,
     body: Option<&Value>,
 ) -> CmdResult<Value> {
+    // bearer_auth marks the Authorization value sensitive (kept out of Debug output and HPACK tables).
     let mut req = client.request(method.clone(), format!("{BASE_URL}{path}")).bearer_auth(token).timeout(TIMEOUT);
     if method != Method::GET {
         req = req.header("X-Request-Id", uuid::Uuid::new_v4().to_string());
@@ -62,20 +63,20 @@ async fn get_all(
 pub async fn todoist_tasks(state: State<'_, AppState>, filter: String) -> CmdResult<Vec<Value>> {
     todoist::filter_path(&filter, None)?;
     let token = token().await?;
-    get_all(&state.http, &token, |cursor| todoist::filter_path(&filter, cursor)).await
+    get_all(&state.api, &token, |cursor| todoist::filter_path(&filter, cursor)).await
 }
 
 #[tauri::command]
 pub async fn todoist_completed(state: State<'_, AppState>, since: String, until: String) -> CmdResult<Vec<Value>> {
     todoist::completed_path(&since, &until, None)?;
     let token = token().await?;
-    get_all(&state.http, &token, |cursor| todoist::completed_path(&since, &until, cursor)).await
+    get_all(&state.api, &token, |cursor| todoist::completed_path(&since, &until, cursor)).await
 }
 
 #[tauri::command]
 pub async fn todoist_stats(state: State<'_, AppState>) -> CmdResult<Value> {
     let token = token().await?;
-    send(&state.http, &token, Method::GET, todoist::STATS_PATH, None).await
+    send(&state.api, &token, Method::GET, todoist::STATS_PATH, None).await
 }
 
 /// Returns the created task, or `null` if Todoist's answer did not contain one.
@@ -89,7 +90,7 @@ pub async fn todoist_add(
 ) -> CmdResult<Option<Value>> {
     let body = todoist::add_body(&content, due_string.as_deref(), priority, parent_id.as_deref())?;
     let token = token().await?;
-    let created = send(&state.http, &token, Method::POST, "tasks", Some(&body)).await?;
+    let created = send(&state.api, &token, Method::POST, "tasks", Some(&body)).await?;
     Ok(todoist::created_task(created))
 }
 
@@ -97,13 +98,13 @@ pub async fn todoist_add(
 pub async fn todoist_quick_add(state: State<'_, AppState>, text: String) -> CmdResult<()> {
     let body = todoist::quick_add_body(&text)?;
     let token = token().await?;
-    send(&state.http, &token, Method::POST, "tasks/quick", Some(&body)).await.map(drop)
+    send(&state.api, &token, Method::POST, "tasks/quick", Some(&body)).await.map(drop)
 }
 
 async fn task_action(state: &AppState, id: &str, action: TaskAction) -> CmdResult<()> {
     let path = todoist::task_action_path(id, action)?;
     let token = token().await?;
-    send(&state.http, &token, Method::POST, &path, None).await.map(drop)
+    send(&state.api, &token, Method::POST, &path, None).await.map(drop)
 }
 
 #[tauri::command]
@@ -121,7 +122,7 @@ pub async fn todoist_reschedule(state: State<'_, AppState>, id: String, due_stri
     let path = todoist::task_path(&id)?;
     let body = todoist::reschedule_body(&due_string)?;
     let token = token().await?;
-    send(&state.http, &token, Method::POST, &path, Some(&body)).await.map(drop)
+    send(&state.api, &token, Method::POST, &path, Some(&body)).await.map(drop)
 }
 
 /// Permanent: sub-tasks are deleted too.
@@ -129,5 +130,5 @@ pub async fn todoist_reschedule(state: State<'_, AppState>, id: String, due_stri
 pub async fn todoist_delete(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let path = todoist::task_path(&id)?;
     let token = token().await?;
-    send(&state.http, &token, Method::DELETE, &path, None).await.map(drop)
+    send(&state.api, &token, Method::DELETE, &path, None).await.map(drop)
 }

@@ -114,6 +114,7 @@ export function createTauriBackend(): Backend {
       setTodoistToken: (token) => call<void>("todoist_set_token", { token }),
       clearTodoistToken: () => call<void>("todoist_clear_token"),
       setAnthropicKey: (key) => call<void>("anthropic_set_key", { key }),
+      setCalendarLinks: (links) => call<void>("calendar_set_links", { links }),
     },
 
     claude: {
@@ -122,13 +123,13 @@ export function createTauriBackend(): Backend {
     },
 
     calendar: {
-      // Never rejects: if the command itself fails, every link reports that failure.
-      fetchIcs: async (urls) => {
+      // Never rejects. Rust reads the saved links itself; if the command fails as a whole (Credential
+      // Manager unreadable) the links are unknown, so a single result without a host reports it.
+      fetchIcs: async () => {
         try {
-          return await call<IcsResult[]>("calendar_fetch", { urls });
+          return await call<IcsResult[]>("calendar_fetch");
         } catch (e) {
-          const error = toBackendError(e).message;
-          return urls.map((url) => ({ url, ok: false, error }));
+          return [{ host: "", ok: false, error: toBackendError(e).message }];
         }
       },
     },
@@ -139,6 +140,7 @@ export function createTauriBackend(): Backend {
       onCommand: (cb) => subscribe<AppCommand>("app-command", cb),
       setClickThrough: (ignore) => call<void>("set_click_through", { ignore }),
       focusOverlay: () => call<void>("focus_overlay"),
+      releaseOverlayFocus: () => call<void>("release_overlay_focus"),
       setTrayStatus: (tooltip) => call<void>("set_tray_status", { tooltip }),
       setTrayLabels: (labels: TrayLabels) => call<void>("set_tray_labels", { labels }),
       openUrl: (url) => call<void>("open_url", { url }),

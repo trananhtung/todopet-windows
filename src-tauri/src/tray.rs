@@ -7,7 +7,7 @@ use crate::windows::{self, ExtraWindow};
 use serde::Deserialize;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, State, Wry};
+use tauri::{AppHandle, Manager, Wry};
 use todopet_core::system::tray_tooltip;
 use todopet_core::{validate, CmdResult};
 
@@ -54,9 +54,9 @@ fn on_menu(app: &AppHandle, id: &str) {
         "quit" => return app.exit(0),
         _ => return,
     };
-    if let Err(e) = windows::open(app, window) {
-        log::warn!("Could not open {}: {e}", window.label());
-    }
+    // Menu events arrive on the main thread inside the event loop; building a webview from there
+    // deadlocks on Windows, so the window is opened from the async runtime instead.
+    windows::open_in_background(app, window);
 }
 
 /// Builds the tray icon and keeps its handles in managed state.
@@ -106,31 +106,36 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Tooltip such as "TodoPet — 😊 2/3" or "🍅 18:42" (cut to Windows' 127-character limit).
+/// Tooltip such as "TodoPet — 😊 2/3" or "🍅 18:42" (cut to Windows' 127-character limit). A no-op when
+/// the tray icon could not be created at startup.
 #[tauri::command]
-pub async fn set_tray_status(tray: State<'_, Tray>, tooltip: String) -> CmdResult<()> {
+pub async fn set_tray_status(app: AppHandle, tooltip: String) -> CmdResult<()> {
+    let Some(tray) = app.try_state::<Tray>() else { return Ok(()) };
     tray.icon.set_tooltip(Some(tray_tooltip(&tooltip))).map_err(util::tauri_err)
 }
 
+/// Relabels the menu in the user's language. A no-op without a tray icon (labels are still validated).
 #[tauri::command]
-pub async fn set_tray_labels(tray: State<'_, Tray>, labels: TrayLabels) -> CmdResult<()> {
+pub async fn set_tray_labels(app: AppHandle, labels: TrayLabels) -> CmdResult<()> {
+    let texts = [
+        &labels.board,
+        &labels.add,
+        &labels.focus,
+        &labels.hide,
+        &labels.quiet,
+        &labels.settings,
+        &labels.diary,
+        &labels.quit,
+    ]
+    .iter()
+    .map(|text| validate::text(text, "Menu label", MAX_LABEL_CHARS))
+    .collect::<CmdResult<Vec<_>>>()?;
+    let Some(tray) = app.try_state::<Tray>() else { return Ok(()) };
     let items = &tray.items;
-    let pairs = [
-        (&items.board, &labels.board),
-        (&items.add, &labels.add),
-        (&items.focus, &labels.focus),
-        (&items.hide, &labels.hide),
-        (&items.quiet, &labels.quiet),
-        (&items.settings, &labels.settings),
-        (&items.diary, &labels.diary),
-        (&items.quit, &labels.quit),
-    ];
-    // Validate all first so a bad label never leaves the menu half translated.
-    let texts = pairs
-        .iter()
-        .map(|(_, text)| validate::text(text, "Menu label", MAX_LABEL_CHARS))
-        .collect::<CmdResult<Vec<_>>>()?;
-    for ((item, _), text) in pairs.iter().zip(texts) {
+    // Same order as `texts`, all validated first so a bad label never leaves the menu half translated.
+    let menu_items =
+        [&items.board, &items.add, &items.focus, &items.hide, &items.quiet, &items.settings, &items.diary, &items.quit];
+    for (item, text) in menu_items.into_iter().zip(texts) {
         item.set_text(text).map_err(util::tauri_err)?;
     }
     Ok(())

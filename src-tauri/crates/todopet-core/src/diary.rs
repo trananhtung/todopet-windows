@@ -3,7 +3,8 @@
 //! Day names come from the JS side in the user's local time zone. Rust only knows UTC without extra
 //! dependencies, so pruning at startup uses a reference day one day behind UTC (the earliest local day it
 //! can be anywhere): it may keep a day too many, never deletes one too early. Appending the first entry of
-//! a new day prunes again with that exact local day.
+//! a new day prunes again with that exact local day, capped at UTC today + 1 (the latest local day it can
+//! be anywhere) so a wrong day from the page can never wipe the diary.
 
 use crate::{validate, CmdError, CmdResult};
 use std::fs::{self, OpenOptions};
@@ -81,6 +82,13 @@ pub fn day_from_unix_secs(secs: i64) -> i64 {
     secs.div_euclid(86_400)
 }
 
+/// The reference day for pruning after the first entry of `day`: `day` itself, but never later than UTC
+/// today + 1, the latest local date anywhere on Earth. A page with a wrong clock (or a bug) sending a far
+/// future day would otherwise delete every diary.
+pub fn prune_reference(day: i64, now_unix_secs: i64) -> i64 {
+    day.min(day_from_unix_secs(now_unix_secs) + 1)
+}
+
 /// Days among `days` that fall before the `keep`-day window ending at `reference` (inclusive).
 /// Entries that are not valid day names are ignored.
 pub fn days_to_prune(days: &[String], reference: i64, keep: i64) -> Vec<&str> {
@@ -111,9 +119,9 @@ impl Diary {
         self.dir.join(format!("{day}.{EXT}"))
     }
 
-    /// Appends one line to `day`'s file. When this creates the file (first entry of a new day), days older
-    /// than the retention window relative to `day` are deleted.
-    pub fn append(&self, day: &str, line: &str) -> CmdResult<()> {
+    /// Appends one line to `day`'s file. Returns `true` when this created the file (the first entry of a
+    /// new day), the moment to call [`Diary::prune_for_new_day`].
+    pub fn append(&self, day: &str, line: &str) -> CmdResult<bool> {
         let day = validate::diary_day(day)?;
         let line = validate::diary_line(line)?;
         fs::create_dir_all(&self.dir).map_err(|e| io_err("Could not create the diary folder", e))?;
@@ -126,12 +134,17 @@ impl Diary {
             .map_err(|e| io_err("Could not open the diary", e))?;
         // One write call per line so concurrent appends from two windows never interleave mid-line.
         f.write_all(format!("{line}\n").as_bytes()).map_err(|e| io_err("Could not write the diary", e))?;
-        if is_new {
-            if let Some(reference) = parse_day(day) {
-                self.prune(reference, KEEP_DAYS)?;
-            }
+        Ok(is_new)
+    }
+
+    /// Deletes days outside the retention window that ends at `day` (the page's local today), with the
+    /// reference capped at UTC today + 1. See [`prune_reference`].
+    pub fn prune_for_new_day(&self, day: &str, now_unix_secs: i64) -> CmdResult<Vec<String>> {
+        let day = validate::diary_day(day)?;
+        match parse_day(day) {
+            Some(day) => self.prune(prune_reference(day, now_unix_secs), KEEP_DAYS),
+            None => Ok(Vec::new()),
         }
-        Ok(())
     }
 
     /// The lines of `day`'s file, blank lines skipped. A missing file is an empty diary.
@@ -232,22 +245,41 @@ mod tests {
     }
 
     #[test]
+    fn prune_reference_is_capped_at_utc_tomorrow() {
+        let today = parse_day("2026-10-28").unwrap();
+        let noon = today * 86_400 + 12 * 3600;
+        assert_eq!(prune_reference(today, noon), today);
+        assert_eq!(prune_reference(today - 3, noon), today - 3);
+        assert_eq!(prune_reference(today + 1, noon), today + 1, "UTC+14 is a day ahead");
+        assert_eq!(prune_reference(today + 2, noon), today + 1);
+        assert_eq!(prune_reference(parse_day("2099-01-01").unwrap(), noon), today + 1);
+    }
+
+    #[test]
     fn append_read_list_and_prune_files() {
         let dir = test_dir("diary");
         let diary = Diary::new(dir.join("log"));
         assert_eq!(diary.days().unwrap(), Vec::<String>::new());
         assert_eq!(diary.read("2026-10-01").unwrap(), Vec::<String>::new());
 
-        diary.append("2026-10-01", r#"{"a":1}"#).unwrap();
-        diary.append("2026-10-01", r#"{"a":2}"#).unwrap();
-        diary.append("2026-10-10", r#"{"b":1}"#).unwrap();
+        assert!(diary.append("2026-10-01", r#"{"a":1}"#).unwrap(), "first entry creates the day");
+        assert!(!diary.append("2026-10-01", r#"{"a":2}"#).unwrap());
+        assert!(diary.append("2026-10-10", r#"{"b":1}"#).unwrap());
         fs::write(diary.dir().join("notes.txt"), "ignored").unwrap();
         assert_eq!(diary.read("2026-10-01").unwrap(), vec![r#"{"a":1}"#, r#"{"a":2}"#]);
         assert_eq!(diary.days().unwrap(), vec!["2026-10-10", "2026-10-01"]);
 
         // First entry of 2026-10-20: 2026-10-01 is outside the 14-day window and goes.
-        diary.append("2026-10-20", r#"{"c":1}"#).unwrap();
+        let oct_20 = parse_day("2026-10-20").unwrap() * 86_400 + 3600;
+        assert!(diary.append("2026-10-20", r#"{"c":1}"#).unwrap());
+        assert_eq!(diary.prune_for_new_day("2026-10-20", oct_20).unwrap(), vec!["2026-10-01"]);
         assert_eq!(diary.days().unwrap(), vec!["2026-10-20", "2026-10-10"]);
+
+        // A far-future day from the page prunes as if it were UTC today + 1, not 2099.
+        assert!(diary.append("2099-01-01", r#"{"d":1}"#).unwrap());
+        assert_eq!(diary.prune_for_new_day("2099-01-01", oct_20).unwrap(), Vec::<String>::new());
+        assert_eq!(diary.days().unwrap(), vec!["2099-01-01", "2026-10-20", "2026-10-10"]);
+        fs::remove_file(diary.dir().join("2099-01-01.jsonl")).unwrap();
 
         // Startup on 2026-11-05 UTC (reference 11-04, window 10-22..11-04) removes the rest.
         let now = (parse_day("2026-11-05").unwrap() * 86_400) + 3600;
@@ -255,6 +287,7 @@ mod tests {
         assert!(diary.dir().join("notes.txt").exists());
 
         assert!(diary.append("../evil", "x").is_err());
+        assert!(diary.prune_for_new_day("../evil", oct_20).is_err());
         assert!(diary.append("2026-10-20", "a\nb").is_err());
         assert!(diary.read("2026-10-20.jsonl").is_err());
         fs::remove_dir_all(dir).unwrap();

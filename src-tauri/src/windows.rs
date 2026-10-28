@@ -2,6 +2,7 @@
 
 use crate::{state::AppState, util};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use todopet_core::system::fit_window_size;
 use todopet_core::{CmdError, CmdResult};
 
 /// `ExtraWindow` on the TypeScript side. The label doubles as the page name.
@@ -57,7 +58,17 @@ pub fn page_url(page: &str, demo: bool) -> String {
     }
 }
 
-/// Shows and focuses the window, creating it if it is not open.
+/// The primary monitor's work area in logical pixels.
+fn work_area_logical(app: &AppHandle) -> Option<(f64, f64)> {
+    let monitor = app.primary_monitor().ok().flatten()?;
+    let scale = monitor.scale_factor();
+    let size = monitor.work_area().size;
+    (scale.is_finite() && scale > 0.0).then(|| (f64::from(size.width) / scale, f64::from(size.height) / scale))
+}
+
+/// Shows and focuses the window, creating it if it is not open. Builds a webview, so it must not run on
+/// the main thread inside a synchronous event handler (it deadlocks on Windows); see
+/// [`open_in_background`].
 pub fn open(app: &AppHandle, which: ExtraWindow) -> tauri::Result<()> {
     if let Some(win) = app.get_webview_window(which.label()) {
         win.unminimize()?;
@@ -65,17 +76,28 @@ pub fn open(app: &AppHandle, which: ExtraWindow) -> tauri::Result<()> {
         return win.set_focus();
     }
     let demo = app.state::<AppState>().demo;
-    let (width, height) = which.size();
+    let ((width, height), (min_width, min_height)) = fit_window_size(which.size(), work_area_logical(app));
     WebviewWindowBuilder::new(app, which.label(), WebviewUrl::App(page_url(which.label(), demo).into()))
         .title(which.title())
         .inner_size(width, height)
-        .min_inner_size(width.min(480.0), 480.0)
+        .min_inner_size(min_width, min_height)
         .center()
         .resizable(true)
         .decorations(true)
         .focused(true)
         .build()?;
     Ok(())
+}
+
+/// [`open`] from the async runtime, for synchronous callers on the main thread (tray menu, single-instance
+/// callback). Failures are logged.
+pub fn open_in_background(app: &AppHandle, which: ExtraWindow) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = open(&app, which) {
+            log::warn!("Could not open {}: {e}", which.label());
+        }
+    });
 }
 
 /// Async so the window is built off the main thread: building a webview from a synchronous command

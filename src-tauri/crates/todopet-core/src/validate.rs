@@ -10,7 +10,12 @@ pub const MAX_SECRET_LEN: usize = 512;
 pub const MAX_DIARY_LINE_BYTES: usize = 8 * 1024;
 /// URL schemes `open_url` hands to the OS.
 pub const OPEN_URL_SCHEMES: [&str; 4] = ["http", "https", "msteams", "zoommtg"];
+/// The only storage documents the app uses: preferences, the pet's life, the postponed-task log.
+pub const STORE_KEYS: [&str; 3] = ["prefs", "life", "stuck"];
 const MAX_URL_LEN: usize = 4096;
+/// Characters never valid unescaped in a URL that matter to the command lines the link may pass through
+/// (`explorer.exe`, protocol handlers): quotes, angle brackets, backslash, caret, backtick, pipe.
+const UNSAFE_URL_CHARS: [char; 7] = ['"', '<', '>', '\\', '^', '`', '|'];
 
 /// Todoist ids: `[A-Za-z0-9_-]{1,64}`. They go into URL paths, so nothing else is allowed.
 pub fn todoist_id(id: &str) -> CmdResult<&str> {
@@ -23,13 +28,9 @@ pub fn todoist_id(id: &str) -> CmdResult<&str> {
     }
 }
 
-/// Storage keys: `^[a-z][a-z0-9-]{0,31}$`. They become file names.
+/// Storage keys: exactly one of [`STORE_KEYS`]. They become file names.
 pub fn store_key(key: &str) -> CmdResult<&str> {
-    let bytes = key.as_bytes();
-    let ok = matches!(bytes.first(), Some(b) if b.is_ascii_lowercase())
-        && bytes.len() <= 32
-        && bytes.iter().all(|&b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-    if ok {
+    if STORE_KEYS.contains(&key) {
         Ok(key)
     } else {
         Err(CmdError::invalid("Invalid storage key"))
@@ -100,48 +101,63 @@ fn has_space_or_control(s: &str) -> bool {
     s.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
-/// Links `open_url` may hand to the default handler: http(s) web pages and Teams/Zoom meeting links.
-/// Anything else (`file:`, `ms-settings:`, custom protocol handlers…) is refused.
+/// Links `open_url` may hand to the default handler: http(s) web pages, Teams meeting links
+/// (`msteams:/l/meetup-join/…`) and Zoom join links (`zoommtg://<host>.zoom.us/join?…`). Anything else
+/// (`file:`, `ms-settings:`, other Teams/Zoom actions, custom protocol handlers…) is refused.
 pub fn open_url(raw: &str) -> CmdResult<String> {
     let url = raw.trim();
-    if url.is_empty() || url.len() > MAX_URL_LEN || has_space_or_control(url) {
+    if url.is_empty() || url.len() > MAX_URL_LEN || has_space_or_control(url) || url.contains(UNSAFE_URL_CHARS) {
         return Err(CmdError::invalid("Invalid link"));
     }
     let scheme = scheme_of(url).ok_or_else(|| CmdError::invalid("Invalid link"))?;
     if !OPEN_URL_SCHEMES.contains(&scheme.as_str()) {
         return Err(CmdError::invalid(format!("Links starting with {scheme}: are not opened")));
     }
-    if (scheme == "http" || scheme == "https") && host_of(&url[scheme.len() + 1..]).is_none() {
-        return Err(CmdError::invalid("Invalid link"));
+    let rest = &url[scheme.len() + 1..];
+    let ok = match scheme.as_str() {
+        "http" | "https" => host_of(rest).is_some(),
+        "msteams" => is_teams_meeting(rest),
+        "zoommtg" => is_zoom_join(rest),
+        _ => false,
+    };
+    if ok {
+        Ok(url.to_owned())
+    } else {
+        Err(CmdError::invalid("Invalid link"))
     }
-    Ok(url.to_owned())
+}
+
+/// `msteams:` + `/l/meetup-join/<meeting>`: the link Teams puts in meeting invitations.
+fn is_teams_meeting(after_scheme: &str) -> bool {
+    after_scheme.strip_prefix("/l/meetup-join/").is_some_and(|meeting| !meeting.is_empty())
+}
+
+/// `zoommtg:` + `//zoom.us/join?…` or `//<subdomain>.zoom.us/join?…` with a non-empty query.
+fn is_zoom_join(after_scheme: &str) -> bool {
+    let Some(rest) = after_scheme.strip_prefix("//") else { return false };
+    let Some((host, query)) = rest.split_once("/join?") else { return false };
+    let host = host.to_ascii_lowercase();
+    let subdomain_ok = |sub: &str| {
+        sub.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+        })
+    };
+    let host_ok = host == "zoom.us" || host.strip_suffix(".zoom.us").is_some_and(subdomain_ok);
+    host_ok && !query.is_empty() && !query.contains('#')
 }
 
 /// The host part of `//host/path…` (after the scheme's colon), if present and non-empty.
-fn host_of(after_scheme: &str) -> Option<&str> {
+pub(crate) fn host_of(after_scheme: &str) -> Option<&str> {
     let rest = after_scheme.strip_prefix("//")?;
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..end];
     // Drop credentials (`user:pass@host`) when locating the host.
     let host = authority.rsplit('@').next().unwrap_or(authority);
     (!host.is_empty()).then_some(host)
-}
-
-/// Calendar links: `https://…` as is, `webcal://…` rewritten to `https://…`. Nothing else.
-pub fn ics_url(raw: &str) -> Result<String, String> {
-    let url = raw.trim();
-    if url.is_empty() || url.len() > MAX_URL_LEN || has_space_or_control(url) {
-        return Err("Invalid link".into());
-    }
-    let rest = match scheme_of(url).as_deref() {
-        Some("https") => &url["https:".len()..],
-        Some("webcal") => &url["webcal:".len()..],
-        _ => return Err("Only https:// and webcal:// calendar links are supported".into()),
-    };
-    if host_of(rest).is_none() {
-        return Err("Invalid link".into());
-    }
-    Ok(format!("https:{rest}"))
 }
 
 /// An ISO 8601 timestamp as the Todoist API expects (`2026-10-28T00:00:00Z`). Only shape-checked: the
@@ -173,10 +189,10 @@ mod tests {
 
     #[test]
     fn store_keys() {
-        for good in ["prefs", "life", "stuck", "a", "pet-2", &format!("a{}", "b".repeat(31))] {
+        for good in STORE_KEYS {
             assert!(store_key(good).is_ok(), "{good}");
         }
-        for bad in ["", "Prefs", "1abc", "-a", "a_b", "a.json", "../x", "a/b", &format!("a{}", "b".repeat(32))] {
+        for bad in ["", "Prefs", "prefs ", "prefs.json", "pet-2", "secrets", "a", "../prefs", "life/x", "stuck2"] {
             assert!(store_key(bad).is_err(), "{bad}");
         }
     }
@@ -231,8 +247,11 @@ mod tests {
             "https://todoist.com/app/today",
             "http://localhost:3000/x",
             "HTTPS://Example.com",
-            "msteams:/l/meetup-join/19%3ameeting",
+            "msteams:/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%22Tid%22%7d",
+            "MSTEAMS:/l/meetup-join/19%3ameeting",
             "zoommtg://zoom.us/join?confno=123",
+            "zoommtg://us02web.zoom.us/join?action=join&confno=8123456789&pwd=abc",
+            "zoommtg://Company-1.Zoom.US/join?confno=1",
         ] {
             assert!(open_url(good).is_ok(), "{good}");
         }
@@ -243,26 +262,32 @@ mod tests {
             "https://",
             "https:example.com",
             "https://exa mple.com",
+            "https://example.com/\"onmouseover",
+            "https://example.com/a<b",
+            "https://example.com/a\\b",
+            "https://example.com/a|b",
+            "https://example.com/a^b",
+            "https://example.com/a`b",
             "",
             "todoist.com",
+            "msteams:",
+            "msteams:/l/meetup-join/",
+            "msteams:/l/chat/0/0?users=a@b.com",
+            "msteams://teams.microsoft.com/l/meetup-join/19",
+            "msteams:/l/app/abc",
+            "zoommtg://zoom.us/start?confno=1",
+            "zoommtg://zoom.us/join?",
+            "zoommtg://zoom.us/join",
+            "zoommtg://evil.com/join?confno=1",
+            "zoommtg://zoom.us.evil.com/join?confno=1",
+            "zoommtg://evilzoom.us/join?confno=1",
+            "zoommtg://-x.zoom.us/join?confno=1",
+            "zoommtg://a..zoom.us/join?confno=1",
+            "zoommtg://user@zoom.us/join?confno=1",
+            "zoommtg:zoom.us/join?confno=1",
+            "zoommtg://zoom.us/join?confno=1#frag",
         ] {
             assert!(open_url(bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn ics_urls() {
-        assert_eq!(
-            ics_url("webcal://p01-caldav.icloud.com/published/2/abc").unwrap(),
-            "https://p01-caldav.icloud.com/published/2/abc"
-        );
-        assert_eq!(
-            ics_url(" https://calendar.google.com/calendar/ical/x/private-y/basic.ics ").unwrap(),
-            "https://calendar.google.com/calendar/ical/x/private-y/basic.ics"
-        );
-        assert_eq!(ics_url("WEBCAL://host/a.ics").unwrap(), "https://host/a.ics");
-        for bad in ["http://host/a.ics", "file:///a.ics", "https://", "webcal:host", "ftp://x/a.ics", ""] {
-            assert!(ics_url(bad).is_err(), "{bad}");
         }
     }
 

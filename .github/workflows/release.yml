@@ -4,37 +4,69 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+# Nothing by default; each job asks for what it needs.
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    name: Build Windows installers and draft a release
+  # Read-only: builds the installers from the tag with no write token in reach and no caches restored
+  # (a cache written by another workflow run must not end up inside a release).
+  build:
+    name: Build Windows installers
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          cache: npm
       - run: npm ci
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
         with:
-          workspaces: src-tauri
-      - uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          toolchain: stable
+      - name: Build installers
+        run: npx tauri build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: TodoPet ${{ github.ref_name }}
-          releaseBody: |
-            Windows installers for TodoPet ${{ github.ref_name }}.
+          name: todopet-windows-installers
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+          retention-days: 7
 
-            - `TodoPet_*_x64-setup.exe`: installer for the current user (recommended).
-            - `TodoPet_*_x64_*.msi`: MSI package (English or Vietnamese).
-          releaseDraft: true
-          prerelease: false
+  # The only job with a write token: it runs no project code, just drafts the release from the artifacts.
+  publish:
+    name: Draft the GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: todopet-windows-installers
+          path: installers
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md <<'EOF'
+          Windows installers for TodoPet.
+
+          - `TodoPet_*_x64-setup.exe`: installer for the current user (recommended).
+          - `TodoPet_*_x64_*.msi`: MSI package (English or Vietnamese).
+          EOF
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft \
+            --title "TodoPet $TAG" \
+            --notes-file notes.md \
+            installers/nsis/*.exe installers/msi/*.msi

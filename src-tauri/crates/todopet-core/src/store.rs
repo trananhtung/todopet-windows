@@ -155,7 +155,8 @@ mod tests {
         let dir = test_dir("store-big");
         let store = Store::new(&dir);
         let big = Value::String("x".repeat(MAX_DOC_BYTES + 1));
-        assert!(store.save("big", &big).is_err());
+        assert!(store.save("prefs", &big).is_err());
+        assert!(!dir.join("prefs.json").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 }
