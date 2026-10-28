@@ -1,0 +1,71 @@
+[workspace]
+members = [".", "crates/todopet-core"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[package]
+name = "todopet"
+version = "0.1.0"
+description = "A desktop pet for Windows that reads your Todoist tasks and gets happy when you work."
+authors = ["Tran Anh Tung"]
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+default-run = "todopet"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+todopet-core = { path = "crates/todopet-core" }
+tauri = { version = "2.12", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2.5"
+tauri-plugin-autostart = "2.7"
+tauri-plugin-global-shortcut = "2.4"
+tauri-plugin-opener = "2.7"
+tauri-plugin-log = "2.10"
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "charset", "http2", "system-proxy"] }
+keyring = "4"
+uuid = { version = "1", features = ["v4"] }
+sys-locale = "0.3"
+log = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Ole",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[features]
+default = ["tls"]
+# rustls (aws-lc-rs) with the OS certificate store. Split out only so the crate can be type-checked for
+# Windows from a Linux host that has no MSVC C compiler (`--no-default-features`); release builds keep it on.
+tls = ["reqwest/rustls"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

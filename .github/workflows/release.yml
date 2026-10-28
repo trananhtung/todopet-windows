@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build Windows installers and draft a release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: TodoPet ${{ github.ref_name }}
+          releaseBody: |
+            Windows installers for TodoPet ${{ github.ref_name }}.
+
+            - `TodoPet_*_x64-setup.exe`: installer for the current user (recommended).
+            - `TodoPet_*_x64_*.msi`: MSI package (English or Vietnamese).
+          releaseDraft: true
+          prerelease: false

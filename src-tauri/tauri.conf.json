@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TodoPet",
+  "version": "0.1.0",
+  "identifier": "com.trananhtung.todopet",
+  "build": {
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "publisher": "Tran Anh Tung",
+    "copyright": "© 2026 Tran Anh Tung",
+    "license": "MIT",
+    "category": "Productivity",
+    "shortDescription": "A desktop pet that reads your Todoist tasks.",
+    "longDescription": "TodoPet lives on top of your taskbar, reads your Todoist tasks, asks you to plan three tasks a day, reminds you at good moments and gets happy or grumpy with your progress.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English", "Vietnamese"],
+        "displayLanguageSelector": false
+      },
+      "wix": {
+        "language": ["en-US", "vi-VN"]
+      }
+    }
+  }
+}
