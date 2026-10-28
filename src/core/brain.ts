@@ -1689,6 +1689,7 @@ export class Brain {
     const nowMs = this.now();
     const t = task ?? this.state.next;
     this.set({ focus: { task: t, start: nowMs, end: nowMs + m * MIN, isBreak: false, minutes: m }, antic: null });
+    this.finishFocusAt(nowMs + m * MIN);
     this.recompute();
     this.lastBubbleAt = nowMs;
     this.set({ bubble: { id: ++this.bubbleSeq, text: lines.focusStart(t, m), actions: [], seconds: 5, urgent: false, reminder: false } });
@@ -1699,6 +1700,7 @@ export class Brain {
     const nowMs = this.now();
     const m = this.state.prefs.breakMinutes;
     this.set({ focus: { task: null, start: nowMs, end: nowMs + m * MIN, isBreak: true, minutes: m } });
+    this.finishFocusAt(nowMs + m * MIN);
     this.recompute();
     this.set({ bubble: { id: ++this.bubbleSeq, text: lines.breakStart(m), actions: [], seconds: 6, urgent: false, reminder: false } });
     this.diary.add("focus", L(`Nghỉ ${m} phút`, `${m}-minute break`));
@@ -1715,6 +1717,14 @@ export class Brain {
     }
     this.set({ focus: null });
     this.recompute();
+  }
+
+  /** Ends the session right at 0:00 rather than at the next 15-second tick (the tick stays as a fallback). */
+  private finishFocusAt(end: number): void {
+    this.later(() => {
+      const f = this.state.focus;
+      if (f && f.end === end && this.now() >= end - 1000) this.finishFocus();
+    }, Math.max(0, end - this.now()));
   }
 
   private finishFocus(): void {

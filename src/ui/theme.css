@@ -15,12 +15,12 @@
   --line-strong: #dcc5ad;
   --ink: #2b2118;
   --ink-2: #5b4a3c;
-  --muted: #8a7766;
+  --muted: #6e5c4d;
 
   --accent: #e2703a;
   --accent-ink: #ffffff;
   --accent-soft: #fde3d2;
-  --accent-strong: #c2551f;
+  --accent-strong: #b84d1b;
   --good: #4f8f45;
   --good-soft: #e1f0d9;
   --bad: #cf3f57;
@@ -34,7 +34,7 @@
   --p1: #d1453b;
   --p2: #eb8909;
   --p3: #246fe0;
-  --p4: #a59a8e;
+  --p4: #8f8478;
 
   --radius-card: 14px;
   --radius: 9px;
@@ -42,7 +42,7 @@
   --shadow-1: 0 1px 2px rgba(60, 35, 15, 0.08), 0 2px 8px rgba(60, 35, 15, 0.06);
   --shadow-2: 0 2px 6px rgba(60, 35, 15, 0.1), 0 12px 32px rgba(60, 35, 15, 0.16);
   --shadow-pop: 0 6px 18px rgba(60, 35, 15, 0.16), 0 24px 60px rgba(60, 35, 15, 0.22);
-  --focus-ring: 0 0 0 3px rgba(226, 112, 58, 0.35);
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent-strong);
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -76,6 +76,23 @@
     --shadow-pop: 0 6px 18px rgba(0, 0, 0, 0.5), 0 24px 60px rgba(0, 0, 0, 0.55);
     --focus-ring: 0 0 0 3px rgba(240, 138, 84, 0.45);
   }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  :root:not([data-theme="light"]) .btn.primary:hover {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
+}
+:root[data-theme="dark"] .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* Forced dark (the same tokens), for windows that offer a theme switch. */
@@ -137,7 +154,9 @@ textarea {
 }
 
 :focus-visible {
-  outline: none;
+  /* A transparent outline still shows in Windows High Contrast, where box-shadows are dropped. */
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: var(--focus-ring);
 }
 
@@ -170,14 +189,15 @@ textarea {
   opacity: 0.5;
   cursor: default;
 }
+/* White on the bright tangerine is only 3.2:1, so filled buttons use the deeper shade (4.9:1). */
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
-}
-.btn.primary:hover {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
+  color: #fff;
+}
+.btn.primary:hover {
+  background: #9e4116;
+  border-color: #9e4116;
 }
 .btn.ghost {
   background: transparent;
