@@ -1,0 +1,299 @@
+/* TodoPet design tokens: warm paper and ink, with the pet's tangerine as the accent.
+   Windows 11 type (Segoe UI Variable), soft depth, 12px cards and 8px controls. */
+
+:root {
+  color-scheme: light;
+  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+
+  --paper: #fff8f0;
+  --paper-2: #fbefe2;
+  --surface: #ffffff;
+  --surface-2: #fdf6ee;
+  --line: #ecdccb;
+  --line-strong: #dcc5ad;
+  --ink: #2b2118;
+  --ink-2: #5b4a3c;
+  --muted: #8a7766;
+
+  --accent: #e2703a;
+  --accent-ink: #ffffff;
+  --accent-soft: #fde3d2;
+  --accent-strong: #c2551f;
+  --good: #4f8f45;
+  --good-soft: #e1f0d9;
+  --bad: #cf3f57;
+  --bad-soft: #fbdde2;
+  --warn: #c98a12;
+  --warn-soft: #fbefd0;
+  --info: #3a78b8;
+  --info-soft: #dde9f6;
+  --gold: #e3a400;
+
+  --p1: #d1453b;
+  --p2: #eb8909;
+  --p3: #246fe0;
+  --p4: #a59a8e;
+
+  --radius-card: 14px;
+  --radius: 9px;
+  --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(60, 35, 15, 0.08), 0 2px 8px rgba(60, 35, 15, 0.06);
+  --shadow-2: 0 2px 6px rgba(60, 35, 15, 0.1), 0 12px 32px rgba(60, 35, 15, 0.16);
+  --shadow-pop: 0 6px 18px rgba(60, 35, 15, 0.16), 0 24px 60px rgba(60, 35, 15, 0.22);
+  --focus-ring: 0 0 0 3px rgba(226, 112, 58, 0.35);
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #1d1814;
+    --paper-2: #241e19;
+    --surface: #2a231d;
+    --surface-2: #322a23;
+    --line: #3e342b;
+    --line-strong: #53463a;
+    --ink: #f6ece2;
+    --ink-2: #d8c8b8;
+    --muted: #a8968a;
+    --accent: #f08a54;
+    --accent-ink: #1d1814;
+    --accent-soft: #4a2f20;
+    --accent-strong: #ffa774;
+    --good: #84c477;
+    --good-soft: #263a22;
+    --bad: #f27389;
+    --bad-soft: #4a2229;
+    --warn: #e9b34a;
+    --warn-soft: #3d3020;
+    --info: #79aee6;
+    --info-soft: #1f3044;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.45);
+    --shadow-pop: 0 6px 18px rgba(0, 0, 0, 0.5), 0 24px 60px rgba(0, 0, 0, 0.55);
+    --focus-ring: 0 0 0 3px rgba(240, 138, 84, 0.45);
+  }
+}
+
+/* Forced dark (the same tokens), for windows that offer a theme switch. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #1d1814;
+  --paper-2: #241e19;
+  --surface: #2a231d;
+  --surface-2: #322a23;
+  --line: #3e342b;
+  --line-strong: #53463a;
+  --ink: #f6ece2;
+  --ink-2: #d8c8b8;
+  --muted: #a8968a;
+  --accent: #f08a54;
+  --accent-ink: #1d1814;
+  --accent-soft: #4a2f20;
+  --accent-strong: #ffa774;
+  --good: #84c477;
+  --good-soft: #263a22;
+  --bad: #f27389;
+  --bad-soft: #4a2229;
+  --warn: #e9b34a;
+  --warn-soft: #3d3020;
+  --info: #79aee6;
+  --info-soft: #1f3044;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 6px 18px rgba(0, 0, 0, 0.5), 0 24px 60px rgba(0, 0, 0, 0.55);
+  --focus-ring: 0 0 0 3px rgba(240, 138, 84, 0.45);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+body.window {
+  background: var(--paper);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Shared controls */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s;
+  white-space: nowrap;
+}
+.btn:hover {
+  background: var(--surface-2);
+  border-color: var(--muted);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.btn.primary:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.btn.ghost:hover {
+  background: var(--paper-2);
+}
+.btn.danger {
+  color: var(--bad);
+}
+.btn.danger.solid {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+}
+.btn.small {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+.btn.icon {
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+}
+
+.field {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field:hover {
+  border-color: var(--muted);
+}
+.field:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+textarea.field {
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+  cursor: pointer;
+  transition: background 0.18s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.18s var(--ease-spring);
+}
+.switch:checked {
+  background: var(--accent);
+}
+.switch:checked::after {
+  transform: translateX(18px);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-1);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
