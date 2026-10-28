@@ -18,10 +18,10 @@ original.
 | Surface | **One transparent, always-on-top overlay window** covering the primary monitor's work area | The pet walks with CSS transforms instead of moving a window; bubble, board, sign parade, table flip and fireworks share one surface. Rust polls the cursor (~40 Hz) and the overlay toggles click-through with `set_ignore_cursor_events` only when the cursor enters/leaves an interactive element (`document.elementFromPoint`). |
 | Other windows | Settings and Diary are normal decorated windows | They need focus and scrolling; they talk to the overlay through Tauri events. |
 | Secrets | Windows **Credential Manager** (`keyring` crate) | Tokens never reach JavaScript: Rust reads them and makes the Todoist / Anthropic calls itself. |
-| Storage | `tauri-plugin-store` JSON files in `%APPDATA%\com.trananhtung.todopet` | Prefs, pet life, postponed-task log. Diary as daily JSONL files, 14 days. Browser demo uses `localStorage`. |
-| Calendar | **ICS links** (Google "secret address in iCal format", Outlook "Publish calendar"), parsed with `ical.js` | Windows has no EventKit equivalent; ICS covers Google, Outlook/Microsoft 365 and iCloud. Rust fetches (no CORS), JS parses and expands recurrences. |
+| Storage | Small JSON files (atomic writes) in `%APPDATA%\com.trananhtung.todopet`; diary as daily JSONL files in `%LOCALAPPDATA%` | Prefs, pet life, postponed-task log; the diary keeps 14 days. Browser demo uses `localStorage`. |
+| Calendar | **ICS links** (Google "secret address in iCal format", Outlook "Publish calendar"), stored in Credential Manager, parsed with `ical.js` | Windows has no EventKit equivalent; ICS covers Google, Outlook/Microsoft 365 and iCloud. Rust fetches (public addresses only), JS parses and expands recurrences. |
 | Distraction | Foreground process via Win32, active tab address via **UI Automation** (Chrome, Edge, Brave, Vivaldi, Opera, Firefox), window title as fallback | Same rules as the original (`youtube.com`, `youtube.com/shorts`). Addresses stay in memory. |
-| Typing / idle | `GetLastInputInfo` for idle; a low-level keyboard hook that stores **only the timestamp** of the last key press | Needed for "interrupt at a pause" and "in the zone" rules. No key codes are read or stored. |
+| Typing / idle | `GetLastInputInfo` for idle; Windows **Raw Input** that stores **only the timestamp** of the last key-down | Needed for "interrupt at a pause" and "in the zone" rules. No key codes are read or stored; no keyboard hook. |
 | Packaging | GitHub Actions on `windows-latest`: NSIS `.exe` and `.msi` via `tauri build`; tags `v*` publish a release | Cross-compiling WebView2 apps from Linux is fragile; CI is the source of truth for Windows builds. |
 
 ## Architecture
@@ -120,8 +120,9 @@ picker in Settings shows a live preview; locked species show their requirement.
 ## Privacy
 
 No analytics, no servers of its own. Network: `api.todoist.com`, your ICS links, and `api.anthropic.com`
-only when you press Ask Claude. Window titles and tab addresses stay in memory. The keyboard hook stores only
-the time of the last key press. Everything else is local in `%APPDATA%`.
+only when you press Ask Claude. Browser titles and tab addresses stay in memory. Raw Input stores only the time
+of the last key-down. Secrets (tokens, ICS links) live in Credential Manager; everything else is local. See
+[SECURITY.md](../SECURITY.md).
 
 ## Thin vertical slices
 

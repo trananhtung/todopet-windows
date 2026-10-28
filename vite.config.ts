@@ -16,8 +16,8 @@ export default defineConfig({
   build: {
     target: "es2022",
     rollupOptions: {
+      // index.html is the dev hub: served by `npm run dev`, never shipped.
       input: {
-        index: page("index"),
         overlay: page("overlay"),
         settings: page("settings"),
         diary: page("diary"),

@@ -55,7 +55,7 @@ The token is stored in **Windows Credential Manager** (as `TodoPet`) and is only
 
 ### Calendar (optional)
 
-**Settings → Calendar**, paste one ICS link per line:
+**Settings → Calendar**, paste one ICS link per line and press **Save**. The links are stored in Windows Credential Manager and never shown again (only their host names):
 
 - **Google Calendar:** Settings → your calendar → *Integrate calendar* → **Secret address in iCal format**.
 - **Outlook / Microsoft 365:** Settings → Calendar → Shared calendars → **Publish a calendar** → ICS link.
@@ -95,9 +95,10 @@ Score ≥ 75 is happy, ≥ 50 chill, ≥ 30 annoyed, and anything lower grumpy. 
 ## Privacy
 
 - No analytics and no servers of its own. Network traffic goes to `api.todoist.com`, your ICS links, and to `api.anthropic.com` only when you press **Ask Claude**.
-- Distraction detection reads the **name of the app in front** and, for browsers, the **address of the active tab**. Addresses stay in memory and are never stored or sent anywhere.
-- Typing detection uses a keyboard hook that records **only the time of the last key press** — never which key.
-- Settings, the pet's life and the diary are local files in `%APPDATA%\com.trananhtung.todopet`. The diary keeps 14 days and can be turned off.
+- Distraction detection reads the **name of the app in front** and, for browsers, the **address of the active tab** and its page title (window titles of other apps are never read). They stay in memory and are never stored or sent anywhere.
+- Typing detection uses Windows Raw Input and records **only the time of the last key-down**: it never reads which key, and it is not a keyboard hook.
+- Calendar ICS links are secret addresses, so they're stored in Windows Credential Manager like the tokens, and only public internet addresses are fetched.
+- Settings and the pet's life are in `%APPDATA%\com.trananhtung.todopet`; the diary stays on this PC in `%LOCALAPPDATA%\com.trananhtung.todopet` (14 days, can be turned off).
 - Spoken lines use the voices built into Windows, offline.
 
 ## Development

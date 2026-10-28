@@ -8,3 +8,4 @@ src-tauri/gen/schemas/
 gan-harness/screenshots/
 test-results/
 playwright-report/
+.claude/

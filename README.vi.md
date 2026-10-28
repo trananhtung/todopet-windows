@@ -51,7 +51,7 @@ Token được lưu trong **Windows Credential Manager** (tên `TodoPet`) và ch
 
 ### Lịch (tuỳ chọn)
 
-**Cài đặt → Lịch**, dán mỗi dòng một link ICS:
+**Cài đặt → Lịch**, dán mỗi dòng một link ICS rồi bấm **Lưu**. Link được cất trong Windows Credential Manager và không hiện lại (chỉ hiện tên miền):
 
 - **Google Calendar:** Cài đặt → lịch của bạn → *Tích hợp lịch* → **Địa chỉ bí mật ở định dạng iCal**.
 - **Outlook / Microsoft 365:** Cài đặt → Lịch → Lịch được chia sẻ → **Xuất bản lịch** → link ICS.
@@ -79,9 +79,10 @@ Pet giữ điểm vui 0–100, tính lại mỗi 15 giây (y hệt bản macOS).
 ## Quyền riêng tư
 
 - Không thu thập dữ liệu, không có máy chủ riêng. Chỉ kết nối tới `api.todoist.com`, link lịch của bạn, và `api.anthropic.com` khi bạn bấm **Hỏi Claude**.
-- Chỉ đọc **tên ứng dụng đang mở** và **địa chỉ tab trình duyệt**; địa chỉ chỉ nằm trong bộ nhớ, không lưu, không gửi đi.
-- Phát hiện gõ phím chỉ ghi **thời điểm phím cuối cùng được bấm** — không bao giờ biết bạn bấm phím gì.
-- Cài đặt, trạng thái pet và nhật ký nằm trong `%APPDATA%\com.trananhtung.todopet`. Nhật ký giữ 14 ngày và có thể tắt.
+- Chỉ đọc **tên ứng dụng đang mở**, và với trình duyệt thì thêm **địa chỉ tab** cùng tiêu đề trang (không đọc tiêu đề cửa sổ của ứng dụng khác); tất cả chỉ nằm trong bộ nhớ, không lưu, không gửi đi.
+- Phát hiện gõ phím dùng Raw Input của Windows, chỉ ghi **thời điểm phím cuối cùng được nhấn xuống**; không bao giờ biết phím nào và không dùng keyboard hook.
+- Link ICS là địa chỉ bí mật nên được lưu trong Windows Credential Manager như token, và chỉ tải từ địa chỉ Internet công khai.
+- Cài đặt và trạng thái pet nằm trong `%APPDATA%\com.trananhtung.todopet`; nhật ký chỉ ở máy này, trong `%LOCALAPPDATA%\com.trananhtung.todopet` (giữ 14 ngày, có thể tắt).
 
 ## Phát triển
 
