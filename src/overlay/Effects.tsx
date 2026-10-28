@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type { CelebrationEvent } from "../core/brain";
 
 interface Burst {
@@ -12,10 +12,22 @@ interface Burst {
 
 const COLORS = ["#ff8a5b", "#ffd166", "#06d6a0", "#4cc9f0", "#f72585", "#b388eb", "#ffb4a2"];
 const GOLD = ["#ffd700", "#ffe680", "#ffb800", "#fff3b0"];
+/** A burst is removed once its longest animation (1.6 s pop text, 0.24 s delay) has finished. */
+const BURST_MS = 1900;
 
 /** Confetti for every finished task; fireworks for combos and golden treats. */
 export function Effects({ celebration, anchor }: { celebration: CelebrationEvent | null; anchor: RefObject<{ x: number; top: number }> }) {
   const [bursts, setBursts] = useState<Burst[]>([]);
+  // Each burst owns its removal timer, so a new celebration never cancels an older burst's cleanup.
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      for (const id of pending) clearTimeout(id);
+      pending.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!celebration) return;
@@ -38,9 +50,12 @@ export function Effects({ celebration, anchor }: { celebration: CelebrationEvent
     });
     const text = celebration.golden ? "✨ GOLDEN ✨" : celebration.combo >= 2 ? `×${celebration.combo} COMBO` : null;
     const burst: Burst = { id: celebration.id, x: a.x, y: a.top + 20, particles, text, gold: celebration.golden };
-    setBursts((b) => [...b, burst]);
-    const id = setTimeout(() => setBursts((b) => b.filter((x) => x.id !== burst.id)), 1900);
-    return () => clearTimeout(id);
+    setBursts((b) => (b.some((x) => x.id === burst.id) ? b : [...b, burst]));
+    const id = setTimeout(() => {
+      timers.current.delete(id);
+      setBursts((b) => b.filter((x) => x.id !== burst.id));
+    }, BURST_MS);
+    timers.current.add(id);
   }, [celebration, anchor]);
 
   return (
