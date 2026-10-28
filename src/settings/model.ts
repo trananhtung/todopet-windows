@@ -111,14 +111,16 @@ export function changedEvents(prev: Prefs, next: Prefs): BusEvent[] {
 }
 
 /** A sentence for a failed secrets call, in the user's language. */
-export function secretErrorText(e: unknown, which: "todoist" | "anthropic"): string {
+export function secretErrorText(e: unknown, which: "todoist" | "anthropic" | "calendar"): string {
   if (e instanceof BackendError) {
     switch (e.kind) {
       case "unauthorized": {
         const text =
           which === "todoist"
             ? L("Todoist không nhận token này. Hãy sao chép lại token API.", "Todoist didn't accept this token. Copy the API token again.")
-            : L("Anthropic không nhận khoá này.", "Anthropic didn't accept this key.");
+            : which === "calendar"
+              ? L("Lịch không cho đọc link này.", "The calendar refused this link.")
+              : L("Anthropic không nhận khoá này.", "Anthropic didn't accept this key.");
         return e.message ? `${text} (${e.message})` : text;
       }
       case "network":

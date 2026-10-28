@@ -173,16 +173,18 @@ export function moodBase(b: Base, m: Mood): Base {
         cheekA: 0.2,
       };
     case "angry":
+      // A hot flush, not a new coat: the species must stay recognizable when grumpy (a panda stays black and white).
       return {
         ...b,
-        top: mix(b.top, C.redTop, 0.4),
-        bottom: mix(b.bottom, C.red, 0.5),
-        belly: mix(b.belly, C.redBelly, 0.4),
-        mark: mix(b.mark, C.redMark, 0.3),
-        accent: mix(b.accent, C.red, 0.15),
+        top: mix(b.top, C.redTop, 0.1),
+        bottom: mix(b.bottom, C.red, 0.2),
+        belly: mix(b.belly, C.redBelly, 0.1),
+        mark: mix(b.mark, C.redMark, 0.08),
+        accent: mix(b.accent, C.red, 0.1),
         inner: mix(b.inner, C.red, 0.25),
-        line: mix(b.line, C.redLine, 0.55),
-        cheekA: 0,
+        line: mix(b.line, C.redLine, 0.45),
+        cheek: C.red,
+        cheekA: 0.5,
       };
     case "sleeping":
       return {

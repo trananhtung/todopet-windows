@@ -13,6 +13,7 @@ import type {
   Unsubscribe,
 } from "./types";
 import { getLang } from "../core/l10n";
+import { demoLife } from "../core/life";
 import { BackendError } from "./types";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -62,6 +63,7 @@ export function sampleTasks(now: Date): RawTask[] {
   return [
     { id: "1", content: vi ? "Viết báo cáo tuần" : "Write the weekly report", priority: 4, due: { date: today, string: "today" } },
     { id: "2", content: vi ? "Gọi cho khách hàng ABC" : "Call client ABC", priority: 3, due: { date: localStamp(soon), string: "today", datetime: null } },
+    { id: "4", content: vi ? "Lên kế hoạch sprint tới" : "Plan the next sprint", priority: 2, due: { date: today, string: "today" } },
     {
       id: "3",
       content: vi ? "Trả lời email của sếp" : "Reply to the boss's email",
@@ -70,6 +72,13 @@ export function sampleTasks(now: Date): RawTask[] {
       due: { date: threeDaysAgo, string: "Monday" },
     },
   ];
+}
+
+/** One task already done today, so the demo opens on a good day (planned, a little progress) rather than a grumpy one. */
+export function sampleDone(now: Date): RawTask[] {
+  const vi = getLang() === "vi";
+  const done = new Date(now.getTime() - 50 * 60_000);
+  return [{ id: "5", content: vi ? "Duyệt bản thiết kế" : "Review the design mockups", priority: 2, checked: true, completed_at: done.toISOString(), due: { date: localDay(now), string: "today" } }];
 }
 
 export function demoIcs(now: Date): string {
@@ -112,7 +121,8 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
   // Created on the first sync, once the Brain has picked the app language.
   let active: RawTask[] | null = null;
   const tasksNow = () => (active ??= sampleTasks(new Date(now())));
-  let done: RawTask[] = [];
+  let doneList: RawTask[] | null = null;
+  const doneNow = () => (doneList ??= sampleDone(new Date(now())));
   let counter = 100;
   let autostart = false;
   // The demo starts connected; Settings can disconnect and reconnect to try those flows.
@@ -166,10 +176,10 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
       },
       async completed() {
         await pause();
-        return structuredClone(done);
+        return structuredClone(doneNow());
       },
       async stats(): Promise<RawStats> {
-        return { completed_count: 42 + done.length, goals: { daily_goal: 3, current_daily_streak: { count: 4 }, max_daily_streak: { count: 9 } }, karma: 1234 };
+        return { completed_count: 42 + doneNow().length, goals: { daily_goal: 3, current_daily_streak: { count: 4 }, max_daily_streak: { count: 9 } }, karma: 1234 };
       },
       async add({ content, dueString, priority, parentId }) {
         await pause();
@@ -189,13 +199,14 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
         const i = find(id);
         if (i < 0) return;
         const [t] = tasksNow().splice(i, 1);
-        done.push({ ...t, checked: true, completed_at: new Date(now()).toISOString() });
+        doneNow().push({ ...t, checked: true, completed_at: new Date(now()).toISOString() });
       },
       async reopen(id) {
         await pause();
-        const i = done.findIndex((t) => t.id === id);
+        const list = doneNow();
+        const i = list.findIndex((t) => t.id === id);
         if (i < 0) return;
-        const [t] = done.splice(i, 1);
+        const [t] = list.splice(i, 1);
         tasksNow().push({ ...t, checked: false, completed_at: null });
       },
       async reschedule(id, dueString) {
@@ -289,10 +300,11 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
     },
     storage: {
       async load<T>(key: string): Promise<T | null> {
-        if (!persist) return (memoryStore.get(key) as T) ?? null;
+        const seeded = key === "life" ? (demoLife() as T) : null;
+        if (!persist) return (memoryStore.get(key) as T) ?? seeded;
         try {
           const raw = localStorage.getItem(`todopet:${key}`);
-          return raw ? (JSON.parse(raw) as T) : null;
+          return raw ? (JSON.parse(raw) as T) : seeded;
         } catch {
           return null;
         }

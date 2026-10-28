@@ -8,6 +8,8 @@ import { setLang } from "./l10n";
 const MIN = 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
+/** How often `id` appears: a task must be listed exactly once. */
+const times = (xs: { id: string }[], id: string) => xs.filter((x) => x.id === id).length;
 const workSample = (t: number, patch: object = {}) => ({
   app: { name: "Code", exe: "code.exe", title: "x" },
   url: null,
@@ -36,7 +38,7 @@ describe("Brain races", () => {
     await Promise.all([sync, brain.complete(task)]);
     const s = brain.getSnapshot();
     expect(ids(s.day.today)).not.toContain(task.id);
-    expect(ids(s.day.completed)).toEqual([task.id]);
+    expect(times(s.day.completed, task.id)).toBe(1);
     brain.stop();
   });
 
@@ -55,7 +57,7 @@ describe("Brain races", () => {
     expect(ids(brain.getSnapshot().day.today)).not.toContain(task.id);
     expect(ids(brain.getSnapshot().day.completed)).toContain(task.id);
     await done;
-    expect(ids(brain.getSnapshot().day.completed)).toEqual([task.id]);
+    expect(times(brain.getSnapshot().day.completed, task.id)).toBe(1);
     expect(brain.getSnapshot().life.totalDone).toBe(fedBefore + 1);
     brain.stop();
   });
@@ -76,7 +78,7 @@ describe("Brain races", () => {
     const before = brain.getSnapshot().life.totalDone;
     await Promise.all([brain.complete(task), brain.complete(task)]);
     expect(brain.getSnapshot().life.totalDone - before).toBe(1);
-    expect(ids(brain.getSnapshot().day.completed)).toEqual([task.id]);
+    expect(times(brain.getSnapshot().day.completed, task.id)).toBe(1);
     await brain.undoComplete(task);
     await brain.undoComplete(task);
     expect(brain.getSnapshot().life.totalDone).toBe(before);

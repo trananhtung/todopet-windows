@@ -36,7 +36,8 @@ describe("Brain with the demo backend", () => {
   it("loads today's tasks and the demo calendar", () => {
     const s = brain.getSnapshot();
     expect(s.hasToken).toBe(true);
-    expect(s.day.today).toHaveLength(2);
+    expect(s.day.today).toHaveLength(3);
+    expect(s.day.completed.map((t) => t.id)).toEqual(["5"]);
     expect(s.day.overdue).toHaveLength(1);
     expect(s.next?.id).toBe("1");
     expect(s.events.map((e) => e.title)).toEqual(["Team sync", "Client meeting"]);
@@ -51,10 +52,10 @@ describe("Brain with the demo backend", () => {
     brain.runRules(t);
     const b = brain.getSnapshot().bubble;
     expect(b?.text).toContain("Good morning");
-    // Overdue tasks don't count as planned: 2/3, so it asks for one more, then sums up the calendar.
-    expect(b?.text).toContain("Only 2/3 planned");
+    // The demo day is planned (3 today + 1 done), so it points at the frog, then sums up the calendar.
+    expect(b?.text).toContain("Eat the frog first");
     expect(b?.text).toContain("2 meetings today");
-    expect(b?.actions[0].title).toBe("＋ Add tasks");
+    expect(b?.actions[0].title).toBe("▶ Focus 25'");
     expect(b?.reminder).toBe(true);
   });
 
@@ -66,10 +67,10 @@ describe("Brain with the demo backend", () => {
     expect(s.mood).toBe("celebrating");
     expect(s.life.totalDone).toBe(32);
     expect(s.bubble?.actions.map((a) => a.title)).toEqual(["Undo"]);
-    expect(s.day.completed.map((x) => x.id)).toEqual(["1"]);
+    expect(s.day.completed.map((x) => x.id)).toEqual(["1", "5"]);
     await brain.undoComplete(task);
     expect(brain.getSnapshot().life.totalDone).toBe(31);
-    expect(brain.getSnapshot().day.completed).toHaveLength(0);
+    expect(brain.getSnapshot().day.completed.map((x) => x.id)).toEqual(["5"]);
   });
 
   it("calls out a distracting site after two minutes", () => {

@@ -197,7 +197,7 @@ function Stats({ s }: { s: BrainState }) {
         icon="bowl"
         tone={satiety < 30 ? "bad" : "accent"}
         value={`${satiety}%`}
-        label={L("no", "full")}
+        label={L("no bụng", "full")}
         title={L(`No ${satiety}% · mỗi việc xong +25%`, `${satiety}% full · each finished task +25%`)}
         meter={satiety / 100}
       />
@@ -307,11 +307,13 @@ function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; bac
   const stuckIds = new Map(s.stuck.map((x) => [x.task.id, x.days]));
   const done = day.completed.length;
   const toPlan = s.target - planned(day);
+  // One confirmation line under the add form, for adds and for moves.
+  const [note, setNote] = useState<Note | null>(null);
   return (
     <>
       {s.focus && <FocusCard brain={brain} s={s} />}
 
-      <AddTask brain={brain} focusAdd={focusAdd} seq={seq} />
+      <AddTask brain={brain} focusAdd={focusAdd} seq={seq} note={note} setNote={setNote} />
 
       {day.overdue.length > 0 && (
         <section className="section" aria-labelledby="sec-overdue">
@@ -326,7 +328,7 @@ function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; bac
           </div>
           <ul className="tasks">
             {day.overdue.map((t) => (
-              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} onSplit={onSplit} />
+              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} onSplit={onSplit} onNote={setNote} />
             ))}
           </ul>
         </section>
@@ -345,7 +347,7 @@ function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; bac
         ) : (
           <ul className="tasks">
             {day.today.map((t) => (
-              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} onSplit={onSplit} />
+              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} onSplit={onSplit} onNote={setNote} />
             ))}
           </ul>
         )}
@@ -363,7 +365,7 @@ function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; bac
               const title = taskTitle(t);
               return (
                 <li key={t.id} className="task done">
-                  <button className="check" aria-label={L(`Hoàn tác: ${title}`, `Undo: ${title}`)} title={L("Hoàn tác", "Undo")} onClick={() => void brain.undoComplete(t)}>
+                  <button className="check" aria-label={L(`Hoàn tác: ${title}`, `Undo: ${title}`)} title={L("Hoàn tác", "Undo")} onClick={(e) => e.detail < 2 && void brain.undoComplete(t)}>
                     <Icon name="check" size={12} />
                   </button>
                   <div className="t-body">
@@ -383,7 +385,21 @@ function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; bac
   );
 }
 
-function TaskRow({ t, brain, s, stuckDays, onSplit }: { t: TodoTask; brain: Brain; s: BrainState; stuckDays?: number; onSplit: (t: TodoTask) => void }) {
+function TaskRow({
+  t,
+  brain,
+  s,
+  stuckDays,
+  onSplit,
+  onNote,
+}: {
+  t: TodoTask;
+  brain: Brain;
+  s: BrainState;
+  stuckDays?: number;
+  onSplit: (t: TodoTask) => void;
+  onNote: (n: Note) => void;
+}) {
   const [pop, setPop] = useState<"move" | "delete" | null>(null);
   const moveRef = useRef<HTMLButtonElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
@@ -437,7 +453,7 @@ function TaskRow({ t, brain, s, stuckDays, onSplit }: { t: TodoTask; brain: Brai
   };
   return (
     <li className={`task${pop ? " active" : ""}`} style={{ ["--prio" as string]: PRIO_LINE[prio] }}>
-      <button className="check" aria-label={L(`Xong: ${title}`, `Complete: ${title}`)} title={L("Xong", "Complete")} onClick={() => void brain.complete(t)}>
+      <button className="check" aria-label={L(`Xong: ${title}`, `Complete: ${title}`)} title={L("Xong", "Complete")} onClick={(e) => e.detail < 2 && void brain.complete(t)}>
         <Icon name="check" size={12} />
       </button>
       <div className="t-body">
@@ -467,8 +483,15 @@ function TaskRow({ t, brain, s, stuckDays, onSplit }: { t: TodoTask; brain: Brai
               role="menuitem"
               onClick={() => {
                 setPop(null);
-                if (due === "no date") void brain.unplan(t);
-                else void brain.reschedule(t, due);
+                const name = short(title, 40);
+                const where = due === "today" ? L("hôm nay", "today") : due === "tomorrow" ? L("ngày mai", "tomorrow") : L("ngoài kế hoạch", "off the plan");
+                void (due === "no date" ? brain.unplan(t) : brain.reschedule(t, due)).then((ok) =>
+                  onNote(
+                    ok
+                      ? { n: Date.now(), text: L(`Đã dời “${name}” sang ${where} ✓`, `Moved “${name}” to ${where} ✓`), error: false }
+                      : { n: Date.now(), text: brain.getSnapshot().errorText ?? L("Chưa dời được, thử lại nhé.", "Couldn't move it, try again."), error: true },
+                  ),
+                );
               }}
             >
               <Icon name={due === "no date" ? "inbox" : "calendar"} size={15} />
@@ -516,12 +539,29 @@ function addedNote(due: DueChoice, title: string): string {
   }
 }
 
-function AddTask({ brain, focusAdd, seq }: { brain: Brain; focusAdd: boolean; seq: number }) {
+interface Note {
+  n: number;
+  text: string;
+  error: boolean;
+}
+
+function AddTask({
+  brain,
+  focusAdd,
+  seq,
+  note,
+  setNote,
+}: {
+  brain: Brain;
+  focusAdd: boolean;
+  seq: number;
+  note: Note | null;
+  setNote: (n: Note | null) => void;
+}) {
   const [text, setText] = useState("");
   const [due, setDue] = useState<DueChoice>("today");
   const [prio, setPrio] = useState(4);
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ n: number; text: string; error: boolean } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (focusAdd) input.current?.focus();
@@ -534,14 +574,16 @@ function AddTask({ brain, focusAdd, seq }: { brain: Brain; focusAdd: boolean; se
   const submit = async () => {
     const content = text.trim();
     if (!content) return;
+    // Clear right away, so whatever is typed next while this add is in flight is kept.
+    setText("");
     setBusy(true);
     const ok = await brain.add(content, due, 5 - prio);
     setBusy(false);
     if (!ok) {
+      setText((now) => (now.trim() ? now : content));
       setNote({ n: Date.now(), text: brain.getSnapshot().errorText ?? L("Chưa thêm được, thử lại nhé.", "Couldn't add it, try again."), error: true });
       return;
     }
-    setText("");
     setNote({ n: Date.now(), text: addedNote(due, content), error: false });
     // Due and priority are per task: back to the defaults so the next task isn't silently P1 or tomorrow.
     setDue("today");
@@ -653,10 +695,12 @@ function CalendarCard({ brain, backend, s }: { brain: Brain; backend: Backend; s
   const current = currentEvent(s.events, now);
   const upcoming = current ?? s.events.find((e) => e.start > now) ?? null;
   const soon = upcoming && upcoming.joinUrl && (upcoming === current || upcoming.start.getTime() - now.getTime() < 15 * 60_000) ? upcoming : null;
-  const parts = [plural(s.events.length, "cuộc họp", "meeting", "meetings"), L(`trống ${hoursText(free)}`, `${hoursText(free)} free`)];
+  // Most useful first: the summary is one line and its tail gets cut on narrow boards.
+  const parts = [plural(s.events.length, "cuộc họp", "meeting", "meetings")];
   if (upcoming) parts.push(upcoming === current ? L(`đang họp: ${upcoming.title}`, `now: ${upcoming.title}`) : `${timeString(upcoming.start)} ${upcoming.title}`);
   if (s.suggestions.length > 0) parts.push(plural(s.suggestions.length, "gợi ý giờ làm", "time block", "time blocks"));
   if (s.target < s.prefs.dailyTarget) parts.push(L(`mục tiêu ${s.target} việc`, `target ${s.target}`));
+  parts.push(L(`trống ${hoursText(free)}`, `${hoursText(free)} free`));
   const join = (url: string) => void backend.system.openUrl(url);
   return (
     <section ref={ref} className={`cal${open ? " open" : ""}`} aria-label={L("Lịch hôm nay", "Today's calendar")}>

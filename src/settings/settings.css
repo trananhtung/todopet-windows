@@ -233,7 +233,7 @@
 }
 .seg.on span {
   background: var(--accent-soft);
-  color: var(--accent-strong);
+  color: var(--accent-text);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .seg:has(input:focus-visible) span {
@@ -261,7 +261,7 @@
 }
 .status-pill.good {
   background: var(--good-soft);
-  color: var(--good);
+  color: var(--good-text);
 }
 .status-pill.good .dot {
   background: var(--good);
@@ -543,11 +543,11 @@
 }
 .focus-block.work {
   background: var(--accent-soft);
-  color: var(--accent-strong);
+  color: var(--accent-text);
 }
 .focus-block.rest {
   background: var(--good-soft);
-  color: var(--good);
+  color: var(--good-text);
 }
 
 /* Lists, calendar help, privacy */

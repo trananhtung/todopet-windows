@@ -116,6 +116,12 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     boardOpen.current = board !== null;
   }, [board]);
 
+  // A stunt needs the stage (and its bubble with "Spare me"): the board makes way.
+  const stunt = s.antic?.kind.type === "block" || s.antic?.kind.type === "parade";
+  useEffect(() => {
+    if (stunt) closeBoard();
+  }, [stunt, closeBoard]);
+
   // Sounds, speech and view requests from the brain.
   useEffect(() => {
     brain.effects = {
@@ -317,8 +323,9 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       }
       const flip = flipRef.current;
       if (flip) {
+        // The speech bubble sits above the pet, so the shout goes under its feet: both stay readable.
         flip.style.left = `${m.x}px`;
-        flip.style.top = `${visualTop - 54}px`;
+        flip.style.top = `${Math.min(m.y + 24, H - 48)}px`;
       }
     };
     raf = requestAnimationFrame(frame);

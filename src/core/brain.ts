@@ -872,6 +872,7 @@ export class Brain {
     const cur = this.state.bubble;
     const actions = b.actions ?? [];
     if (cur && cur.actions.length > 0 && !b.urgent && actions.length === 0) return;
+    if (cur && cur.urgent && !b.urgent) return;
     const bubble: Bubble = { id: ++this.bubbleSeq, text: b.text, actions, seconds: b.seconds, urgent: b.urgent ?? false, reminder: opts.why !== undefined };
     this.lastBubbleAt = this.now();
     this.set({ bubble });
@@ -1193,7 +1194,9 @@ export class Brain {
           text: lines.distraction(s.mood, d.app, open.length, next),
           actions: [
             this.focusAction(next),
-            { title: L("Nghỉ xíu thôi (10')", "Just a quick break (10')"), run: () => (this.distractionSnoozedUntil = this.now() + 10 * MIN) },
+            s.antic
+              ? this.spareAction()
+              : { title: L("Nghỉ xíu thôi (10')", "Just a quick break (10')"), run: () => (this.distractionSnoozedUntil = this.now() + 10 * MIN) },
           ],
           seconds: 30,
         },
@@ -1567,14 +1570,18 @@ export class Brain {
     return true;
   }
 
-  async reschedule(task: TodoTask, dueString: string): Promise<void> {
+  /** Returns whether Todoist accepted the new date. */
+  async reschedule(task: TodoTask, dueString: string): Promise<boolean> {
     this.lastPlanAction = this.now();
+    let ok = true;
     try {
       await this.backend.todoist.reschedule(task.id, dueString);
     } catch (e) {
+      ok = false;
       this.say({ text: lines.error(this.fail(e)), seconds: 10, urgent: true });
     }
     await this.refresh();
+    return ok;
   }
 
   async pullOverdueToToday(): Promise<void> {
@@ -1621,17 +1628,18 @@ export class Brain {
     await this.refresh();
   }
 
-  /** Takes a task off today's plan without deleting it (it stays in Todoist with no date). */
-  async unplan(task: TodoTask): Promise<void> {
+  /** Takes a task off today's plan without deleting it (it stays in Todoist with no date). Returns success. */
+  async unplan(task: TodoTask): Promise<boolean> {
     this.lastPlanAction = this.now();
     try {
       await this.backend.todoist.reschedule(task.id, "no date");
     } catch (e) {
       this.say({ text: lines.error(this.fail(e)), seconds: 10, urgent: true });
-      return;
+      return false;
     }
     await this.refresh();
     this.say({ text: lines.unplanned(task), seconds: 6, urgent: true });
+    return true;
   }
 
   async suggestSteps(task: TodoTask): Promise<string[]> {
@@ -1800,6 +1808,9 @@ export class Brain {
    */
   demoDistract(label: string): void {
     this.distractionSince = { label, since: this.now() - 3 * MIN };
+    // Clear a leftover greeting so "Run rules" shows the reminder right away.
+    const b = this.state.bubble;
+    if (b && !b.urgent) this.dismissBubble(b.id, "closed");
     this.recompute();
   }
 

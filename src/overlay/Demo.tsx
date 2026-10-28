@@ -17,10 +17,10 @@ export function DemoDesktop() {
   return (
     <div className="demo-desktop" aria-hidden>
       <div className="demo-window">
-        <p>Q4 planning notes</p>
-        <p>— Ship the weekly report before lunch.</p>
-        <p>— Call client ABC about the renewal.</p>
-        <p>— Reply to the budget email (it's been waiting a while…).</p>
+        <p>{L("Ghi chú kế hoạch quý 4", "Q4 planning notes")}</p>
+        <p>{L("— Gửi báo cáo tuần trước bữa trưa.", "— Ship the weekly report before lunch.")}</p>
+        <p>{L("— Gọi khách hàng ABC về việc gia hạn.", "— Call client ABC about the renewal.")}</p>
+        <p>{L("— Trả lời email ngân sách (để lâu lắm rồi…).", "— Reply to the budget email (it's been waiting a while…).")}</p>
       </div>
       <div className="demo-taskbar">
         <span>🪟</span>

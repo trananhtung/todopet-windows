@@ -30,7 +30,7 @@ function CalendarLinks() {
         text: next.length > 0 ? L(`Đã lưu ${next.length} link lịch.`, next.length === 1 ? "Saved 1 calendar link." : `Saved ${next.length} calendar links.`) : L("Đã xoá các link lịch khỏi máy.", "Calendar links removed from this PC."),
       });
     } catch (err) {
-      setResult({ kind: "error", text: secretErrorText(err, "anthropic") });
+      setResult({ kind: "error", text: secretErrorText(err, "calendar") });
     } finally {
       setBusy(false);
     }
