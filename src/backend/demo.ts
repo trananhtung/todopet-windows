@@ -63,8 +63,10 @@ const storageAvailable = (() => {
 
 export function sampleTasks(now: Date): RawTask[] {
   const today = localDay(now);
+  // The next hour on the hour, but always today (from 23:00, just before midnight).
   const soon = new Date(now);
-  soon.setHours(now.getHours() + 1, 0, 0, 0);
+  if (now.getHours() < 23) soon.setHours(now.getHours() + 1, 0, 0, 0);
+  else soon.setHours(23, 59, 0, 0);
   const threeDaysAgo = localDay(new Date(now.getTime() - 3 * 86_400_000));
   // In the app's language (set by the Brain before the first sync), not the browser's.
   const vi = getLang() === "vi";
@@ -85,7 +87,10 @@ export function sampleTasks(now: Date): RawTask[] {
 /** One task already done today, so the demo opens on a good day (planned, a little progress) rather than a grumpy one. */
 export function sampleDone(now: Date): RawTask[] {
   const vi = getLang() === "vi";
-  const done = new Date(now.getTime() - 50 * 60_000);
+  // 50 minutes ago, but today (at midnight in the first 50 minutes of the day).
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const done = new Date(Math.max(now.getTime() - 50 * 60_000, midnight.getTime()));
   return [{ id: "5", content: vi ? "Duyệt bản thiết kế" : "Review the design mockups", priority: 2, checked: true, completed_at: done.toISOString(), due: { date: localDay(now), string: "today" } }];
 }
 

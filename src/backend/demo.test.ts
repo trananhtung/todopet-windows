@@ -1,6 +1,6 @@
 // The browser demo's own clock and task list (v0.4 evaluation, issue 11): the next morning, and a Friday.
 import { describe, expect, it } from "vitest";
-import { createDemoBackend } from "./demo";
+import { createDemoBackend, sampleDone, sampleTasks } from "./demo";
 
 const at = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m).getTime();
 
@@ -53,5 +53,25 @@ describe("demo backend: tasks moved to a later day", () => {
     const monday = (await b.todoist.tasks("today | overdue")).map((t) => t.id);
     expect(monday).toContain("1");
     expect(monday).not.toContain("4");
+  });
+});
+
+describe("demo backend: the sample day", () => {
+  const local = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  it("keeps today's tasks on today late in the evening and just after midnight", () => {
+    for (const [h, m] of [
+      [9, 0],
+      [22, 40],
+      [23, 8],
+      [23, 59],
+      [0, 20],
+    ]) {
+      const now = new Date(2026, 9, 29, h, m);
+      const call = sampleTasks(now).find((t) => t.id === "2")!;
+      expect(call.due!.date.slice(0, 10), `${h}:${m}`).toBe("2026-10-29");
+      const done = sampleDone(now)[0];
+      expect(local(new Date(done.completed_at!)), `${h}:${m}`).toBe("2026-10-29");
+    }
   });
 });
