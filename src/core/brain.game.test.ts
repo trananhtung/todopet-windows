@@ -1,6 +1,6 @@
 // v0.5 "Game" in the brain: chests for active work, knitting during focus, trips, and the Monday fresh start.
 import { describe, expect, it, vi } from "vitest";
-import { createDemoBackend } from "../backend/demo";
+import { createDemoBackend, type DemoBackend } from "../backend/demo";
 import type { SystemSample } from "../backend/types";
 import { Brain, type Bubble } from "./brain";
 import { dayKey } from "./dates";
@@ -14,6 +14,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const at = (month: number, day: number, h: number, m = 0) => new Date(2026, month - 1, day, h, m).getTime();
 const YOUTUBE = { app: { name: "Google Chrome", exe: "chrome.exe", title: "Cats - YouTube" }, url: "https://www.youtube.com/watch?v=1" };
 
+/** The trip offer: a check-in, so it has no kind (only counted reminders do); it's known by its words. */
+const isTripOffer = (b: Bubble) => b.text.includes("Can I go on a little trip?");
+
 /** Random numbers from `values`, then 0.5. */
 const seq = (values: number[]) => () => values.shift() ?? 0.5;
 
@@ -21,9 +24,10 @@ const seq = (values: number[]) => () => values.shift() ?? 0.5;
  * The demo, by default on Wednesday 28 October 2026 at 9:00, with `life` (for today unless it says otherwise) and
  * `prefs` saved first.
  */
-async function rig(opts: { start?: number; life?: Partial<LifeState>; prefs?: Partial<Prefs>; random?: () => number } = {}) {
+async function rig(opts: { start?: number; life?: Partial<LifeState>; prefs?: Partial<Prefs>; random?: () => number; setup?: (b: DemoBackend) => void } = {}) {
   const clock = { t: opts.start ?? at(10, 28, 9) };
   const backend = createDemoBackend({ now: () => clock.t, persist: false });
+  opts.setup?.(backend);
   if (opts.life) await backend.storage.save("life", { ...demoLife(), dayKey: dayKey(new Date(clock.t)), ...opts.life });
   if (opts.prefs) await backend.storage.save("prefs", { ...defaultPrefs(clock.t), ...opts.prefs });
   let front: Partial<SystemSample> = {};
@@ -334,9 +338,10 @@ describe("Brain and trips", () => {
     await brain.refresh(); // let the syncs started by each completion land
     brain.dismissBubble(s().bubble!.id, "ignored");
     const left = s().nudgesLeft;
-    const offer = until((b) => b.kind === "trip");
+    const offer = until(isTripOffer);
     expect(offer.text).toMatch(/Back at \d\d:\d\d/);
     expect(offer.reminder).toBe(true);
+    expect(offer.kind).toBeUndefined();
     expect(offer.actions.map((a) => a.title)).toEqual(["Go!", "Stay"]);
     expect(s().nudgesLeft).toBe(left);
     brain.pickAction(offer.id, 0);
@@ -412,11 +417,11 @@ describe("Brain and trips", () => {
     for (const id of ["1", "2", "4"]) await brain.complete(s().day.today.find((t) => t.id === id)!);
     await brain.refresh();
     brain.dismissBubble(s().bubble!.id, "ignored");
-    brain.pickAction(until((b) => b.kind === "trip").id, 0);
+    brain.pickAction(until(isTripOffer).id, 0);
     clock.t += 5 * MIN;
     brain.callBack();
     brain.dismissBubble(s().bubble!.id, "ignored");
-    const again = until((b) => b.kind === "trip");
+    const again = until(isTripOffer);
     brain.pickAction(again.id, 1);
     expect(s().life.tripDeclined).toBe("2026-10-28");
     brain.stop();
@@ -429,7 +434,7 @@ describe("Brain and trips", () => {
       next.recompute();
       next.runRules(clock.t);
       const b = next.getSnapshot().bubble;
-      expect(b?.kind).not.toBe("trip");
+      expect(b !== null && isTripOffer(b)).toBe(false);
       if (b) next.dismissBubble(b.id, "ignored");
     }
     next.stop();
@@ -447,27 +452,89 @@ describe("Brain and trips", () => {
   });
 });
 
-describe("Brain and bubble buttons", () => {
-  it("resets the dismissal run only for counted reminders, not for a check-in like the trip offer", async () => {
-    const { s, brain } = await rig();
-    const inner = brain as unknown as { dismissedInRow: number; say: Brain["say"] };
-    inner.dismissedInRow = 2;
-    brain.say({ text: "Off on a trip?", actions: [{ title: "Go!", run: () => undefined }], seconds: 60 }, { why: "test", kind: "trip" });
-    brain.pickAction(s().bubble!.id, 0);
-    expect(inner.dismissedInRow).toBe(2);
-    brain.say({ text: "Next task?", actions: [{ title: "Later", run: () => undefined }], seconds: 60 }, { why: "test", kind: "nudge" });
-    brain.pickAction(s().bubble!.id, 0);
-    expect(inner.dismissedInRow).toBe(0);
+describe("Brain and the trip offer as a check-in", () => {
+  // Merged with v0.4: one mechanism for the budget. Only counted reminders have a kind; check-ins (the morning
+  // greeting, the resume card, the overbooked warning, the trip offer) have none. The trip offer used to carry a
+  // "trip" kind that the budget skipped; now it is a plain check-in, so answering it starts the dismissal run over
+  // like answering any other check-in (v0.4's rule), and closing it is still a "Stay", never a refusal.
+  it("is never counted, and closing it is a Stay, not a refusal", async () => {
+    const { s, until, brain } = await rig({ prefs: { bubbleGap: 0 } });
+    for (const id of ["1", "2", "4"]) await brain.complete(s().day.today.find((t) => t.id === id)!);
+    await brain.refresh();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    const left = s().nudgesLeft;
+    const offer = until(isTripOffer);
+    expect(offer.kind).toBeUndefined();
+    expect(s().nudgesLeft).toBe(left);
+    const run = s().life.dismissedInRow;
+    const backoff = s().life.dayBackoff;
+    brain.dismissBubble(offer.id, "closed");
+    expect(s().life).toMatchObject({ tripDeclined: "2026-10-28", dismissedInRow: run, dayBackoff: backoff });
+    brain.stop();
+  });
+});
+
+describe("Brain and Done for today (v0.4)", () => {
+  /** "Done for today" in the Wrap up sheet, moving nothing: the pet sleeps until the next workday starts. */
+  const doneForToday = async (brain: Brain) => {
+    expect(await brain.wrapUp({ moves: {}, frogId: null, note: "" })).toMatchObject({ ok: true });
+    expect(brain.getSnapshot().doneUntil).not.toBeNull();
+    brain.dismissBubble(brain.getSnapshot().bubble!.id, "ignored");
+  };
+
+  it("holds the trip offer while done for today; it comes once you're back at it", async () => {
+    const { s, step, until, brain } = await rig({ prefs: { bubbleGap: 0 } });
+    for (const id of ["1", "2", "4"]) await brain.complete(s().day.today.find((t) => t.id === id)!);
+    await brain.refresh();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    await doneForToday(brain);
+    for (let i = 0; i < 30; i++) {
+      const b = step();
+      if (!b) continue;
+      // Only urgent bubbles (meetings, timed tasks) get through.
+      expect(b.urgent, b.text).toBe(true);
+      brain.dismissBubble(b.id, "ignored");
+    }
+    expect(s().life.tripDay).toBe("");
+    brain.resumeDay();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    expect(until(isTripOffer).reminder).toBe(true);
+    brain.stop();
+  });
+
+  it("keeps earning chests silently while done for today, and says so on waking", async () => {
+    const { s, tick, brain } = await rig({ life: { chests: 0, chestsToday: 0, chestDay: "2026-10-28", workSec: 1790 } });
+    await doneForToday(brain);
+    tick();
+    expect(s().life.chests).toBe(1);
+    expect(s().chests.held).toBe(1);
+    for (let i = 0; i < 10; i++) {
+      tick();
+      expect(s().bubble).toBeNull();
+    }
+    brain.resumeDay();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    tick();
+    expect(s().bubble?.text).toBe("🎁 I found a chest! Finish your next task to open it");
     brain.stop();
   });
 });
 
 describe("Brain and weekly chapters", () => {
   it("starts the week's first greeting with last week's recap, then counts the new week", async () => {
-    // Monday 2 November; Friday was a perfect day.
+    // Monday 2 November; Friday was a perfect day. (v0.4 settles a day with Todoist's own count for it, so Todoist
+    // reports Friday's three tasks too.)
     const { s, step, clock, brain } = await rig({
       start: at(11, 2, 9),
       prefs: { bubbleGap: 0 },
+      setup: (b) => {
+        const completed = b.todoist.completed.bind(b.todoist);
+        const friday = [0, 1, 2].map((i) => ({ id: `f${i}`, content: `Friday ${i}`, checked: true, completed_at: new Date(at(10, 30, 15, i)).toISOString() }));
+        b.todoist.completed = async (since, until) => [
+          ...(await completed(since, until)),
+          ...friday.filter((x) => Date.parse(x.completed_at) >= Date.parse(since) && Date.parse(x.completed_at) < Date.parse(until)),
+        ];
+      },
       life: {
         dayKey: "2026-10-30",
         dayCompleted: 3,
@@ -488,10 +555,13 @@ describe("Brain and weekly chapters", () => {
     brain.dismissBubble(hello.id, "closed");
     await brain.complete(s().next!);
     expect(s().life.week).toMatchObject({ key: "2026-11-02", done: 1 });
-    // Tuesday's greeting is an ordinary one.
+    // Tuesday's greeting is an ordinary one. (v0.4: it waits for the new day's first sync, then comes on the next
+    // heartbeat.)
     clock.t = at(11, 3, 9);
     brain.tick();
     await sleep(400);
+    await vi.waitFor(() => expect(s()).toMatchObject({ loading: false, life: { dayKey: "2026-11-03" } }));
+    brain.tick();
     expect(s().bubble?.text).toContain("Good morning");
     expect(s().bubble?.text).not.toContain("New week");
     brain.stop();

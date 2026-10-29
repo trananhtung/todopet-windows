@@ -97,16 +97,23 @@ export interface DaySnapshot {
   completed: TodoTask[];
   /** Due today at a time that has passed. */
   late: TodoTask[];
+  /** The frog picked in the Wrap up sheet for today: it, or its steps, goes first in every ordering (SPEC v0.4 §3). */
+  frogId?: string | null;
 }
 
-export const emptyDay = (): DaySnapshot => ({ today: [], overdue: [], completed: [], late: [] });
+export const emptyDay = (): DaySnapshot => ({ today: [], overdue: [], completed: [], late: [], frogId: null });
 export const planned = (d: DaySnapshot) => d.today.length + d.completed.length;
 export const remaining = (d: DaySnapshot) => d.today.length;
 export const openTasks = (d: DaySnapshot) => [...d.overdue, ...d.today];
 
-/** Open tasks in "eat the frog" order: highest priority, then earliest time, then oldest overdue. */
-export function ranked(tasks: TodoTask[]): TodoTask[] {
+/**
+ * Open tasks in "eat the frog" order: highest priority, then earliest time, then oldest overdue. A frog picked the day
+ * before (`frogId`) goes before all of that, and so do its steps if it was split.
+ */
+export function ranked(tasks: TodoTask[], frogId: string | null = null): TodoTask[] {
+  const frogRank = (t: TodoTask) => (frogId === null ? 2 : t.id === frogId ? 0 : t.parentId === frogId ? 1 : 2);
   return [...tasks].sort((a, b) => {
+    if (frogRank(a) !== frogRank(b)) return frogRank(a) - frogRank(b);
     if (a.priority !== b.priority) return b.priority - a.priority;
     const x = dueTime(a);
     const y = dueTime(b);
@@ -124,16 +131,18 @@ export function ranked(tasks: TodoTask[]): TodoTask[] {
 export function actionable(d: DaySnapshot): TodoTask[] {
   const open = openTasks(d);
   const parents = new Set(open.map((t) => t.parentId).filter((id): id is string => id !== null));
-  return ranked(open).filter((t) => !parents.has(t.id));
+  return ranked(open, d.frogId ?? null).filter((t) => !parents.has(t.id));
 }
 
 export function nextTask(d: DaySnapshot): TodoTask | null {
-  return actionable(d)[0] ?? ranked(openTasks(d))[0] ?? null;
+  return actionable(d)[0] ?? ranked(openTasks(d), d.frogId ?? null)[0] ?? null;
 }
 
-export function buildDay(active: TodoTask[], completed: TodoTask[], now: Date): DaySnapshot {
+/** `frogId` is the frog picked for today in the Wrap up sheet, if any. */
+export function buildDay(active: TodoTask[], completed: TodoTask[], now: Date, frogId: string | null = null): DaySnapshot {
   const todayKey = dayKey(now);
   const s = emptyDay();
+  s.frogId = frogId;
   for (const t of active) {
     if (t.checked) continue;
     const day = dueDay(t);
@@ -146,8 +155,8 @@ export function buildDay(active: TodoTask[], completed: TodoTask[], now: Date): 
     }
     // Tasks due later (a custom filter may return them) don't count for today.
   }
-  s.today = ranked(s.today);
-  s.overdue = ranked(s.overdue);
+  s.today = ranked(s.today, frogId);
+  s.overdue = ranked(s.overdue, frogId);
   s.completed = [...completed].sort((a, b) => ((b.completedAt ?? "") > (a.completedAt ?? "") ? 1 : -1));
   return s;
 }

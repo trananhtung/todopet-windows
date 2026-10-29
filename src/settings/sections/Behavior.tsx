@@ -99,8 +99,8 @@ export function BehaviorSection() {
           k="nudgeBudget"
           label={L("Nhắc tối đa mỗi ngày", "Reminders a day, at most")}
           help={L(
-            "Lời nhắc bạn không yêu cầu. Việc có giờ, cuộc họp, lời chào buổi sáng và tổng kết cuối ngày không tính. Bạn đóng loại nhắc nào thì loại đó thưa dần; bỏ qua 3 lần liền thì thú cưng im một giờ.",
-            "Bubbles you didn't ask for. Timed tasks, meetings, the morning hello and the end-of-day review are free. Close a kind of reminder and it comes less often; pass on 3 in a row and your pet waits an hour.",
+            "Lời nhắc bạn không yêu cầu. Việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp, cảnh báo quá tải và việc bạn tự hẹn giờ không tính. Bạn đóng loại nhắc nào thì loại đó thưa dần; bỏ qua 3 lần liền thì thú cưng im một giờ.",
+            "Bubbles you didn't ask for. Timed tasks, meetings, the morning hello, the end-of-day review, the “where was I?” card, the question after a meeting, the overbooked check and plans you set yourself are free. Close a kind of reminder and it comes less often; pass on 3 in a row and your pet waits an hour.",
           )}
           unit={L("lần", "times")}
         />

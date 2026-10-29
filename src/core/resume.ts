@@ -28,10 +28,21 @@ export type IsDistracting = (app: ForegroundApp | null, url: string | null) => b
 
 /** Windows that are never "where you were": the pet itself, the lock screen and shell pop-ups. */
 const NOT_WORK_EXES = ["lockapp.exe", "searchhost.exe", "searchapp.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe"];
-const isNotWork = (app: ForegroundApp) => {
+/** The pet's own window (the board has the keyboard) and shell pop-ups are never "where you were". */
+export const isNotWorkApp = (app: ForegroundApp) => {
   const exe = app.exe.toLowerCase();
   return exe.startsWith("todopet") || app.name.trim().toLowerCase() === "todopet" || NOT_WORK_EXES.includes(exe);
 };
+const isNotWork = isNotWorkApp;
+
+/** Call apps and their web pages: being in a meeting isn't the work you come back to after it. */
+const CONFERENCING_EXES = ["zoom.exe", "teams.exe", "ms-teams.exe", "webex.exe", "ciscowebex.exe", "skype.exe"];
+const CONFERENCING_HOSTS = ["zoom.us", "meet.google.com", "teams.microsoft.com", "teams.live.com", "webex.com", "whereby.com"];
+export function isConferencing(app: ForegroundApp | null, url: string | null): boolean {
+  if (app && CONFERENCING_EXES.includes(app.exe.toLowerCase())) return true;
+  const host = url ? hostOf(url) : null;
+  return host !== null && CONFERENCING_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+}
 
 /** Trimmed, whitespace collapsed, at most `max` characters; null when empty. */
 function clean(s: string | null | undefined, max = MAX_TITLE): string | null {

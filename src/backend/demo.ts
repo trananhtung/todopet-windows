@@ -39,6 +39,8 @@ export interface DemoControls {
   /** Pretend the user has been away (idle) for this many seconds. */
   setIdle(seconds: number): void;
   command(c: AppCommand): void;
+  /** Give today's tasks long Todoist durations (about 11 hours in all), so the overbooked warning has something to say. */
+  setHeavyDay(on: boolean): void;
 }
 
 export interface DemoBackend extends Backend {
@@ -115,6 +117,9 @@ export function demoIcs(now: Date): string {
 
 const pause = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 
+/** Minutes for today's tasks on the demo's "heavy day": more than a work day, even before the meetings. */
+const HEAVY_MINUTES: Readonly<Record<string, number>> = { "1": 240, "2": 180, "4": 240 };
+
 export function createDemoBackend(opts: { now?: () => number; persist?: boolean } = {}): DemoBackend {
   const now = opts.now ?? Date.now;
   const persist = (opts.persist ?? true) && storageAvailable;
@@ -125,6 +130,7 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
   const doneNow = () => (doneList ??= sampleDone(new Date(now())));
   let counter = 100;
   let autostart = false;
+  let heavyDay = false;
   // The demo starts connected; Settings can disconnect and reconnect to try those flows.
   const secrets = { todoist: true, anthropic: true, calendarHosts: ["demo.todopet"] };
   const memoryStore = new Map<string, unknown>();
@@ -166,17 +172,28 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
   }
 
   const find = (id: string) => tasksNow().findIndex((t) => t.id === id);
+  /** Tasks moved off today's list (to a later day or no date). */
+  const elsewhere: RawTask[] = [];
 
   const backend: DemoBackend = {
     kind: "demo",
     todoist: {
       async tasks() {
         await pause();
-        return structuredClone(tasksNow());
+        const list = structuredClone(tasksNow());
+        return heavyDay ? list.map((t) => (HEAVY_MINUTES[t.id] ? { ...t, duration: { amount: HEAVY_MINUTES[t.id], unit: "minute" } } : t)) : list;
       },
-      async completed() {
+      async completed(sinceIso, untilIso) {
         await pause();
-        return structuredClone(doneNow());
+        // Like Todoist: only the tasks finished in that time range.
+        const since = Date.parse(sinceIso);
+        const until = Date.parse(untilIso);
+        return structuredClone(
+          doneNow().filter((t) => {
+            const at = Date.parse(t.completed_at ?? "");
+            return !(at < since) && !(at >= until);
+          }),
+        );
       },
       async stats(): Promise<RawStats> {
         return { completed_count: 42 + doneNow().length, goals: { daily_goal: 3, current_daily_streak: { count: 4 }, max_daily_streak: { count: 9 } }, karma: 1234 };
@@ -211,16 +228,28 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
       },
       async reschedule(id, dueString) {
         await pause();
-        const i = find(id);
-        if (i < 0) return;
         const d = new Date(now());
+        const today = localDay(d);
         const list = tasksNow();
-        if (dueString === "tomorrow" || dueString === "no date") {
-          list.splice(i, 1);
+        // A task moved off today's list earlier (tomorrow, a later day, no date) can come back, as after an Undo.
+        let i = find(id);
+        if (i < 0) {
+          const j = elsewhere.findIndex((t) => t.id === id);
+          if (j < 0) return;
+          list.push(...elsewhere.splice(j, 1));
+          i = list.length - 1;
+        }
+        const date = dueString === "tomorrow" ? localDay(new Date(d.getTime() + 86_400_000)) : /^\d{4}-\d{2}-\d{2}$/.test(dueString) ? dueString : null;
+        if (dueString === "no date" || (date !== null && date > today)) {
+          // Off the "today | overdue" filter.
+          const [t] = list.splice(i, 1);
+          elsewhere.push({ ...t, due: date ? { date, string: dueString } : null });
+        } else if (date !== null) {
+          list[i] = { ...list[i], due: { date, string: dueString } };
         } else if (dueString.startsWith("today at ")) {
-          list[i] = { ...list[i], due: { date: `${localDay(d)}T${dueString.split(" ").pop()}:00`, string: dueString } };
+          list[i] = { ...list[i], due: { date: `${today}T${dueString.split(" ").pop()}:00`, string: dueString } };
         } else {
-          list[i] = { ...list[i], due: { date: localDay(d), string: dueString } };
+          list[i] = { ...list[i], due: { date: today, string: dueString } };
         }
       },
       async remove(id) {
@@ -374,6 +403,9 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
       },
       command(c) {
         commands.emit(c);
+      },
+      setHeavyDay(on) {
+        heavyDay = on;
       },
     },
   };

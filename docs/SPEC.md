@@ -1,8 +1,8 @@
 # TodoPet for Windows — design spec
 
 A Windows port of [TodoPet](https://github.com/trananhtung/todopet) (macOS, Swift): a desktop pet that lives on
-top of the taskbar, reads your Todoist tasks, asks you to plan 3 tasks a day, reminds you, and gets happy or
-grumpy with your progress. English and Vietnamese.
+top of the taskbar, reads your Todoist tasks, asks you to plan 3 tasks a day, reminds you, cheers your progress and
+worries (and offers help) when things slip. English and Vietnamese.
 
 **What's new on Windows:** 24 pet species instead of one (21 from the start, 3 unlocked by milestones), each
 with its own body, gait and voice, all sharing the moods, growth stages, hunger, dirt and accessories of the
@@ -18,7 +18,7 @@ original.
 | Surface | **One transparent, always-on-top overlay window** covering the primary monitor's work area | The pet walks with CSS transforms instead of moving a window; bubble, board, sign parade, table flip and fireworks share one surface. Rust polls the cursor (~40 Hz) and the overlay toggles click-through with `set_ignore_cursor_events` only when the cursor enters/leaves an interactive element (`document.elementFromPoint`). |
 | Other windows | Settings and Diary are normal decorated windows | They need focus and scrolling; they talk to the overlay through Tauri events. |
 | Secrets | Windows **Credential Manager** (`keyring` crate) | Tokens never reach JavaScript: Rust reads them and makes the Todoist / Anthropic calls itself. |
-| Storage | Small JSON files (atomic writes) in `%APPDATA%\com.trananhtung.todopet`; diary as daily JSONL files in `%LOCALAPPDATA%` | Prefs, pet life, postponed-task log; the diary keeps 14 days. Browser demo uses `localStorage`. |
+| Storage | Small JSON files (atomic writes) in `%APPDATA%\com.trananhtung.todopet`; diary as daily JSONL files in `%LOCALAPPDATA%` | Prefs, pet life, postponed-task log, today's "start when…" plans (`triggers`, v0.4), tomorrow's frog and note (`plan`, v0.4); the diary keeps 14 days. Browser demo uses `localStorage`. |
 | Calendar | **ICS links** (Google "secret address in iCal format", Outlook "Publish calendar"), stored in Credential Manager, parsed with `ical.js` | Windows has no EventKit equivalent; ICS covers Google, Outlook/Microsoft 365 and iCloud. Rust fetches (public addresses only), JS parses and expands recurrences. |
 | Distraction | Foreground process via Win32, active tab address via **UI Automation** (Chrome, Edge, Brave, Vivaldi, Opera, Firefox), window title as fallback | Same rules as the original (`youtube.com`, `youtube.com/shorts`). Addresses stay in memory. |
 | Typing / idle | `GetLastInputInfo` for idle; Windows **Raw Input** that stores **only the timestamp** of the last key-down | Needed for "interrupt at a pause" and "in the zone" rules. No key codes are read or stored; no keyboard hook. |
@@ -62,8 +62,9 @@ tasks (also forced by `?demo`).
 3. **Reminders.** Next task by "eat the frog" order; a nudge every 45 min; 10 min before and at the time of
    timed tasks; overdue tasks every 90 min; welcome back after 15+ min away.
 4. **Moods.** 0–100 score every 15 s (exact formula of `MoodEngine.swift`): happy ≥ 75, chill ≥ 50,
-   annoyed ≥ 30, grumpy below; sleeping at night / idle 10 min; focus; celebrating. Grumpy pet marches
-   toward the cursor. Hovering the reason line on the board shows the breakdown.
+   worried below; grumpy (below 30) only while you're on a distracting app or site in work hours (v0.3);
+   sleeping at night / idle 10 min; focus; celebrating. Grumpy pet marches toward the cursor. Hovering the
+   reason line on the board shows the breakdown.
 5. **Board** (click the pet): today's tasks, overdue, completed; complete / undo; add (Today, Tomorrow,
    No date, Todoist quick-add syntax) with priority; move to today/tomorrow; delete with confirmation;
    focus; split; Todoist streak; life bar; wardrobe; mood reasons; calendar card.
@@ -75,13 +76,15 @@ tasks (also forced by `?demo`).
    counts as work, adaptive daily target, time-block suggestions in free gaps.
 10. **Postponed tasks** (3+ days): split into 15–30 min steps (Todoist sub-tasks, step 1 today) or drop
     from plan; optional **Ask Claude** (`claude-opus-5-5`, low effort, JSON schema output).
-11. **Pet life.** Fullness (+25 per task, −7/work hour), dirt (lazy workdays, up to 3, flies), XP and stages
+11. **Pet life.** Fullness (+25 per task, −7/work hour), dirt (missed workdays, up to 3, flies), XP and stages
     Baby → Kid → Teen → Grown-up → Master, random celebrations (jump, spin, flip, dance), 10% golden treat,
     combos within 30 min → fireworks, accessories (bow, scarf, sunglasses, top hat, crown, grad cap)
     unlocked by milestones, sticker book of perfect days.
-12. **Mischief** when slacking: grumble after 10 min annoyed, sign parade after 10 min grumpy, table flip
-    (╯°□°)╯︵ ┻━┻ jumping into the middle of the screen after 5 min on a distraction while grumpy; at most
-    one stunt per 20 min; "Spare me 15'" button; never during meetings, focus, typing or while away.
+12. **Mischief**, only while you're on a distracting app or site (v0.3): a sign parade after 5 min on it
+    while grumpy, then (the escalation) a table flip (╯°□°)╯︵ ┻━┻ jumping into the middle of the screen
+    after 15 min, sharing one slot of at most one stunt per 20 min; a grumble after 10 min on it in a low
+    mood; "Spare me 15'" button; never during meetings, focus or while away, and the parade and grumble
+    wait for a pause in typing.
 13. **Calm rules.** Interrupt only at a pause (8 s without typing or an app switch); in the zone after
     10 min of steady typing (🎧, holds non-urgent bubbles); ≥ 15 min between unsolicited bubbles.
 14. **Sounds** (Off / Important only / Everything, synthesized with WebAudio) and **spoken lines**
@@ -130,7 +133,8 @@ picker in Settings shows a live preview; locked species show their requirement.
 ## Privacy
 
 No analytics, no servers of its own. Network: `api.todoist.com`, your ICS links, and `api.anthropic.com`
-only when you press Ask Claude. Browser titles and tab addresses stay in memory. Raw Input stores only the time
+only when you press Ask Claude. Browser titles and tab addresses stay in memory, and so does the v0.4 "Where was I?"
+place (never saved or written to the diary, dropped at the day change); only the day's "start when…" plans are stored. Raw Input stores only the time
 of the last key-down. Secrets (tokens, ICS links) live in Credential Manager; everything else is local. See
 [SECURITY.md](../SECURITY.md).
 
@@ -152,20 +156,29 @@ backfires, broken streaks demotivate, repairable streaks and freezes keep people
 constant ones, and endowed progress raises completion.
 
 ### 1. Forgiving streaks (`life.ts`, `prefs.ts`, `brain.ts`)
-- **A streak day is a workday with at least 1 finished task** ("you showed up"). The daily goal and the perfect day
-  stay as higher bars: a **goal day** (done ≥ target) puts a 🍪 snack in the stash (max 2); a **perfect day**
-  (done ≥ target and ≥ planned) earns a sticker and +30 XP, as before.
-- **Days the app never saw** (PC off) are neutral: no streak change, no dirt.
+- **A streak day is a day the app saw with at least 1 finished task** ("you showed up"), rest days and weekends
+  included; missing a rest day or a weekend never hurts. The daily goal and the perfect day stay as higher bars:
+  a **goal day** (done ≥ target) puts a 🍪 snack in the stash (max 2); a **perfect day** (done ≥ target and
+  ≥ planned) earns a sticker and +30 XP, as before; that XP can grow the pet a stage (same level-up words).
+- **Days the app never saw** (PC off) are neutral: no streak change, no dirt. A day counts as seen only from a
+  count Todoist confirmed; at rollover the brain first asks Todoist how many tasks were finished on the ending day
+  (some may have been done on the phone after the last sync). If it can't say, the day closes as never seen.
 - **Rest days:** `prefs.restDays` (day keys `YYYY-MM-DD`, deduped, sorted, at most 60, older than yesterday pruned).
   `isWorkday` is false on them, so the pet behaves like on a weekend. The board has a "Take today off" toggle;
-  Settings → Schedule adds a date range (max 30 days) and lists upcoming rest days with remove buttons.
+  Settings → Schedule adds a date range (max 30 days), says how many days were really added (and warns when the
+  60-day cap left the furthest out), and lists upcoming rest days with remove buttons.
 - **Busy days:** a workday with fewer than 60 free minutes in work hours (calendar on) is excused when nothing got
-  done: streak paused, no dirt, no snack used.
-- **Missed day** (seen workday, 0 done, not busy): a snack is eaten if there is one (streak kept, no dirt). Otherwise
-  dirt +1 and, if the streak was ≥ 2, a **repair quest** is offered: finish 2 tasks on the next workday (within 14
-  days) and the old streak comes back, then that day counts too. Unfinished quests expire when their day closes.
+  done: streak paused, no dirt, no snack used. Once busy, the day stays busy (a later failed calendar fetch doesn't
+  undo it).
+- **Missed day** (seen workday, 0 done, not busy): a snack is eaten if there is a streak to save (streak kept, no
+  dirt); at streak 0 the snack stays and the day adds dirt. Otherwise dirt +1 and, if the streak was ≥ 2 and its 14
+  days haven't gone by already, a **repair quest** is offered: finish 2 tasks on the next workday (within 14 days)
+  and the old streak comes back, then that day counts too. The restore follows today's count (a failed close or an
+  Undo takes it back) and is final when the day closes; its cheer comes once a day. Unfinished quests expire when
+  their day closes, and the next morning's note says so kindly.
 - `closeDay` returns what happened (`kept | excused | frozen | broken | none`, snack earned, sticker, page done,
-  repair offered) and the brain explains it kindly in one bubble the next morning (not counted as a reminder).
+  repair offered or expired, level-up) and the brain explains it kindly in one bubble the next morning (not counted
+  as a reminder), from an hour before work starts, on that day only.
 - Everyone starts with (or migrates to) 1 snack. Copy: the dragon and crown read "Keep a 7-day streak"; dirt reads
   "needs a bath (N missed days)"; the board's streak tooltip shows the snack stash and an active repair quest.
 
@@ -190,9 +203,11 @@ constant ones, and endowed progress raises completion.
 - `prefs.nudgeBudget` (default 8, 0–30): the most unsolicited non-urgent bubbles per day. Never counted: urgent
   bubbles (timed tasks, meetings), replies to what you did, and the two daily check-ins (morning greeting/plan and
   the end-of-day review). When the budget is used up the pet stays quiet (one diary line).
-- **Back-off:** each reminder kind has a multiplier (1, 2, 4, 8) on its interval. Closing or ignoring that kind
-  doubles it; tapping any of its buttons resets it. Three dismissed reminders in a row hold non-urgent bubbles for
-  an hour. Multipliers reset each day.
+- **Back-off:** each repeating reminder kind has a multiplier (1, 2, 4, 8) on its interval. Closing or ignoring that
+  kind doubles it; tapping one of its real buttons resets it ("Later", "Spare me" and "Just a quick break" are
+  neutral). Three dismissed reminders in a row hold non-urgent bubbles for an hour; a bubble that expires unseen
+  (pet hidden) counts for neither. Multipliers reset each day. The day's gates, multipliers, dismissals in a row and
+  the hold are kept across restarts, and counted reminders and check-ins wait for a fresh sync.
 - The board shows how many reminders are left today; the diary explains every skip.
 
 ## v0.4 "Indispensable" (Không thể thiếu)
@@ -227,6 +242,10 @@ people detach; overcommitting is the main planning failure.
   the next workday.
 - Tomorrow's frog and the note are stored locally (`plan` key) and the next morning's greeting names them; the
   frog goes first in "eat the frog" ordering that day.
+- The sheet only collects choices; **Done for today** applies them together (a repeating task can only stay, since
+  moving it would break its repeat). The frog and note are for the next *workday* (Monday after a Friday) and only
+  count that day. If a move fails the pet stays awake, the sheet says so and the same button tries again. The day
+  strip's **Back to work** wakes the pet again. "Done for today" is stored as the time it ends (`plan.doneUntil`).
 
 ### 4. Overbooked warning and day timeline (`calendar.ts`, `brain.ts`, board)
 - Estimates: the Todoist duration when set, else `prefs.defaultEstimate` (default 30 min, 15–120).
@@ -234,6 +253,8 @@ people detach; overcommitting is the main planning failure.
   minutes. Once a day, after planning, if load exceeds capacity by 60+ minutes: "Today looks overbooked: ~6h of
   tasks + 3h of meetings in 7h left. Move some?" with **Pick tasks to move** and **It's fine** (a check-in).
 - The board shows a compact timeline of the work day: meetings, timed tasks, now, and a load meter.
+- The check is skipped in the last 30 minutes of the work day (the end-of-day review covers it) and when no work
+  time is left. Load counts today's open tasks (not overdue ones) and only the part of a meeting that is still ahead.
 
 ### 5. If-then starts and the 2-minute starter (`brain.ts`, board)
 - A task's menu has **Start when…**: after ⟨a meeting today⟩, when I open ⟨app⟩ (recent non-distracting apps or
@@ -285,3 +306,10 @@ sets, and gentle failure. Rewards stay cosmetic, random rewards have published o
 ### 4. Weekly chapters and a Monday fresh start
 - The first greeting of the week frames a fresh start with last week's recap (tasks, stickers, trips).
 - The diary groups days into weekly chapters with a one-line recap.
+
+### With v0.4
+- The trip offer is a check-in like the morning greeting or the resume card: it has no reminder kind, so it is never
+  counted against the nudge budget, and closing it is a **Stay**, not a refusal. Only counted reminders have a kind.
+- **Done for today** holds the trip offer and the "I found a chest" note until the next workday, like every other
+  non-urgent bubble. Chests still accrue silently meanwhile, and the note comes once the pet is awake again.
+- The end of a **Try 2 minutes** starter says what was knitted, and a chest earned meanwhile, like a full session.

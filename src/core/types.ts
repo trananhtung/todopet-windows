@@ -65,6 +65,16 @@ export type Season = (typeof SEASONS)[number];
 export const DECOR_IDS = ["rug", "plant", "lamp", "cushion", "bookshelf", "mug", "poster", "garland", "fishbowl", "radio", "blanket", "lantern"] as const;
 export type DecorId = (typeof DECOR_IDS)[number];
 
+/**
+ * Unsolicited reminders, named after their rule's key. Each one counts against the daily nudge budget. The ones that
+ * repeat on an interval (`EVERY_KINDS`) back off on their own; the rest come at most once a day. Check-ins (the
+ * morning greeting, the resume card, the overbooked warning, v0.5's trip offer…) have no kind: they are never counted.
+ */
+export const REMINDER_KINDS = ["welcome", "distract", "antic", "night", "plan", "stuck", "hungry", "grumble", "overdue", "timeblock", "distractsum", "nudge", "tip"] as const;
+export type ReminderKind = (typeof REMINDER_KINDS)[number];
+/** The kinds with an interval, which closing or ignoring stretches (×2, ×4, ×8). */
+export const EVERY_KINDS: readonly ReminderKind[] = ["distract", "antic", "plan", "stuck", "hungry", "grumble", "overdue", "nudge", "tip"];
+
 export const CELEBRATIONS = ["jump", "spin", "flip", "dance", "fireworks"] as const;
 export type CelebrationKind = (typeof CELEBRATIONS)[number];
 

@@ -3,8 +3,8 @@ import { countWeek, emptyWeek, rollWeek, weekFromJson, type WeekStats } from "./
 import { addDays, dayKey, isDayKey, parseDate } from "./dates";
 import { L } from "./l10n";
 import { isSouvenirId, tripFromJson, type SouvenirId, type Trip } from "./trips";
-import type { Accessory, AccessorySlot, CelebrationKind, DecorId, Season, StageIndex } from "./types";
-import { ACCESSORIES, ACCESSORY_SLOT, DECOR_IDS } from "./types";
+import type { Accessory, AccessorySlot, CelebrationKind, DecorId, ReminderKind, Season, StageIndex } from "./types";
+import { ACCESSORIES, ACCESSORY_SLOT, DECOR_IDS, EVERY_KINDS } from "./types";
 
 export const STAGE_THRESHOLDS = [0, 100, 300, 700, 1500] as const;
 
@@ -153,6 +153,8 @@ export const PAGE_SIZE = 10;
 export const MAX_HELD_CHESTS = 3;
 /** Every sticker page starts with this many gift stickers 🎁. */
 export const PAGE_GIFTS = 2;
+/** Each dismissal of a repeating reminder doubles its interval, up to this many times the usual. */
+export const MAX_BACKOFF = 8;
 
 /** "Finish 2 tasks on your next workday and your old streak comes back." */
 export interface RepairQuest {
@@ -160,6 +162,11 @@ export interface RepairQuest {
   streak: number;
   /** The last day ("yyyy-MM-dd") it can be done on. */
   until: string;
+  /**
+   * Set while today's finished tasks have brought the old streak back: the streak it replaced, to fall back to if
+   * the count drops again (a failed close, an Undo). Only final once the day closes.
+   */
+  restored?: { from: number };
 }
 
 /** Everything the pet remembers across days. */
@@ -200,6 +207,17 @@ export interface LifeState {
   distraction: Record<string, number>;
   /** Unsolicited reminders shown today (the nudge budget), kept across restarts. */
   dayNudges: number;
+  /**
+   * Today's reminder gates, kept across restarts so they don't fire again: when each reminder kind's timer, "Later",
+   * and each once-a-day key of a counted bubble or check-in (`morning-<day>`, `stuck-<id>-<day>`…) last fired (epoch ms).
+   */
+  dayFired: Record<string, number>;
+  /** Today's back-off per repeating reminder kind (2, 4 or 8 times its interval). */
+  dayBackoff: Partial<Record<ReminderKind, number>>;
+  /** Reminders closed or ignored in a row today. */
+  dismissedInRow: number;
+  /** After three dismissed in a row, non-urgent reminders wait until then (epoch ms); it runs out on its own. */
+  nudgeHoldUntil: number | null;
   // v0.5 "Game".
   /** Chests held (0–3), earned with active work and opened by finishing a task. */
   chests: number;
@@ -258,6 +276,10 @@ export const newLife = (): LifeState => ({
   daySeen: false,
   distraction: {},
   dayNudges: 0,
+  dayFired: {},
+  dayBackoff: {},
+  dismissedInRow: 0,
+  nudgeHoldUntil: null,
   chests: 0,
   chestsToday: 0,
   chestDay: "",
@@ -282,7 +304,11 @@ const clampInt = (x: unknown, lo: number, hi: number, d: number) => Math.min(hi,
 function repairFromJson(x: unknown): RepairQuest | null {
   if (!x || typeof x !== "object") return null;
   const r = x as Record<string, unknown>;
-  return typeof r.streak === "number" && r.streak >= 1 && isDayKey(r.until) ? { streak: Math.trunc(r.streak), until: r.until } : null;
+  if (typeof r.streak !== "number" || r.streak < 1 || !isDayKey(r.until)) return null;
+  const quest: RepairQuest = { streak: Math.trunc(r.streak), until: r.until };
+  const from = r.restored && typeof r.restored === "object" ? (r.restored as Record<string, unknown>).from : undefined;
+  if (typeof from === "number" && Number.isFinite(from) && from >= 0) quest.restored = { from: Math.trunc(from) };
+  return quest;
 }
 
 /** Tolerates missing or broken fields, so adding fields later never wipes the pet's progress. */
@@ -296,6 +322,18 @@ export function lifeFromJson(raw: unknown): LifeState {
     for (const [k, v] of Object.entries(r.distraction as Record<string, unknown>)) if (typeof v === "number") distraction[k] = v;
   }
   const perfectDays = strings(r.perfectDays);
+  const dayFired: Record<string, number> = {};
+  if (r.dayFired && typeof r.dayFired === "object") {
+    for (const [k, v] of Object.entries(r.dayFired as Record<string, unknown>)) if (typeof v === "number" && Number.isFinite(v)) dayFired[k] = v;
+  }
+  const dayBackoff: Partial<Record<ReminderKind, number>> = {};
+  if (r.dayBackoff && typeof r.dayBackoff === "object") {
+    const raw = r.dayBackoff as Record<string, unknown>;
+    for (const k of EVERY_KINDS) {
+      const v = raw[k];
+      if (typeof v === "number" && v >= 2) dayBackoff[k] = Math.min(MAX_BACKOFF, Math.trunc(v));
+    }
+  }
   return {
     satiety: Math.min(100, Math.max(0, num(r.satiety, d.satiety))),
     dirt: Math.min(3, Math.max(0, Math.trunc(num(r.dirt, d.dirt)))),
@@ -326,6 +364,10 @@ export function lifeFromJson(raw: unknown): LifeState {
     daySeen: typeof r.daySeen === "boolean" ? r.daySeen : true,
     distraction,
     dayNudges: clampInt(r.dayNudges, 0, 1000, 0),
+    dayFired,
+    dayBackoff,
+    dismissedInRow: clampInt(r.dismissedInRow, 0, 1000, 0),
+    nudgeHoldUntil: typeof r.nudgeHoldUntil === "number" && Number.isFinite(r.nudgeHoldUntil) ? r.nudgeHoldUntil : null,
     chests: clampInt(r.chests, 0, MAX_HELD_CHESTS, 0),
     chestsToday: clampInt(r.chestsToday, 0, 1000, 0),
     chestDay: isDayKey(r.chestDay) ? r.chestDay : "",
@@ -479,14 +521,18 @@ export function decay(s: LifeState, now: number, working: boolean): void {
   s.satiety = Math.max(0, s.satiety - (HUNGER_PER_HOUR * Math.min(now - last, 3_600_000)) / 3_600_000);
 }
 
-/** Records today as the app sees it after a Todoist sync (which also makes it a day the app saw). */
-export function syncDay(s: LifeState, completed: number, plannedCount: number, target: number, workday: boolean, busy = false): void {
+/**
+ * Records today as the app sees it after a Todoist sync. `verified`: Todoist confirmed today's finished tasks
+ * (the completed-tasks fetch worked), which makes it a day the app saw. A packed calendar stays packed for the day,
+ * even if a later calendar fetch fails.
+ */
+export function syncDay(s: LifeState, completed: number, plannedCount: number, target: number, workday: boolean, busy = false, verified = true): void {
   s.dayCompleted = completed;
   s.dayPlanned = plannedCount;
   s.dayTarget = target;
   s.dayWorkday = workday;
-  s.dayBusy = busy;
-  s.daySeen = true;
+  s.dayBusy ||= busy;
+  s.daySeen ||= verified;
 }
 
 /** The repair quest that today can finish: a workday no later than 14 days after the break. */
@@ -494,14 +540,26 @@ export function activeRepair(s: LifeState): RepairQuest | null {
   return s.repair && s.dayWorkday && s.dayKey <= s.repair.until ? s.repair : null;
 }
 
-/** Brings the old streak back once today's repair quest is done. Returns the restored streak, or 0. */
-export function checkRepair(s: LifeState): number {
-  const quest = activeRepair(s);
-  if (!quest || s.dayCompleted < REPAIR_TASKS) return 0;
-  s.streak = Math.max(s.streak, quest.streak);
-  s.bestStreak = Math.max(s.bestStreak, s.streak);
-  s.repair = null;
-  return s.streak;
+/**
+ * Re-evaluates today's repair quest after a sync: the old streak is back while today has `REPAIR_TASKS` finished
+ * tasks, and goes back to what it was when the count drops again (a failed close, an Undo). Idempotent; `closeDay`
+ * makes it final. Returns what changed.
+ */
+export function checkRepair(s: LifeState): "restored" | "reverted" | null {
+  const quest = s.repair;
+  if (!quest) return null;
+  const done = activeRepair(s) !== null && s.dayCompleted >= REPAIR_TASKS;
+  if (done && !quest.restored) {
+    s.repair = { ...quest, restored: { from: s.streak } };
+    s.streak = Math.max(s.streak, quest.streak);
+    return "restored";
+  }
+  if (!done && quest.restored) {
+    s.streak = quest.restored.from;
+    s.repair = { streak: quest.streak, until: quest.until };
+    return "reverted";
+  }
+  return null;
 }
 
 function addSnack(s: LifeState): boolean {
@@ -525,8 +583,9 @@ export function addDistraction(s: LifeState, label: string, seconds: number): vo
 }
 
 /**
- * How a settled workday went: `kept` (a task done), `excused` (packed calendar, nothing done), `frozen` (missed,
- * a snack saved it), `broken` (missed, no snack) or `none` (rest day, weekend, or a day the app never saw).
+ * How a settled day went: `kept` (a task done, on any day the app saw), `excused` (a workday with a packed calendar
+ * and nothing done), `frozen` (a missed workday, a snack saved the streak), `broken` (a missed workday, no snack or
+ * no streak to save) or `none` (a rest day or weekend with nothing done, or a day the app never saw).
  */
 export type DayOutcome = "kept" | "excused" | "frozen" | "broken" | "none";
 
@@ -542,26 +601,53 @@ export interface DayClose {
   repairOffered: boolean;
   /** A repair quest ran out: its day closed unfinished, or 14 days went by. */
   repairExpired: boolean;
+  /** The growth stage the day's XP (sticker, full page) reached, if it crossed one. */
+  levelUp: StageIndex | null;
   unlocked: Accessory[];
 }
 
 /**
- * Settles the stored day once the date changed. A workday with one finished task keeps the streak; a goal day
- * adds a snack, a perfect day a sticker. A missed day eats a snack, or breaks the streak (dirt, and a repair quest
- * for streaks of 2+). Days the app never saw (PC off), rest days and busy days with nothing done change nothing.
+ * Settles the stored day once the date changed. On any day the app saw, one finished task keeps the streak; a goal
+ * day adds a snack, a perfect day a sticker. A missed workday eats a snack if there is a streak to save, or breaks
+ * it (dirt, and a repair quest for streaks of 2+ while its 14 days haven't gone by). Days the app never saw (PC off,
+ * no word from Todoist), rest days and weekends with nothing done, and busy days with nothing done change nothing.
+ * Today's repair quest is decided here, by the day's final count.
  */
 export function closeDay(s: LifeState, today: string, isWorkday: (key: string) => boolean): DayClose {
-  const r: DayClose = { day: "", outcome: "none", lost: 0, snackEarned: false, sticker: false, pageDone: false, repairOffered: false, repairExpired: false, unlocked: [] };
+  const r: DayClose = {
+    day: "",
+    outcome: "none",
+    lost: 0,
+    snackEarned: false,
+    sticker: false,
+    pageDone: false,
+    repairOffered: false,
+    repairExpired: false,
+    levelUp: null,
+    unlocked: [],
+  };
   if (!s.dayKey || s.dayKey >= today) {
     if (!s.dayKey) s.dayKey = today;
     return r;
   }
   r.day = s.dayKey;
-  const counts = s.daySeen && s.dayWorkday;
-  const quest = counts ? activeRepair(s) : null;
-  // Done during the day without the brain noticing: it still counts.
-  if (quest) checkRepair(s);
-  if (counts && s.dayCompleted > 0) {
+  const stageBefore = stageOf(s.xp);
+  const seen = s.daySeen;
+  const missed = seen && s.dayWorkday && s.dayCompleted === 0;
+  // The quest's day is over: with 2 tasks done the old streak stays back, otherwise it goes back to what it was.
+  const quest = seen ? activeRepair(s) : null;
+  if (s.repair) {
+    const base = s.repair.restored?.from ?? s.streak;
+    if (quest && s.dayCompleted >= REPAIR_TASKS) {
+      s.streak = Math.max(base, s.repair.streak);
+      s.repair = null;
+    } else {
+      s.streak = base;
+      s.repair = { streak: s.repair.streak, until: s.repair.until };
+    }
+  }
+  let broke = 0;
+  if (seen && s.dayCompleted > 0) {
     r.outcome = "kept";
     s.streak += 1;
     s.bestStreak = Math.max(s.bestStreak, s.streak);
@@ -577,25 +663,29 @@ export function closeDay(s: LifeState, today: string, isWorkday: (key: string) =
         r.snackEarned ||= page.snack;
       }
     }
-  } else if (counts && s.dayBusy) {
+  } else if (missed && s.dayBusy) {
     r.outcome = "excused";
-  } else if (counts && s.snacks > 0) {
+  } else if (missed && s.streak > 0 && s.snacks > 0) {
     r.outcome = "frozen";
     s.snacks -= 1;
-  } else if (counts) {
+  } else if (missed) {
+    // With no streak to save, the snack stays in the stash; the day still counts as missed (dirt).
     r.outcome = "broken";
     r.lost = s.streak;
+    broke = s.streak;
     s.dirt = Math.min(3, s.dirt + 1);
-    if (s.streak >= 2) {
-      s.repair = { streak: s.streak, until: addDays(s.dayKey, REPAIR_DAYS) };
-      r.repairOffered = true;
-    }
     s.streak = 0;
   }
   // An unfinished quest ends with its day (a busy day doesn't use it up), and 14 days after the break at the latest.
-  if ((quest && s.repair === quest && r.outcome !== "excused") || (s.repair && today > s.repair.until)) {
+  if (s.repair && ((quest && r.outcome !== "excused") || today > s.repair.until)) {
     s.repair = null;
     r.repairExpired = true;
+  }
+  // A broken streak of 2+ can come back, unless its 14 days have gone by already (the PC was off since).
+  const until = addDays(r.day, REPAIR_DAYS);
+  if (broke >= 2 && until >= today) {
+    s.repair = { streak: broke, until };
+    r.repairOffered = true;
   }
   s.dayKey = today;
   s.dayCompleted = 0;
@@ -610,7 +700,12 @@ export function closeDay(s: LifeState, today: string, isWorkday: (key: string) =
   s.chestDay = today;
   s.workSec = 0;
   rollWeek(s, today);
+  s.dayFired = {};
+  s.dayBackoff = {};
+  s.dismissedInRow = 0;
   s.perfectDays = s.perfectDays.slice(-60);
+  const stageAfter = stageOf(s.xp);
+  r.levelUp = stageAfter !== stageBefore ? stageAfter : null;
   r.unlocked = checkUnlocks(s);
   return r;
 }

@@ -52,6 +52,8 @@ export interface MoodInputs {
   stuck: number;
   satiety: number;
   dirt: number;
+  /** "Done for today" in the Wrap up sheet: the pet sleeps until the next workday (SPEC v0.4 §3). */
+  doneForToday: boolean;
 }
 
 export const defaultMoodInputs = (): MoodInputs => ({
@@ -77,6 +79,7 @@ export const defaultMoodInputs = (): MoodInputs => ({
   stuck: 0,
   satiety: 70,
   dirt: 0,
+  doneForToday: false,
 });
 
 export interface MoodReason {
@@ -124,9 +127,11 @@ export function evaluateMood(i: MoodInputs): MoodResult {
   if (i.stuck > 0) {
     add(-Math.min(i.stuck, 3) * 3, L(`${i.stuck} việc bị dời mãi`, `${n(i.stuck, "task")} ${i.stuck === 1 ? "keeps" : "keep"} getting postponed`));
   }
+  // The day is wrapped up ("done for today"): the pet is off duty, like outside work hours.
+  const atWork = i.workday && i.inWorkHours && !i.doneForToday;
   // Only a distraction you're on right now, in work hours, makes the pet grumpy.
-  const distracted = i.workday && i.inWorkHours && !i.inMeeting && i.distractedMinutes >= 2;
-  if (i.workday && i.inWorkHours && !i.inMeeting) {
+  const distracted = atWork && !i.inMeeting && i.distractedMinutes >= 2;
+  if (atWork && !i.inMeeting) {
     if (i.hoursAfterPlanDeadline >= 0 && i.planned < i.target) {
       const gap = i.target - i.planned;
       add(
@@ -151,14 +156,14 @@ export function evaluateMood(i: MoodInputs): MoodResult {
   if (i.focusing) add(10, L("đang tập trung", "focusing"));
 
   // Outside work hours the pet relaxes; it only remembers the bad stuff a little.
-  if (!(i.workday && i.inWorkHours) && s < 55) s = 55;
+  if (!atWork && s < 55) s = 55;
   s = Math.min(100, Math.max(0, s));
 
   let mood: Mood;
   if (i.celebratingNow) mood = "celebrating";
   else if (!i.hasToken) mood = "normal";
   else if (i.focusing) mood = "focus";
-  else if (i.night || i.idleMinutes > 10) mood = "sleeping";
+  else if (i.night || i.idleMinutes > 10 || i.doneForToday) mood = "sleeping";
   else if (s >= 75) mood = "happy";
   else if (s >= 50) mood = "normal";
   // Everything else (overdue, no progress, no plan, hunger, dirt) bottoms out at worried.

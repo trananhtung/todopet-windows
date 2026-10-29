@@ -4,7 +4,7 @@ import type { CalEvent } from "./calendar";
 import { dayLoad, DEFAULT_ESTIMATE, isOverbooked, taskEstimate, timeline, type DayLoadInput } from "./load";
 import { taskFromRaw, type TodoTask } from "./models";
 import { normalizeWords, relatedTasks, significantWords } from "./related";
-import { resumeSummary, shouldOfferResume, snapshot, withNote, workUrl, type WorkContext } from "./resume";
+import { isConferencing, isNotWorkApp, resumeSummary, shouldOfferResume, snapshot, withNote, workUrl, type WorkContext } from "./resume";
 import {
   appMatches,
   clearTrigger,
@@ -406,5 +406,20 @@ describe("where was I", () => {
     expect(withNote(ctx, "  fix the\n tests ").note).toBe("fix the tests");
     expect(withNote(ctx, "   ").note).toBeNull();
     expect(resumeSummary(withNote(ctx, "next: tests"))).toMatchObject({ note: "next: tests", where: "Visual Studio Code — brain.ts - todopet" });
+  });
+});
+
+describe("which windows are never where you were", () => {
+  it("knows the pet's own window, shell pop-ups and call apps", () => {
+    expect(isNotWorkApp(app("TodoPet", "todopet.exe"))).toBe(true);
+    expect(isNotWorkApp(app("Lock", "LockApp.exe"))).toBe(true);
+    expect(isNotWorkApp(app("Visual Studio Code", "code.exe"))).toBe(false);
+    expect(isConferencing(app("Zoom", "Zoom.exe"), null)).toBe(true);
+    expect(isConferencing(app("Microsoft Teams", "ms-teams.exe"), null)).toBe(true);
+    expect(isConferencing(app("Google Chrome", "chrome.exe"), "https://meet.google.com/abc-defg-hij")).toBe(true);
+    expect(isConferencing(app("Google Chrome", "chrome.exe"), "https://eu.zoom.us/j/1")).toBe(true);
+    expect(isConferencing(app("Google Chrome", "chrome.exe"), "https://notzoom.us.example.com/")).toBe(false);
+    expect(isConferencing(app("Google Chrome", "chrome.exe"), "https://docs.example.com/spec")).toBe(false);
+    expect(isConferencing(null, null)).toBe(false);
   });
 });

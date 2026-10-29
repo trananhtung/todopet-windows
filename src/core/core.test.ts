@@ -8,7 +8,7 @@ import * as life from "./life";
 import { actionable, buildDay, dueTime, nextTask, planned, ranked, statsFromRaw, taskFromRaw, uiPriority, type TodoTask } from "./models";
 import * as lines from "./lines";
 import { defaultMoodInputs, evaluateMood, moodEmoji, moodLabel } from "./mood";
-import { dayRange, defaultPrefs, isWorkday, MAX_REST_DAYS, MAX_REST_RANGE, prefsFromJson } from "./prefs";
+import { addRestDays, dayRange, defaultPrefs, isWorkday, MAX_REST_DAYS, MAX_REST_RANGE, prefsFromJson } from "./prefs";
 import { appRules, currentDistraction, hostOf, matchSite, siteRules } from "./sites";
 import { findStuck, recordSeen, stuckDays } from "./stuck";
 
@@ -192,33 +192,277 @@ describe("kind lines", () => {
     setLang("en");
     return out;
   };
-  const scolding = /NOW|NGAY|!!|💢|😤|😠|😒|😑|mad\b|giận|lazy|lười|không làm gì|sad|buồn/;
+  /** Telling-off words, in both languages (case-insensitive). */
+  const scolding = /\?!|💢|😤|😠|😒|😑|\bmad\b|giận|lazy|lười|không làm gì|\bsad\b|buồn|goof|enough|đủ rồi|slack|waste|phí thời gian|bored|chán|get to work|làm việc đi|\bnow!|ngay!|again\?|nữa hả/i;
+  /** Never said, not even while you're on a distraction (case-insensitive). */
+  const insults = /\?!|!!|💢|😠|\bmad\b|giận|lazy|lười|goof|enough|đủ rồi|stupid|ngốc|useless|vô dụng|shame|xấu hổ|waste|phí thời gian|get to work|làm việc đi/i;
+  /** Shouting: a word of four or more capitals (the app name included). */
+  const shouting = /\b[A-ZĐ]{4,}\b/;
+  /** While you're on a distracting app or site, the pet may be playful (but never insulting or shouting). */
+  const DISTRACTION_TIME = new Set(["distraction", "grumble", "parade", "block"]);
 
-  it("offers help instead of scolding outside distractions, even when worried or grumpy", () => {
-    for (const mood of ["annoyed", "angry"] as const) {
-      const all = [
-        ...variants(() => lines.plan(mood, 1, 3)),
-        ...variants(() => lines.nudge(mood, t, 3)),
-        ...variants(() => lines.overdue(mood, 2)),
-        ...variants(() => lines.stuck(stuckTask, mood)),
-      ];
-      for (const text of all) expect(text, `${mood}: ${text}`).not.toMatch(scolding);
-    }
-    for (const text of [...variants(() => lines.dirty(2)), ...variants(() => lines.hungry(10, t)), ...variants(() => lines.review(1, 3, 2))]) {
-      expect(text).not.toMatch(scolding);
+  const moods = ["happy", "normal", "annoyed", "angry", "sleeping", "focus", "celebrating"] as const;
+  const at9 = new Date(2026, 9, 28, 9);
+  const ev = { id: "e", title: "Sync", start: new Date(2026, 9, 28, 10), end: new Date(2026, 9, 28, 11), joinUrl: null };
+  const slot = { task: t, start: new Date(2026, 9, 28, 14), end: new Date(2026, 9, 28, 14, 30) };
+  /** Sample arguments for every exported line (a new line needs an entry here). */
+  const ARGS: Record<string, unknown[][]> = {
+    greeting: [[at9], [new Date(2026, 9, 28, 12)], [new Date(2026, 9, 28, 15)], [new Date(2026, 9, 28, 20)]],
+    hello: [["Mochi"]],
+    morning: [
+      [at9, 1, 3, t, 3],
+      [at9, 3, 3, t, 3],
+      [at9, 3, 0, null, 3],
+      [at9, 3, 3, t, 3, { frog: t, note: "Start with the intro" }],
+      [at9, 3, 3, t, 3, { frog: task("2", { content: "Call Anna" }), note: null }],
+      [at9, 1, 3, t, 3, { frog: t, note: "Call mum" }],
+      [at9, 3, 0, null, 3, { frog: null, note: "Call mum" }],
+      [at9, 3, 3, t, 3, { frog: null, note: null }],
+    ],
+    plan: moods.map((m) => [m, 1, 3]),
+    nudge: moods.map((m) => [m, t, 3]),
+    overdue: moods.flatMap((m) => [[m, 2, 0], [m, 1, 2], [m, 0, 2], [m, 0, 1]]),
+    freshStart: [[2, 0], [1, 1]],
+    freshStartPartial: [[2, 3, 1, 0, "offline"], [0, 2, 2, 1, "offline"]],
+    freshStartUndone: [[2, 0], [1, 1]],
+    distraction: moods.flatMap((m) => [[m, "youtube.com", 2, t], [m, "Discord", 1, null]]),
+    done: [[t, 1, 3, "meow"], [t, 3, 3, "meow"]],
+    allDone: [[]],
+    review: [[1, 3, 2]],
+    overbooked: [
+      [{ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 }],
+      [{ taskMinutes: 200, meetingMinutes: 0, capacity: 90, overBy: 110 }],
+      [{ taskMinutes: 480, meetingMinutes: 45, capacity: 30, overBy: 495 }],
+    ],
+    loadMeter: [
+      [{ taskMinutes: 240, meetingMinutes: 120, capacity: 420, overBy: 0 }],
+      [{ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 }],
+      [{ taskMinutes: 90, meetingMinutes: 0, capacity: 0, overBy: 90 }],
+      [{ taskMinutes: 0, meetingMinutes: 0, capacity: 0, overBy: 0 }],
+    ],
+    loadDetail: [
+      [{ taskMinutes: 240, meetingMinutes: 120, capacity: 420, overBy: 0 }],
+      [{ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 }],
+      [{ taskMinutes: 90, meetingMinutes: 0, capacity: 0, overBy: 90 }],
+    ],
+    wrappedUp: [[t], [null]],
+    backToWork: [[]],
+    welcomeBack: [[t]],
+    soon: [[t, 5]],
+    dueNow: [[t]],
+    focusStart: [[t, 25], [null, 1]],
+    focusEnd: [[t, 25], [null, 1]],
+    breakStart: [[5]],
+    breakEnd: [[]],
+    added: [["Buy milk"]],
+    planComplete: [[3, t], [3, null]],
+    lateNight: [[]],
+    error: [["offline"]],
+    connected: [[]],
+    demoHello: [[]],
+    movedToTomorrow: [[2]],
+    meetingSoon: [[ev, 5], [ev, 5, [t, t]]],
+    meetingOver: [[ev, null], [ev, { ...ev, title: "Design review", start: new Date(2026, 9, 28, 11, 10) }]],
+    resumeCard: [
+      [{ task: "Write the weekly report", where: "Visual Studio Code — brain.ts", note: "Fix the retry loop", canReopen: true }, "away"],
+      [{ task: null, where: "Notepad", note: null, canReopen: false }, "meeting"],
+      [{ task: "Reply to the boss", where: null, note: null, canReopen: false }, "distraction"],
+      [{ task: null, where: null, note: "Call mum", canReopen: false }, "away"],
+    ],
+    resumeDiary: [["Write the weekly report", true], [null, false]],
+    pinned: [[]],
+    asPlanned: [[t]],
+    triggerChip: [
+      [{ kind: "afterMeeting", eventId: "e", title: "Sync" }, [ev]],
+      [{ kind: "afterMeeting", eventId: "gone", title: "Sync" }, []],
+      [{ kind: "appOpen", app: "Visual Studio Code" }, []],
+      [{ kind: "afterLunch" }, []],
+    ],
+    triggerChoice: [
+      [{ kind: "afterMeeting", eventId: "e", title: "Sync" }, [ev]],
+      [{ kind: "appOpen", app: "Figma" }, []],
+      [{ kind: "afterLunch" }, []],
+    ],
+    starterStart: [[t], [null]],
+    starterEnd: [[t], [null]],
+    starterEnough: [[]],
+    calendarDay: [[2, 90, 300, 2, true], [1, 30, 400, 3, false]],
+    timeBlock: [[slot]],
+    timeSet: [[t, slot.start]],
+    stuck: moods.map((m) => [stuckTask, m]),
+    splitDone: [[3, "Outline"]],
+    deleted: [[t]],
+    confirmDelete: [[t]],
+    unplanned: [[t]],
+    golden: [[]],
+    combo: [[3]],
+    cleaned: [[0], [1]],
+    levelUp: [[2]],
+    unlocked: [[["bow", "crown"]]],
+    speciesUnlocked: [["🐉", "Dragon"]],
+    streak: [[4]],
+    dirty: [[2]],
+    dayFrozen: [["yesterday", 5, 1], ["3 days ago", 2, 0]],
+    dayExcused: [["yesterday", 5], ["yesterday", 0]],
+    dayBroken: [["yesterday", 5, 2, true], ["yesterday", 5, 2, false]],
+    pageDone: [[2, true], [2, false]],
+    streakRepaired: [[6]],
+    repairExpired: [[0], [1]],
+    dayOff: [[true, 4], [true, 0], [false, 4]],
+    hungry: [[20, t], [5, null]],
+    grumble: [[t]],
+    parade: [[t]],
+    block: [["youtube.com", t], ["Discord", null]],
+    distractionSummary: [[{ "youtube.com": 720, Discord: 300 }]],
+    voiceGrumble: [[]],
+    voiceAngry: [[t]],
+    voiceBlock: [["youtube.com"]],
+    voiceHungry: [[]],
+    voiceCheer: [[]],
+    voiceSummary: [[17]],
+    tip: [[]],
+    // v0.5 Game: trips and the Monday fresh start.
+    tripOffer: [[new Date(2026, 9, 28, 16)]],
+    tripGo: [[]],
+    tripStay: [[]],
+    tripStayed: [[]],
+    tripStart: [["Hội An", new Date(2026, 9, 28, 16)]],
+    tripBack: [
+      [{ place: "hoian", minutes: 120, souvenir: "hoian", xp: 0 }],
+      [{ place: "hoian", minutes: 120, souvenir: null, xp: 20 }],
+      [{ place: "hoian", minutes: 10, souvenir: null, xp: 0 }],
+    ],
+    postcard: [["Hội An", "Lanterns on the river at night."]],
+    newWeek: [[{ key: "2026-10-26", done: 11, stickers: 2, trips: 1 }], [{ key: "2026-10-26", done: 0, stickers: 0, trips: 0 }], [null]],
+  };
+
+  it("never scolds: every line and every spoken line, in both languages; only playful while you're on a distraction", () => {
+    const fns = Object.entries(lines).filter((e): e is [string, (...a: unknown[]) => string] => typeof e[1] === "function");
+    expect(fns.length).toBeGreaterThan(50);
+    for (const [name, fn] of fns) {
+      expect(ARGS[name], `sample arguments for lines.${name}`).toBeDefined();
+      for (const args of ARGS[name]) {
+        for (const text of variants(() => fn(...args))) {
+          if (DISTRACTION_TIME.has(name)) {
+            expect(text, `${name}: ${text}`).not.toMatch(insults);
+            expect(text, `${name}: ${text}`).not.toMatch(shouting);
+          } else {
+            expect(text, `${name}: ${text}`).not.toMatch(scolding);
+          }
+        }
+      }
     }
   });
 
-  it("mentions a fresh start for overdue tasks", () => {
+  it("speaks kindly: the voice lines are invitations, never orders", () => {
+    for (const text of [
+      ...variants(() => lines.voiceGrumble()),
+      ...variants(() => lines.voiceAngry(t)),
+      ...variants(() => lines.voiceBlock("YouTube")),
+      ...variants(() => lines.voiceSummary(30)),
+    ]) {
+      expect(text).not.toMatch(scolding);
+      expect(text).not.toMatch(insults);
+      expect(text).not.toMatch(/!/);
+    }
+  });
+
+  it("mentions a fresh start for overdue tasks, and only offers what can be done", () => {
     for (const mood of ["normal", "annoyed", "angry"] as const) {
       setLang("en");
-      expect(lines.overdue(mood, 2)).toMatch(/fresh start/i);
+      expect(lines.overdue(mood, 2, 0)).toMatch(/fresh start/i);
+      expect(lines.overdue(mood, 1, 1)).toMatch(/1 repeating task stays put/i);
+      // Every overdue task repeats: nothing to move, so no promise of moving.
+      expect(lines.overdue(mood, 0, 2)).not.toMatch(/move|fresh start/i);
+      expect(lines.overdue(mood, 0, 2)).toMatch(/2 repeating tasks/);
       setLang("vi");
-      expect(lines.overdue(mood, 2)).toMatch(/bắt đầu lại/i);
+      expect(lines.overdue(mood, 2, 0)).toMatch(/bắt đầu lại/i);
+      expect(lines.overdue(mood, 0, 2)).not.toMatch(/dời|bắt đầu lại/i);
     }
     setLang("en");
-    expect(lines.freshStart(2)).toContain("2 overdue tasks");
-    expect(lines.freshStart(1)).toContain("1 overdue task ");
+    expect(lines.freshStart(2, 0)).toContain("2 overdue tasks");
+    expect(lines.freshStart(2, 0)).toContain("clean slate");
+    expect(lines.freshStart(1, 1)).toContain("1 overdue task ");
+    expect(lines.freshStart(1, 1)).not.toContain("clean slate");
+    expect(lines.freshStart(1, 1)).toMatch(/repeating tasks stay put/i);
+    expect(lines.freshStartPartial(2, 3, 1, 0, "offline")).toContain("Moved 2 of 3 overdue tasks to tomorrow; 1 couldn't move");
+    expect(lines.freshStartPartial(0, 2, 2, 0, "offline")).toMatch(/Couldn't move the 2 overdue tasks/);
+  });
+
+  it("says the overbooked day with what is ahead and what is left, in both languages", () => {
+    const heavy = { taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 };
+    setLang("en");
+    expect(lines.overbooked(heavy)).toBe("Today looks overbooked: ~6h of tasks + 3h of meetings in 7h left. Move some?");
+    expect(lines.overbooked({ taskMinutes: 200, meetingMinutes: 0, capacity: 150, overBy: 50 })).toBe("Today looks overbooked: ~3h20 of tasks in 2h30 left. Move some?");
+    // Under an hour is said in minutes, never "0h45".
+    expect(lines.overbooked({ taskMinutes: 120, meetingMinutes: 30, capacity: 45, overBy: 105 })).toBe("Today looks overbooked: ~2h of tasks + 30 min of meetings in 45 min left. Move some?");
+    setLang("vi");
+    expect(lines.overbooked(heavy)).toContain("~6h việc + 3h họp");
+    expect(lines.overbooked(heavy)).toContain("7h");
+    setLang("en");
+  });
+
+  it("shows the load meter as load over time left, and says so kindly when the day is over", () => {
+    setLang("en");
+    expect(lines.loadMeter({ taskMinutes: 240, meetingMinutes: 120, capacity: 420, overBy: 0 })).toBe("~6h / 7h left");
+    expect(lines.loadMeter({ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 })).toBe("~9h / 7h left");
+    expect(lines.loadMeter({ taskMinutes: 90, meetingMinutes: 0, capacity: 0, overBy: 90 })).toBe("Work day is over · ~1h30 still open");
+    expect(lines.loadDetail({ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 })).toMatch(/6h of tasks.*3h of meetings.*7h.*2h over/);
+    setLang("vi");
+    expect(lines.loadMeter({ taskMinutes: 240, meetingMinutes: 120, capacity: 420, overBy: 0 })).toBe("~6h / 7h còn lại");
+    setLang("en");
+  });
+
+  it("wishes you a good evening and names tomorrow's frog when there is one", () => {
+    setLang("en");
+    expect(lines.wrappedUp(t)).toContain("“Write the report”");
+    expect(lines.wrappedUp(t)).toContain("🐸");
+    expect(lines.wrappedUp(null)).not.toContain("🐸");
+    expect(lines.wrappedUp(null)).toMatch(/rest/i);
+    setLang("vi");
+    expect(lines.wrappedUp(t)).toContain("“Write the report”");
+    setLang("en");
+  });
+
+  it("names the frog and the note you left in the morning greeting", () => {
+    setLang("en");
+    const call = task("2", { content: "Call Anna" });
+    // Planned: the frog is the first task, said as your own pick.
+    const planned = lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Start with the intro" });
+    expect(planned).toContain("Good morning");
+    expect(planned).toContain("picked");
+    expect(planned).toContain("“Write the report”");
+    expect(planned).toContain("📝");
+    expect(planned).toContain("“Start with the intro”");
+    // Not planned yet: the planning question comes first, the frog and the note follow.
+    const asking = lines.morning(at9, 1, 3, t, 3, { frog: call, note: null });
+    expect(asking.split("\n")[0]).toContain("1/3");
+    expect(asking).toContain("“Call Anna”");
+    expect(asking).not.toContain("Your note");
+    // A frog that is not the next task is still named, next to the usual line.
+    expect(lines.morning(at9, 3, 3, t, 3, { frog: call, note: null })).toMatch(/Eat the frog first: “Write the report”[\s\S]*“Call Anna”/);
+    // Without a plan, nothing changes.
+    expect(lines.morning(at9, 3, 3, t, 3)).toBe(lines.morning(at9, 3, 3, t, 3, null));
+    expect(lines.morning(at9, 3, 3, t, 3, { frog: null, note: null })).toBe(lines.morning(at9, 3, 3, t, 3));
+    setLang("vi");
+    expect(lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Bắt đầu từ phần mở đầu" })).toContain("“Bắt đầu từ phần mở đầu”");
+    setLang("en");
+  });
+
+  it("invites you to wrap up the day when it is almost over", () => {
+    setLang("en");
+    expect(lines.review(1, 3, 2)).toMatch(/end of day/);
+    expect(lines.review(1, 3, 2)).toMatch(/wrap up/i);
+    setLang("vi");
+    expect(lines.review(1, 3, 2)).toMatch(/tổng kết/i);
+    setLang("en");
+  });
+
+  it("gives the whole choice when asked for it, for the menu's tooltip", () => {
+    setLang("en");
+    const e = { kind: "afterMeeting", eventId: "e", title: "A very long meeting title that goes on and on and on" } as const;
+    expect(lines.triggerChoice(e, [])).toContain("A very long meeting title tha…");
+    expect(lines.triggerChoice(e, [], Infinity)).toContain("A very long meeting title that goes on and on and on");
   });
 });
 
@@ -389,13 +633,15 @@ describe("forgiving streaks", () => {
     life.closeDay(s, "2026-10-27", always);
     expect(life.activeRepair(s)).toEqual({ streak: 6, until: "2026-11-09" });
     life.syncDay(s, 1, 3, 3, true);
-    expect(life.checkRepair(s)).toBe(0);
+    expect(life.checkRepair(s)).toBeNull();
     expect(s.streak).toBe(0);
     life.syncDay(s, 2, 3, 3, true);
-    expect(life.checkRepair(s)).toBe(6);
+    expect(life.checkRepair(s)).toBe("restored");
     expect(s.streak).toBe(6);
-    expect(s.repair).toBeNull();
+    // Not final until the day closes: the quest remembers what the streak was.
+    expect(s.repair).toEqual({ streak: 6, until: "2026-11-09", restored: { from: 0 } });
     expect(life.closeDay(s, "2026-10-28", always).outcome).toBe("kept");
+    expect(s.repair).toBeNull();
     expect(s.streak).toBe(7);
     expect(s.bestStreak).toBe(7);
   });
@@ -426,6 +672,115 @@ describe("forgiving streaks", () => {
     expect(life.activeRepair(s)?.until).toBe("2026-11-09");
     expect(life.closeDay(s, "2026-11-10", always).repairExpired).toBe(true);
     expect(s.repair).toBeNull();
+  });
+});
+
+describe("forgiving streaks, as reviewed", () => {
+  it("keeps a restored streak only while today has 2 tasks done, and makes it final when the day closes", () => {
+    const s = seenDay({ streak: 6, snacks: 0 });
+    life.closeDay(s, "2026-10-27", always);
+    life.syncDay(s, 2, 3, 3, true);
+    expect(life.checkRepair(s)).toBe("restored");
+    expect(s.streak).toBe(6);
+    // Idempotent: the next sync with the same count changes nothing.
+    expect(life.checkRepair(s)).toBeNull();
+    // A failed close or an Undo: back to 1 of 2, and the streak goes back with it.
+    life.syncDay(s, 1, 3, 3, true);
+    expect(life.checkRepair(s)).toBe("reverted");
+    expect(s.streak).toBe(0);
+    expect(s.repair).toEqual({ streak: 6, until: "2026-11-09" });
+    life.syncDay(s, 2, 3, 3, true);
+    expect(life.checkRepair(s)).toBe("restored");
+    // Undone on the phone after the last sync: the day closes with 1 task, so the quest ends unfinished.
+    life.syncDay(s, 1, 3, 3, true);
+    const r = life.closeDay(s, "2026-10-28", always);
+    expect(r).toMatchObject({ outcome: "kept", repairExpired: true });
+    expect(s.streak).toBe(1);
+    expect(s.repair).toBeNull();
+  });
+
+  it("takes a restored streak back when the day closes unchecked, and keeps the quest", () => {
+    const s = seenDay({ streak: 6, snacks: 0 });
+    life.closeDay(s, "2026-10-27", always);
+    // Two tasks finished in the pet, but Todoist never confirmed the day.
+    life.syncDay(s, 2, 3, 3, true, false, false);
+    expect(life.checkRepair(s)).toBe("restored");
+    const r = life.closeDay(s, "2026-10-28", always);
+    expect(r).toMatchObject({ outcome: "none", repairExpired: false });
+    expect(s.streak).toBe(0);
+    expect(s.repair).toEqual({ streak: 6, until: "2026-11-09" });
+  });
+
+  it("doesn't offer a repair that has already run out", () => {
+    // Back after more than two weeks away: the 14 days have gone by.
+    const s = seenDay({ streak: 5, snacks: 0 });
+    const r = life.closeDay(s, "2026-11-10", always);
+    expect(r).toMatchObject({ outcome: "broken", lost: 5, repairOffered: false, repairExpired: false });
+    expect(s.repair).toBeNull();
+    // On its last day it still can be done, so it's offered.
+    const t = seenDay({ streak: 5, snacks: 0 });
+    expect(life.closeDay(t, "2026-11-09", always).repairOffered).toBe(true);
+    expect(t.repair?.until).toBe("2026-11-09");
+  });
+
+  it("counts a day as seen only from a count Todoist confirmed", () => {
+    const s = { ...life.newLife(), dayKey: "2026-10-26" };
+    life.syncDay(s, 0, 3, 3, true, false, false);
+    expect(s.daySeen).toBe(false);
+    life.syncDay(s, 1, 3, 3, true, false, true);
+    expect(s.daySeen).toBe(true);
+    // A later fetch failed: it's still a day the app saw.
+    life.syncDay(s, 1, 3, 3, true, false, false);
+    expect(s.daySeen).toBe(true);
+  });
+
+  it("counts work done on a rest day or a weekend, and never holds a missed one against you", () => {
+    const s = seenDay({ dayWorkday: false, dayCompleted: 3, streak: 4, snacks: 0 });
+    const r = life.closeDay(s, "2026-10-27", always);
+    expect(r).toMatchObject({ outcome: "kept", snackEarned: true, sticker: true });
+    expect(s.streak).toBe(5);
+    expect(s.snacks).toBe(1);
+    expect(s.perfectDays).toEqual(["2026-10-26"]);
+    life.syncDay(s, 0, 0, 3, false);
+    expect(life.closeDay(s, "2026-10-28", always).outcome).toBe("none");
+    expect(s.streak).toBe(5);
+    expect(s.dirt).toBe(0);
+    expect(s.snacks).toBe(1);
+  });
+
+  it("keeps a packed day excused even if a later calendar fetch fails", () => {
+    const s = seenDay({ streak: 4, snacks: 1 });
+    life.syncDay(s, 0, 3, 3, true, true);
+    life.syncDay(s, 0, 3, 3, true, false);
+    expect(s.dayBusy).toBe(true);
+    expect(life.closeDay(s, "2026-10-27", always).outcome).toBe("excused");
+    expect(s.dayBusy).toBe(false);
+  });
+
+  it("keeps the snack when there's no streak to save, and lets an unfinished quest go", () => {
+    const s = seenDay({ streak: 5, snacks: 0 });
+    life.closeDay(s, "2026-10-27", always);
+    s.snacks = 1;
+    life.syncDay(s, 0, 3, 3, true);
+    const r = life.closeDay(s, "2026-10-28", always);
+    expect(r).toMatchObject({ outcome: "broken", lost: 0, repairOffered: false, repairExpired: true });
+    expect(s.snacks).toBe(1);
+    expect(s.dirt).toBe(2);
+    expect(s.repair).toBeNull();
+  });
+
+  it("reports a growth stage reached with a sticker's or a page's XP", () => {
+    const s = seenDay({ dayCompleted: 3, xp: 95 });
+    expect(life.closeDay(s, "2026-10-27", always).levelUp).toBe(1);
+    life.syncDay(s, 1, 3, 3, true);
+    expect(life.closeDay(s, "2026-10-28", always).levelUp).toBeNull();
+    const t = seenDay({ dayCompleted: 3, xp: 250, pageFilled: 9 });
+    expect(life.closeDay(t, "2026-10-27", always)).toMatchObject({ pageDone: true, levelUp: 2 });
+  });
+
+  it("reads a restored quest back from disk", () => {
+    expect(life.lifeFromJson({ repair: { streak: 6, until: "2026-11-09", restored: { from: 1 } } }).repair).toEqual({ streak: 6, until: "2026-11-09", restored: { from: 1 } });
+    expect(life.lifeFromJson({ repair: { streak: 6, until: "2026-11-09", restored: "x" } }).repair).toEqual({ streak: 6, until: "2026-11-09" });
   });
 });
 
@@ -477,6 +832,27 @@ describe("life migration", () => {
     const s = seenDay({ dayNudges: 6, dayCompleted: 1 });
     life.closeDay(s, "2026-10-27", always);
     expect(s.dayNudges).toBe(0);
+  });
+
+  it("keeps today's reminder gates, back-off and hold across restarts, until the day closes", () => {
+    const saved = {
+      dayFired: { "morning-2026-10-26": 1, nudge: 2, bad: "x" },
+      dayBackoff: { distract: 4, nudge: 99, plan: 0.5, nope: 2 },
+      dismissedInRow: 2,
+      nudgeHoldUntil: 1234,
+    };
+    const s = { ...seenDay(), ...life.lifeFromJson(saved), dayKey: "2026-10-26", daySeen: true, dayCompleted: 1 };
+    expect(s.dayFired).toEqual({ "morning-2026-10-26": 1, nudge: 2 });
+    // Back-off doubles up to ×8; anything else is dropped.
+    expect(s.dayBackoff).toEqual({ distract: 4, nudge: 8 });
+    expect(s.dismissedInRow).toBe(2);
+    expect(s.nudgeHoldUntil).toBe(1234);
+    expect(life.lifeFromJson({}).dayFired).toEqual({});
+    expect(life.lifeFromJson({ nudgeHoldUntil: "x", dismissedInRow: -1 })).toMatchObject({ nudgeHoldUntil: null, dismissedInRow: 0, dayBackoff: {} });
+    life.closeDay(s, "2026-10-27", always);
+    expect(s).toMatchObject({ dayFired: {}, dayBackoff: {}, dismissedInRow: 0 });
+    // The hold is an absolute time: it runs out on its own, midnight or not.
+    expect(s.nudgeHoldUntil).toBe(1234);
   });
 
   it("clamps broken new fields", () => {
@@ -617,6 +993,24 @@ describe("prefs", () => {
     const capped = prefsFromJson({ restDays: many }, now).restDays;
     expect(capped).toHaveLength(MAX_REST_DAYS);
     expect(capped[0]).toBe("2026-10-29");
+  });
+
+  it("adds rest days, telling how many were new and how many the 60-day cap left out", () => {
+    const now = new Date(2026, 9, 29, 12).getTime();
+    expect(addRestDays(["2026-11-02"], dayRange("2026-11-01", "2026-11-03"), now)).toEqual({
+      restDays: ["2026-11-01", "2026-11-02", "2026-11-03"],
+      added: 2,
+      cut: 0,
+    });
+    // Already 60 days ahead: an earlier range pushes the furthest days out.
+    const full = dayRange("2026-11-01", "2026-12-30", 60);
+    expect(full).toHaveLength(MAX_REST_DAYS);
+    const earlier = addRestDays(full, dayRange("2026-10-29", "2026-10-31"), now);
+    expect(earlier).toMatchObject({ added: 3, cut: 3 });
+    expect(earlier.restDays).toHaveLength(MAX_REST_DAYS);
+    expect(earlier.restDays.at(-1)).toBe("2026-12-27");
+    // A later one doesn't fit at all.
+    expect(addRestDays(full, ["2027-01-05"], now)).toMatchObject({ added: 0, cut: 1 });
   });
 
   it("clamps the daily nudge budget to 0–30, 8 by default", () => {
