@@ -178,7 +178,10 @@ constant ones, and endowed progress raises completion.
   their day closes, and the next morning's note says so kindly.
 - `closeDay` returns what happened (`kept | excused | frozen | broken | none`, snack earned, sticker, page done,
   repair offered or expired, level-up) and the brain explains it kindly in one bubble the next morning (not counted
-  as a reminder), from an hour before work starts, on that day only.
+  as a reminder), from an hour before work starts, on that day only. When the day's first greeting is still to come,
+  the kind words ride in it, after the greeting (and its frog and note), as lines of the same bubble: a bubble of their
+  own would hold the greeting back for the 15-minute gap between bubbles, and a day with nothing done is the day the
+  frog and the note matter most. Without a greeting to join (a day off, or it already came) they are a bubble of their own.
 - Everyone starts with (or migrates to) 1 snack. Copy: the dragon and crown read "Keep a 7-day streak"; dirt reads
   "needs a bath (N missed days)"; the board's streak tooltip shows the snack stash and an active repair quest.
 
@@ -253,7 +256,13 @@ people detach; overcommitting is the main planning failure.
   line "where do I start tomorrow?". **Done for today** puts the pet to sleep and stops non-urgent bubbles until
   the next workday. The sheet is one line per task with its three choices as a radio group (one tab stop, arrow keys
   between the choices); tomorrow's first task is one choice (a list) and the note sits above the tasks, so neither is
-  far to scroll to; the buttons stay in reach below. Escape goes back to the list, like **Back**.
+  far to scroll to; the buttons stay in reach below. Escape goes back to the list, like **Back**. Every line that says
+  "tomorrow" (the note's label, the choices, the bubble after **Done for today**, the end-of-day review and its quick
+  button) says the next workday's name when that isn't tomorrow: "Monday" / "Thứ Hai", from one helper. On a short board
+  (under 600 px: it opened above the pet) the sheet is tighter so the list shows on open: Back and the title on a line,
+  today's wins on a line, the labels beside their fields, a thinner bar; the same keyboard and the same words. Split
+  and the wardrobe take the keyboard to their heading the same way, so Escape goes back to the list there too (and
+  the focus returns to the button that opened them).
 - Tomorrow's frog and the note are stored locally (`plan` key) and the next morning's greeting names them; the
   frog goes first in "eat the frog" ordering that day.
 - The draft lives in the brain for the day (closing the board keeps it); a frog finished elsewhere becomes "I'll
@@ -274,8 +283,12 @@ people detach; overcommitting is the main planning failure.
   the day is ("~3h45 over") and has a close button; every open row shows its estimate ("30'", lighter when it is the
   default) and a one-tap **→ Tomorrow** (the next workday, like the Wrap up sheet; a repeating task can't move). The
   banner follows the load as tasks move and goes away, with a word about it, when the day fits. How far over the day
-  is also shows in plain words in the strip's header ("~3h45 over"), and tapping it opens the same state. The warning
-  bubble is dropped if the day fits again before anyone read it.
+  is also shows in plain words in the strip's header ("~3h45 over"), and tapping it opens the same state; while the state
+  is open the chip steps aside and the timeline folds away (the banner has the words, and the rows need the room: at
+  least three show on a 1024 x 700 screen). In that state a row is its tick and its **→ Tomorrow** (the hover icons
+  would cover the title): the keyboard goes to the first **→ Tomorrow** when it opens, up and down arrows move between
+  them, and after a move it is on the next row's (or the one before, or the add field when the day fits), never on the
+  page. The warning bubble is dropped when the state opens, or if the day fits again before anyone read it.
 - The board shows a compact timeline of the work day: meetings, timed tasks, now, and a load meter. The blocks are 14 px
   bars (3:1 or better against the track in both themes), labeled when wide enough, with hours marked every 2 hours and
   a caption under them that follows hover and focus (now and what is next otherwise). They are reachable by keyboard:
@@ -298,12 +311,15 @@ people detach; overcommitting is the main planning failure.
   asks first ("You're 12 minutes into a focus session. Switch to 2 minutes?").
 
 ### 6. Bubbles and the open board
-- An urgent bubble that announces or asks something (a meeting, a timed task, "is it done?", "Move some?") shows as a
-  banner at the top of the open board, with its words and buttons. The quiet replies ("Added ✔︎") stay out of the way
-  (the board has its own note), and the rest wait for the board to close.
+- An urgent bubble that announces or asks something (a meeting, a timed task, "is it done?") shows as a banner at the
+  top of the open board, with its words and buttons, and so does the day's "Move some?" check-in, which isn't urgent: it
+  is read there once, so when the board closes it isn't shown again over the pet. The quiet replies ("Added ✔︎") stay out
+  of the way (the board has its own note), and the rest wait for the board to close. Escape on a banner's button closes
+  the banner, not the board.
 - Every bubble can say when it stops being true: the meeting it announces has started, the task it names is gone or
   done, the focus session it confirms was stopped, the day no longer runs over. A stale bubble is dropped unseen, at
-  once when its subject changes and at the latest at the next beat; that is no refusal and costs nothing.
+  once when its subject changes and at the latest at the next beat; that is no refusal and costs nothing (the
+  reminder it counted is given back).
 - The demo panel can show what the browser can't otherwise: **Day's end** (the review bubble, past the gap between
   bubbles), **Next morning** (the clock moves to 8:20 on the next workday: what you moved to tomorrow comes back as
   today's tasks, with the greeting, the frog and the note) and **Friday** (16:30 with weekends off, so "tomorrow" is

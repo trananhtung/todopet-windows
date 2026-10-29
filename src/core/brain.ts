@@ -13,7 +13,7 @@ import {
   type CalEvent,
   type SlotSuggestion,
 } from "./calendar";
-import { addDays, atHour, dayKey, daysAgo, parseDate, shortText, startOfDay, timeString, utcString } from "./dates";
+import { addDays, atHour, dayKey, daysAgo, parseDate, shortText, startOfDay, timeString, utcString, weekdayName } from "./dates";
 import { Diary } from "./diary";
 import { L, langFromLocale, plural, setLang } from "./l10n";
 import * as life from "./life";
@@ -164,6 +164,11 @@ export interface Bubble {
   card?: CardKind;
   /** A quieter second line under the text (where you were, on the resume card). */
   detail?: string;
+  /**
+   * A check-in that is not urgent but still shows as a banner in the open board ("Move some?"). Once it was read
+   * there, the board closing drops it: it is not shown again over the pet.
+   */
+  inBoard?: boolean;
   /** After this time (epoch ms) the bubble is out of date (the meeting it announces has started) and is dropped unseen. */
   validUntil?: number;
   /** Turns false once what the bubble is about has changed (its session stopped, its task is gone): it is dropped unseen. */
@@ -172,9 +177,10 @@ export interface Bubble {
 
 /**
  * Does this bubble get through while the board is open? Urgent ones that announce or ask something (a meeting, a timed
- * task, "is it done?") do, as a banner in the board. The quiet replies ("Added ✔︎") don't: the board says so itself.
+ * task, "is it done?") do, as a banner in the board, and so does the day's "Move some?" check-in. The quiet replies
+ * ("Added ✔︎") don't: the board says so itself.
  */
-export const showsOverBoard = (b: Bubble): boolean => b.urgent && (b.reminder || b.actions.length > 0);
+export const showsOverBoard = (b: Bubble): boolean => (b.urgent || b.inBoard === true) && (b.reminder || b.actions.length > 0);
 
 export interface FocusSession {
   task: TodoTask | null;
@@ -435,6 +441,12 @@ export class Brain {
    * Kind words that wait until you're around, for the day they were written on: how the last day was settled, and
    * a repaired streak. Dropped once that day is over.
    */
+  /** The "Move some?" bubble that is waiting, so opening the lighten view (its answer) can drop it. */
+  private overbookedBubble: number | null = null;
+  /** The board's lighten view is open: the day's weight is on show, so "Move some?" has nothing to add. */
+  private lightening = false;
+  /** A check-in that showed as a banner in the open board: it was read there, so the board closing drops it. */
+  private readInBoard: number | null = null;
   private dayNote: Note | null = null;
   private repairNote: Note | null = null;
   /** Todoist confirmed today's finished tasks at least once (the completed-tasks fetch worked). */
@@ -1353,11 +1365,10 @@ export class Brain {
   }
 
   /**
-   * Says the waiting kind words once you're here: a reply, not a reminder (no `why`), so it isn't counted. Only on
-   * the day they were written for, and not in the middle of the night: from an hour before work starts (the demo
-   * works around the clock).
+   * The kind words waiting for today (SPEC v0.3 §1), or null. Only the day they were written for: words that "done
+   * for today" held back count as today's, the rest of the stale ones are dropped.
    */
-  private tellNotes(nowMs: number): void {
+  private waitingNotes(nowMs: number): string | null {
     const now = new Date(nowMs);
     const today = dayKey(now);
     // While "done for today" holds them back they wait for the first greeting after it, so they count as today's.
@@ -1365,12 +1376,38 @@ export class Brain {
     if (this.dayNote && this.dayNote.day !== today) this.dayNote = sleeping ? { ...this.dayNote, day: today } : null;
     if (this.repairNote && this.repairNote.day !== today) this.repairNote = sleeping ? { ...this.repairNote, day: today } : null;
     const text = [this.dayNote ? (this.dayNote.rebuild?.(nowMs) ?? this.dayNote.text) : undefined, this.repairNote?.text].filter(Boolean).join("\n");
-    // "Done for today" keeps even these until the next workday starts.
-    if (!text || this.state.bubble || this.outOfTheWay || this.sample.idleSeconds > 300 || isDoneForToday(this.plan, nowMs)) return;
-    if (!this.state.isDemo && nowMs < atHour(this.state.prefs.workStart - 1, 0, now).getTime()) return;
-    if (this.state.quietUntil !== null && nowMs < this.state.quietUntil) return;
+    return text || null;
+  }
+
+  private clearNotes(): void {
     this.dayNote = null;
     this.repairNote = null;
+  }
+
+  /**
+   * Is today's first greeting still to come? Then the waiting kind words go into it, one bubble with the greeting
+   * first, instead of taking its place (a bubble of their own would hold the greeting back for the gap between
+   * bubbles, and on a day when nothing got done that is the day the frog and the note matter most).
+   */
+  private greetingComes(nowMs: number): boolean {
+    return this.state.hasToken && this.context(nowMs).inWork && this.firedAt(`morning-${this.dayKey}`) === undefined && !isDoneForToday(this.plan, nowMs);
+  }
+
+  /**
+   * Says the waiting kind words once you're here: a reply, not a reminder (no `why`), so it isn't counted. Only on
+   * the day they were written for, and not in the middle of the night: from an hour before work starts (the demo
+   * works around the clock). When the day's greeting is still to come they wait for it and ride along in it
+   * (`now`: the demo's button wants them at once).
+   */
+  private tellNotes(nowMs: number, now = false): void {
+    const date = new Date(nowMs);
+    const text = this.waitingNotes(nowMs);
+    // "Done for today" keeps even these until the next workday starts.
+    if (!text || this.state.bubble || this.outOfTheWay || this.sample.idleSeconds > 300 || isDoneForToday(this.plan, nowMs)) return;
+    if (!this.state.isDemo && nowMs < atHour(this.state.prefs.workStart - 1, 0, date).getTime()) return;
+    if (this.state.quietUntil !== null && nowMs < this.state.quietUntil) return;
+    if (!now && this.greetingComes(nowMs)) return;
+    this.clearNotes();
     this.say({ text, seconds: 12 });
   }
 
@@ -1383,7 +1420,7 @@ export class Brain {
    * rules do (`remindEvery`, `remindOnce`, `mayRemind`) before a reminder's timer is set, so a held reminder keeps
    * its turn and comes as soon as the hold ends.
    */
-  say(b: { text: string; detail?: string; actions?: BubbleAction[]; seconds: number; urgent?: boolean; validUntil?: number; stillValid?: () => boolean }, opts: SayOptions = {}): void {
+  say(b: { text: string; detail?: string; actions?: BubbleAction[]; seconds: number; urgent?: boolean; inBoard?: boolean; validUntil?: number; stillValid?: () => boolean }, opts: SayOptions = {}): void {
     // A bubble that went stale never blocks the next one.
     this.pruneBubble();
     const cur = this.state.bubble;
@@ -1392,6 +1429,7 @@ export class Brain {
     if (cur && cur.urgent && !b.urgent) return;
     const bubble: Bubble = { id: ++this.bubbleSeq, text: b.text, actions, seconds: b.seconds, urgent: b.urgent ?? false, reminder: opts.why !== undefined };
     if (b.detail) bubble.detail = b.detail;
+    if (b.inBoard) bubble.inBoard = true;
     if (b.validUntil !== undefined) bubble.validUntil = b.validUntil;
     if (b.stillValid) bubble.stillValid = b.stillValid;
     if (opts.kind) bubble.kind = opts.kind;
@@ -1437,7 +1475,7 @@ export class Brain {
    * fades was read, not refused; an expired one was never seen): a repeating kind's interval doubles, up to ×8, and
    * three refusals in a row hold the rest for an hour.
    */
-  dismissBubble(bubbleId: number, how: "closed" | "ignored" | "expired" | "stale"): void {
+  dismissBubble(bubbleId: number, how: "closed" | "ignored" | "expired" | "stale" | "seen"): void {
     const b = this.state.bubble;
     if (!b || b.id !== bubbleId) return;
     const kind = b.kind;
@@ -1461,8 +1499,16 @@ export class Brain {
             ? L("Bạn không phản hồi (tự ẩn)", "No response (faded away)")
             : how === "stale"
               ? L("Bong bóng đã cũ (việc nó nói tới đã đổi) nên mình bỏ đi, không tính là bạn từ chối", "The bubble was out of date (what it was about had changed), so it was dropped: not a refusal")
-              : L("Bong bóng hết hạn mà chưa hiện ra (pet đang ẩn)", "The bubble expired without showing (the pet was out of the way)");
-      this.diary.add("response", what + backoff, { tag: how });
+              : how === "seen"
+                ? L("Bạn đã thấy bong bóng trong bảng việc nên mình không hiện lại, không tính là bạn từ chối", "You saw the bubble in the board, so it isn't shown again: not a refusal")
+                : L("Bong bóng hết hạn mà chưa hiện ra (pet đang ẩn)", "The bubble expired without showing (the pet was out of the way)");
+        this.diary.add("response", what + backoff, { tag: how });
+    }
+    // Dropped unseen because what it said stopped being true: that costs nothing, so the reminder it counted is given back.
+    if (how === "stale" && kind !== undefined) {
+      this.mutateLife((s) => {
+        s.dayNudges = Math.max(0, s.dayNudges - 1);
+      });
     }
     this.set({ bubble: null });
     if (this.state.life.dismissedInRow >= HOLD_AFTER) {
@@ -1479,6 +1525,34 @@ export class Brain {
         ),
       );
     }
+  }
+
+  /** The board shows a check-in as a banner (a bubble with `inBoard`): the user has it in front of them. */
+  bannerRead(id: number): void {
+    const b = this.state.bubble;
+    if (b && b.id === id && b.inBoard && !b.urgent) this.readInBoard = id;
+  }
+
+  /**
+   * The board closed. A check-in that was read there as a banner is not shown again over the pet: no refusal, no
+   * reminder skipped, it costs nothing. Urgent news stays (the meeting is still about to start).
+   */
+  boardClosed(): void {
+    const id = this.readInBoard;
+    this.readInBoard = null;
+    this.lightening = false;
+    if (id !== null) this.dismissBubble(id, "seen");
+  }
+
+  /**
+   * The lighten view is open (or closed): that is what "Move some?" asks for, so its bubble goes, and it isn't said
+   * while the view is open. The board closing ends it.
+   */
+  setLightening(on: boolean): void {
+    this.lightening = on;
+    const id = this.overbookedBubble;
+    if (on && id !== null && this.state.bubble?.id === id) this.dismissBubble(id, "seen");
+    this.overbookedBubble = null;
   }
 
   /** Is the bubble out of date: its time is up, or what it is about has changed? */
@@ -1843,9 +1917,11 @@ export class Brain {
         }
         // The tasks that go with it can be opened from here: the board scrolls to the task and gives it the focus.
         const related = relatedTasks(upcoming.title, ranked(openTasks(s.day), s.day.frogId), 2);
+        // One button has the room for most of a title; with more buttons beside it each gets less.
+        const room = related.length === 1 && !upcoming.joinUrl ? 26 : 16;
         related.forEach((t, i) =>
           actions.push({
-            title: L(`Mở “${shortText(taskTitle(t), 16)}”`, `Open “${shortText(taskTitle(t), 16)}”`),
+            title: L(`Mở “${shortText(taskTitle(t), room)}”`, `Open “${shortText(taskTitle(t), room)}”`),
             primary: i === 0 && !upcoming.joinUrl,
             run: () => this.effects.openBoard?.(false, undefined, { focusTaskId: t.id }),
           }),
@@ -2049,15 +2125,23 @@ export class Brain {
         const free = freeMinutes(s.events, start, end);
         text += `\n${lines.calendarDay(s.events.length, (end.getTime() - start.getTime()) / MIN - free, free, target, target < s.prefs.dailyTarget)}`;
       }
+      // The kind words about the day before ride along, after the greeting: one bubble, so neither waits for the other.
+      const words = this.waitingNotes(nowMs);
+      if (words) {
+        text += `\n${words}`;
+        this.clearNotes();
+      }
       if (s.life.dirt > 0) text += `\n${lines.dirty(s.life.dirt)}`;
-      if (s.life.streak > 0) text += `\n${lines.streak(s.life.streak)}`;
+      // The kind words already say where the streak stands.
+      if (s.life.streak > 0 && !words) text += `\n${lines.streak(s.life.streak)}`;
       this.say(
         { text, actions: needsPlan ? this.planActions() : next ? [this.focusAction(next), this.laterAction()] : [], seconds: 60 },
         {
           why:
             L("lời chào đầu ngày làm việc", "first greeting of the workday") +
             (needsPlan ? L(`, mới có ${planned(day)}/${target} việc`, `, only ${planned(day)}/${target} planned`) : "") +
-            (kept ? L(", kèm con ếch và ghi chú bạn để lại", ", with the frog and note you left") : ""),
+            (kept ? L(", kèm con ếch và ghi chú bạn để lại", ", with the frog and note you left") : "") +
+            (words ? L(", kèm lời nhắn về hôm qua", ", with a kind word about yesterday") : ""),
         },
       );
       return;
@@ -2225,12 +2309,15 @@ export class Brain {
   /** The end-of-day review: what got done, and a way into the Wrap up sheet. */
   private sayReview(): void {
     const day = this.state.day;
+    // "Tomorrow" is the next workday: its name when that isn't tomorrow, in the words and on the button.
+    const name = this.wrapDayName();
     this.say(
       {
-        text: lines.review(day.completed.length, planned(day), day.today.length),
+        text: lines.review(day.completed.length, planned(day), day.today.length, name),
         actions: [
           { title: L("Tổng kết ngày", "Wrap up"), primary: true, run: () => this.effects.openWrapUp?.() },
-          { title: L("Dời sang mai", "Move to tomorrow"), run: () => void this.moveTodayToTomorrow() },
+          // With nothing left there is nothing to move.
+          ...(day.today.length > 0 ? [{ title: L(`Dời sang ${name ?? "mai"}`, `Move to ${name ?? "tomorrow"}`), run: () => void this.moveTodayToTomorrow() }] : []),
           { title: L("Làm tiếp", "Keep going"), run: () => undefined },
         ],
         seconds: 90,
@@ -2535,9 +2622,12 @@ export class Brain {
   }
 
   private sayOverbooked(load: DayLoad): void {
+    if (this.lightening) return;
     this.say(
       {
         text: lines.overbooked(load),
+        // A check-in, not urgent news; but if the board is open it shows in it, and is read there once.
+        inBoard: true,
         actions: [
           // The board opens ready to choose: durations on the rows and a way to move each one.
           { title: L("Chọn việc để dời", "Pick tasks to move"), primary: true, run: () => this.effects.openBoard?.(false, undefined, { lighten: true }) },
@@ -2552,6 +2642,8 @@ export class Brain {
       },
       { why: L(`ngày có vẻ quá tải: dư ${load.overBy} phút so với thời gian còn lại`, `the day looks overbooked: ${load.overBy} min more than the time left`) },
     );
+    const b = this.state.bubble;
+    this.overbookedBubble = b && b.inBoard ? b.id : null;
   }
 
   /** What the Wrap up sheet works on: today's open tasks and the overdue ones. */
@@ -2564,6 +2656,12 @@ export class Brain {
     const nowMs = this.now();
     const day = nextWorkday(nowMs, this.workdayOn);
     return { day, isTomorrow: day === addDays(dayKey(new Date(nowMs)), 1) };
+  }
+
+  /** The next workday's name ("Monday", "Thứ Hai") when it isn't tomorrow; null for tomorrow. One name for every line and button. */
+  wrapDayName(): string | null {
+    const next = this.wrapDay();
+    return next.isTomorrow ? null : weekdayName(next.day);
   }
 
   /** The current time, for the board (it shows the Wrap up button from the same clock the brain uses). */
@@ -2644,16 +2742,17 @@ export class Brain {
     this.wrapAttempt = null;
     this.draft = null;
     this.patchState({ wrapDraft: null });
+    const dayName = this.wrapDayName();
     this.diary.add(
       "system",
-      L(`Tổng kết ngày: ${result.moved} việc sang mai, ${result.offPlan} việc ra khỏi kế hoạch`, `Wrapped up the day: ${result.moved} moved to tomorrow, ${result.offPlan} off the plan`) +
-        (frogTitle ? L(`; con ếch ngày mai “${shortText(frogTitle, 40)}”`, `; tomorrow's frog “${shortText(frogTitle, 40)}”`) : "") +
+      L(`Tổng kết ngày: ${result.moved} việc sang ${dayName ?? "mai"}, ${result.offPlan} việc ra khỏi kế hoạch`, `Wrapped up the day: ${result.moved} moved to ${dayName ?? "tomorrow"}, ${result.offPlan} off the plan`) +
+        (frogTitle ? L(`; con ếch ${dayName ?? "ngày mai"} “${shortText(frogTitle, 40)}”`, `; ${dayName ? `${dayName}'s` : "tomorrow's"} frog “${shortText(frogTitle, 40)}”`) : "") +
         (plan.note ? L("; kèm ghi chú", "; with a note") : "") +
         L(`; yên tĩnh tới ${timeString(new Date(doneUntil ?? nowMs))}`, `; quiet until ${timeString(new Date(doneUntil ?? nowMs))}`),
     );
     this.set({ antic: null });
     this.recompute();
-    this.say({ text: lines.wrappedUp(frogTitle), seconds: 10, urgent: true });
+    this.say({ text: lines.wrappedUp(frogTitle, dayName), seconds: 10, urgent: true });
     return result;
   }
 
@@ -2930,7 +3029,7 @@ export class Brain {
     const { moved, failed, error } = await this.rescheduleAll(tasks, this.wrapDay().day);
     if (error) this.sayMoveFailed(failed, error);
     await this.refresh();
-    if (moved.length > 0) this.say({ text: lines.movedToTomorrow(moved.length), seconds: 8 });
+    if (moved.length > 0) this.say({ text: lines.movedToTomorrow(moved.length, this.wrapDayName()), seconds: 8 });
   }
 
   /** Gives a task the suggested time today, so the pet can remind you right on time. */
@@ -3251,7 +3350,7 @@ export class Brain {
     this.closeStoredDay(0, nowMs);
     this.recompute();
     this.set({ bubble: null });
-    this.tellNotes(nowMs);
+    this.tellNotes(nowMs, true);
   }
 
   /** Demo: open the Wrap up sheet, whatever the hour. */

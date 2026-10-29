@@ -87,6 +87,8 @@ export function DayStripCard({ brain, s, lighten, onLighten, onWrapUp }: { brain
   const timed = strip.segments.length - meetings;
   const detail = lines.loadDetail(strip.load);
   const over = !done && strip.load.overBy > 0;
+  // "Tomorrow" is the next workday: its name when that isn't tomorrow.
+  const dayName = brain.wrapDayName();
   const summary = L(
     `Ngày làm việc ${hh(strip.startHour)} đến ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. Bây giờ là ${timeString(now)}.`,
     `Work day ${hh(strip.startHour)} to ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. It is ${timeString(now)} now.`,
@@ -110,7 +112,7 @@ export function DayStripCard({ brain, s, lighten, onLighten, onWrapUp }: { brain
     trackRef.current?.querySelectorAll<HTMLElement>(".ds-seg")[to]?.focus();
   };
   return (
-    <section className={`daystrip level-${done ? "ok" : strip.level}${done ? " is-done" : ""}`} aria-label={L("Ngày làm việc hôm nay", "Today's work day")}>
+    <section className={`daystrip level-${done ? "ok" : strip.level}${done ? " is-done" : ""}${lighten ? " is-lighten" : ""}`} aria-label={L("Ngày làm việc hôm nay", "Today's work day")}>
       <div className="ds-head">
         <span className="ds-load" title={done ? undefined : detail}>
           <Icon name={done ? "moon" : "hourglass"} size={14} />
@@ -119,13 +121,13 @@ export function DayStripCard({ brain, s, lighten, onLighten, onWrapUp }: { brain
           </span>
           {!done && <span className="sr-only">{detail}</span>}
         </span>
-        {over ? (
-          // How far over, in words; it is also the way into lightening the day.
+        {lighten && over ? null : over ? (
+          // How far over, in words; it is also the way into lightening the day. (While lightening, the banner in the list says it.)
           <button
             type="button"
             className="ds-over"
             aria-pressed={lighten}
-            title={L("Xem việc nào nên dời sang mai", "See which tasks to move to tomorrow")}
+            title={L(`Xem việc nào nên dời sang ${dayName ?? "mai"}`, `See which tasks to move to ${dayName ?? "tomorrow"}`)}
             onClick={onLighten}
           >
             {lines.loadOver(strip.load)}
@@ -163,7 +165,7 @@ export function DayStripCard({ brain, s, lighten, onLighten, onWrapUp }: { brain
                 if (Date.now() - wokeAt.current < 600) return;
                 onWrapUp();
               }}
-              title={L("Dọn nốt ngày: dời việc, chọn việc đầu tiên cho mai, ghi một dòng", "Close the day: move what's left, pick tomorrow's first task, leave a note")}
+              title={L(`Dọn nốt ngày: dời việc, chọn việc đầu tiên cho ${dayName ?? "mai"}, ghi một dòng`, `Close the day: move what's left, pick ${dayName ? `${dayName}'s` : "tomorrow's"} first task, leave a note`)}
             >
               <Icon name="moon" size={14} />
               {L("Tổng kết ngày", "Wrap up")}
@@ -171,55 +173,60 @@ export function DayStripCard({ brain, s, lighten, onLighten, onWrapUp }: { brain
           )
         )}
       </div>
-      <div
-        className="ds-track"
-        ref={trackRef}
-        role="group"
-        aria-label={summary}
-        style={{ height: 4 + strip.lanes * LANE }}
-        onKeyDown={moveStop}
-        onPointerLeave={() => setShown(null)}
-      >
-        {axisHours(strip.startHour, strip.endHour).slice(1, -1).map((h) => (
-          <i key={h} className="ds-tick" aria-hidden style={{ left: `${((h - strip.startHour) / (strip.endHour - strip.startHour)) * 100}%` }} />
-        ))}
-        {strip.segments.map((seg, i) => {
-          const px = (seg.end - seg.start) * width;
-          return (
-            <span
-              key={segKey(seg)}
-              className={`ds-seg ${seg.kind === "meeting" ? "meeting" : "timed"}`}
-              role="img"
-              tabIndex={i === active ? 0 : -1}
-              aria-label={segLabel(seg)}
-              title={segText(seg)}
-              style={{ left: `${seg.start * 100}%`, width: `${(seg.end - seg.start) * 100}%`, top: 2 + seg.lane * LANE, height: BAR }}
-              onPointerEnter={() => setShown(segKey(seg))}
-              onFocus={() => {
-                setShown(segKey(seg));
-                setStop(i);
-              }}
-              onBlur={() => setShown((k) => (k === segKey(seg) ? null : k))}
-            >
-              {px >= SEG_LABEL_MIN_PX && <span className="ds-label">{seg.title}</span>}
-            </span>
-          );
-        })}
-        <i className="ds-past" style={{ width: `${strip.now * 100}%` }} />
-        <b className="ds-now" style={{ left: `${strip.now * 100}%` }} title={L(`Bây giờ ${timeString(now)}`, `Now ${timeString(now)}`)} />
-      </div>
-      <div className="ds-axis" aria-hidden>
-        {axisHours(strip.startHour, strip.endHour).map((h, i, all) => (
-          <span key={h} className={i === 0 ? "first" : i === all.length - 1 ? "last" : undefined} style={{ left: `${((h - strip.startHour) / (strip.endHour - strip.startHour)) * 100}%` }}>
-            {String(h).padStart(2, "0")}
-          </span>
-        ))}
-      </div>
-      {strip.segments.length > 0 && (
-        <div className="ds-caption" aria-live="polite">
-          {caption}
+      {/* While lightening the day the timeline folds away: the rows need the room, and the banner under it has the news. */}
+      <div className="ds-fold" inert={lighten}>
+        <div className="ds-body">
+          <div
+            className="ds-track"
+            ref={trackRef}
+            role="group"
+            aria-label={summary}
+            style={{ height: 4 + strip.lanes * LANE }}
+            onKeyDown={moveStop}
+            onPointerLeave={() => setShown(null)}
+          >
+            {axisHours(strip.startHour, strip.endHour).slice(1, -1).map((h) => (
+              <i key={h} className="ds-tick" aria-hidden style={{ left: `${((h - strip.startHour) / (strip.endHour - strip.startHour)) * 100}%` }} />
+            ))}
+            {strip.segments.map((seg, i) => {
+              const px = (seg.end - seg.start) * width;
+              return (
+                <span
+                  key={segKey(seg)}
+                  className={`ds-seg ${seg.kind === "meeting" ? "meeting" : "timed"}`}
+                  role="img"
+                  tabIndex={i === active ? 0 : -1}
+                  aria-label={segLabel(seg)}
+                  title={segText(seg)}
+                  style={{ left: `${seg.start * 100}%`, width: `${(seg.end - seg.start) * 100}%`, top: 2 + seg.lane * LANE, height: BAR }}
+                  onPointerEnter={() => setShown(segKey(seg))}
+                  onFocus={() => {
+                    setShown(segKey(seg));
+                    setStop(i);
+                  }}
+                  onBlur={() => setShown((k) => (k === segKey(seg) ? null : k))}
+                >
+                  {px >= SEG_LABEL_MIN_PX && <span className="ds-label">{seg.title}</span>}
+                </span>
+              );
+            })}
+            <i className="ds-past" style={{ width: `${strip.now * 100}%` }} />
+            <b className="ds-now" style={{ left: `${strip.now * 100}%` }} title={L(`Bây giờ ${timeString(now)}`, `Now ${timeString(now)}`)} />
+          </div>
+          <div className="ds-axis" aria-hidden>
+            {axisHours(strip.startHour, strip.endHour).map((h, i, all) => (
+              <span key={h} className={i === 0 ? "first" : i === all.length - 1 ? "last" : undefined} style={{ left: `${((h - strip.startHour) / (strip.endHour - strip.startHour)) * 100}%` }}>
+                {String(h).padStart(2, "0")}
+              </span>
+            ))}
+          </div>
+          {strip.segments.length > 0 && (
+            <div className="ds-caption">
+              {caption}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }

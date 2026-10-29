@@ -193,17 +193,39 @@ export function done(t: TodoTask, completed: number, target: number, sound: stri
 export const allDone = () =>
   L("Xong hết việc hôm nay rồi! 🎉 Nghỉ ngơi, hoặc chọn sẵn 3 việc cho mai nhé.", "Everything's done for today! 🎉 Rest, or pick tomorrow's 3 tasks.");
 
-export const review = (completed: number, plannedCount: number, left: number) =>
-  L(
-    `Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc. Còn ${left} việc — tổng kết ngày, hay dời hết sang mai?`,
-    `Almost end of day: ${completed}/${plannedCount} done. Wrap up the day, or move the remaining ${left} to tomorrow?`,
-  );
+/**
+ * `day` in `review`, `wrappedUp` and `movedToTomorrow` is the next workday's name ("Monday", "Thứ Hai") when it isn't tomorrow, else null: the day
+ * the wrap-up really moves things to (the same name as the Wrap up sheet's buttons).
+ */
+export const review = (completed: number, plannedCount: number, left: number, day: string | null = null) =>
+  left === 0
+    ? // Nothing left to move: only the wrap-up is offered.
+      completed > 0
+        ? L(`Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc 🎉 Mình tổng kết ngày nhé?`, `Almost end of day: ${completed}/${plannedCount} done 🎉 Wrap up the day?`)
+        : L("Sắp hết giờ làm. Danh sách hôm nay đã trống. Mình tổng kết ngày nhé?", "Almost end of day, and the list is clear. Wrap up the day?")
+    : L(
+        `Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc. Còn ${left} việc — tổng kết ngày, hay dời hết sang ${day ?? "mai"}?`,
+        `Almost end of day: ${completed}/${plannedCount} done. Wrap up the day, or move the remaining ${left} to ${day ?? "tomorrow"}?`,
+      );
 
-/** "Done for today": a good evening, naming the frog that starts tomorrow when you picked one. */
-export const wrappedUp = (frog: TodoTask | string | null) => {
+/** "Done for today": a good evening, naming the frog that starts the next workday when you picked one. */
+export const wrappedUp = (frog: TodoTask | string | null, day: string | null = null) => {
   const name = frog === null ? null : typeof frog === "string" ? `“${shortText(frog, 60)}”` : q(frog);
-  return L("Xong ngày rồi 🌙 Nghỉ ngơi nhé.", "All wrapped up 🌙 Rest well.") + (name ? L(` Mai mình bắt đầu với ${name} 🐸`, ` Tomorrow starts with ${name} 🐸`) : "");
+  return L("Xong ngày rồi 🌙 Nghỉ ngơi nhé.", "All wrapped up 🌙 Rest well.") + (name ? L(` ${day ?? "Mai"} mình bắt đầu với ${name} 🐸`, ` ${day ?? "Tomorrow"} starts with ${name} 🐸`) : "");
 };
+
+// The Wrap up sheet's own words that name the day it is for (`day`: the next workday's name, or null for tomorrow).
+
+export const wrapIntro = (day: string | null = null) =>
+  L(`Vài cú chạm là xong, không có đúng sai: chỉ là dọn bàn cho ${day ?? "mai"}.`, `A few taps, no right answers: just a tidy desk for ${day ?? "tomorrow"}.`);
+export const wrapNoWins = (day: string | null = null) =>
+  L(`Hôm nay chưa tick việc nào, và vậy cũng không sao. ${day ?? "Mai"} là một trang mới 🌱`, `Nothing ticked off today, and that's okay. ${day ?? "Tomorrow"} is a fresh page 🌱`);
+export const wrapForLabel = (day: string | null = null) => L(`Cho ${day ?? "ngày mai"}`, `For ${day ?? "tomorrow"}`);
+export const wrapFrogLabel = (day: string | null = null) => (day ? L(`Làm đầu tiên vào ${day}`, `First on ${day}`) : L("Làm đầu tiên ngày mai", "First tomorrow"));
+export const wrapDecideLater = (day: string | null = null) => L(`${day ?? "Mai"} mình chọn sau`, `I'll decide ${day ? `on ${day}` : "tomorrow"}`);
+export const wrapFrogDone = (title: string, day: string | null = null) =>
+  L(`“${title}” đã xong rồi, giỏi quá! Chọn việc khác hoặc để ${day ?? "mai"} tính.`, `“${title}” is already done, nice! Pick another, or decide ${day ? `on ${day}` : "tomorrow"}.`);
+export const wrapNoteLabel = (day: string | null = null) => L(`${day ?? "Mai"} mình bắt đầu từ đâu?`, `Where do I start ${day ? `on ${day}` : "tomorrow"}?`);
 
 export const backToWork = () => L("Mình dậy rồi 🌤 Cần gì cứ gọi mình nhé.", "I'm up again 🌤 Call me whenever you need me.");
 
@@ -235,8 +257,8 @@ export const error = (e: string) => L(`Mình không kết nối được Todoist
 export const connected = () => L("Kết nối Todoist thành công! 🎉", "Connected to Todoist! 🎉");
 export const demoHello = () =>
   L("Đang chạy demo với dữ liệu giả 🎭 Bấm vào mình để mở bảng việc nhé!", "Demo mode with sample tasks 🎭 Click me to open the task board!");
-export const movedToTomorrow = (count: number) =>
-  L(`Đã dời ${count} việc sang mai. Nghỉ ngơi nhé 🌙`, `Moved ${n(count, "task")} to tomorrow. Rest well 🌙`);
+export const movedToTomorrow = (count: number, day: string | null = null) =>
+  L(`Đã dời ${count} việc sang ${day ?? "mai"}. Nghỉ ngơi nhé 🌙`, `Moved ${n(count, "task")} to ${day ?? "tomorrow"}. Rest well 🌙`);
 
 // Calendar
 
@@ -303,6 +325,9 @@ export const loadOver = (load: DayLoad) => L(`quá ~${span(load.overBy)}`, `~${s
 
 /** The line that goes with it when the board is open to move tasks; `day` is "tomorrow" or the next workday's name. */
 export const lightenHint = (day: string) => L(`Dời vài việc sang ${day} cho thoáng nhé.`, `Move a few to ${day} to make room.`);
+
+/** What moving a task bought back, for the note that follows it: a 3 h task inside a meeting frees 2 h, not 3. */
+export const freesTime = (minutes: number) => L(` (bớt được ${span(minutes)})`, ` (frees ${span(minutes)})`);
 
 /** The board's note once the day fits again. */
 export const dayFits = () => L("Hay lắm, ngày hôm nay đủ chỗ rồi ✓", "Nice, today fits now ✓");

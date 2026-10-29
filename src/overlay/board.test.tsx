@@ -24,9 +24,14 @@ interface MountOptions {
   /** A fixed clock (epoch ms) and a real (non-demo) day, for what depends on the date. */
   now?: number;
   setup?: (b: DemoBackend) => void;
+  /** Where the board is (a short one, above the pet, is "compact"). */
+  placement?: Partial<BoardPlacement>;
 }
 
+let placementNow: BoardPlacement = placement;
+
 async function mount(req: BoardRequest = request(), opts: MountOptions = {}) {
+  placementNow = { ...placement, ...opts.placement };
   backend = createDemoBackend({ persist: false, ...(opts.now ? { now: () => opts.now! } : {}) });
   opts.setup?.(backend);
   brain = await Brain.create(backend, { demo: opts.now === undefined, ...(opts.now ? { now: () => opts.now! } : {}) });
@@ -42,7 +47,7 @@ async function mount(req: BoardRequest = request(), opts: MountOptions = {}) {
 
 const render = (req: BoardRequest) =>
   act(async () => {
-    root.render(<Board brain={brain} backend={backend} request={req} placement={placement} onClose={() => undefined} />);
+    root.render(<Board brain={brain} backend={backend} request={req} placement={placementNow} onClose={() => undefined} />);
   });
 
 async function vi_waitFor(cond: () => boolean) {
@@ -350,6 +355,33 @@ describe("the Wrap up sheet", () => {
     expect(sheet().textContent).not.toContain("First tomorrow");
   });
 
+  // v0.4 evaluation round 2, issue 3: "Where do I start tomorrow?" stayed next to "First on Monday".
+  it("says Monday in every label of the sheet on a Friday, not 'tomorrow'", async () => {
+    await mount(wrapRequest(), { now: FRIDAY_4PM, setup: (b) => { b.todoist.completed = async () => []; } });
+    const visible = (el: Element) => {
+      const copy = el.cloneNode(true) as Element;
+      copy.querySelectorAll(".sr-only").forEach((e) => e.remove());
+      return copy.textContent!;
+    };
+    const label = document.querySelector(`label[for="wrap-note"]`)!;
+    expect(label.textContent).toBe("Where do I start on Monday?");
+    expect(visible(sheet())).not.toMatch(/tomorrow/i);
+    expect(sheet().querySelector(".wrap-tomorrow")?.getAttribute("aria-label")).toBe("For Monday");
+    expect([...frogSelect().options][0].textContent).toBe("I'll decide on Monday");
+    expect(sheet().querySelector(".wrap-intro")?.textContent).toContain("a tidy desk for Monday");
+    expect(sheet().querySelector(".wrap-empty")?.textContent).toContain("Monday is a fresh page");
+  });
+
+  it("says it the same way in Vietnamese: Thứ Hai", async () => {
+    await mount(wrapRequest(), { now: FRIDAY_4PM, setup: (b) => { b.todoist.completed = async () => []; } });
+    setLang("vi");
+    await render(request({ seq: 2, wrapUp: true }));
+    expect(document.querySelector(`label[for="wrap-note"]`)?.textContent).toBe("Thứ Hai mình bắt đầu từ đâu?");
+    expect(sheet().textContent).not.toMatch(/\bmai\b|ngày mai/i);
+    expect(sheetButton("Tất cả sang Thứ Hai")).toBeTruthy();
+    expect(sheet().querySelector(".wrap-tomorrow")?.getAttribute("aria-label")).toBe("Cho Thứ Hai");
+  });
+
   it("says kindly that nothing was ticked off, without 'showed up' or 'yet'", async () => {
     await mount(wrapRequest(), {
       setup: (b) => {
@@ -488,6 +520,13 @@ describe("the day strip", () => {
     expect(labelled.map((e) => e.textContent)).toEqual(["Quarterly planning"]);
   });
 
+  // v0.4 evaluation round 2, minor: the caption announced itself on every hover; focus already reads each bar's label.
+  it("doesn't announce its caption on every hover", async () => {
+    await mount(request(), { now: WED_10AM, setup: busyDay });
+    expect(document.querySelector(".ds-caption")?.getAttribute("aria-live")).toBeNull();
+    expect(segs()[0].getAttribute("aria-label")).toContain("Design review");
+  });
+
   it("marks the hours every 2 hours", async () => {
     await mount(request(), { now: WED_10AM, setup: busyDay });
     const axis = [...document.querySelectorAll(".ds-axis span")].map((e) => e.textContent);
@@ -535,7 +574,9 @@ describe("the day strip", () => {
     expect(document.querySelector(".lighten-banner")).toBeNull();
     await click(over);
     expect(document.querySelector(".lighten-banner")).not.toBeNull();
-    expect(over.getAttribute("aria-pressed")).toBe("true");
+    // The banner has the words now: the chip steps aside so it is said once.
+    expect(document.querySelector(".ds-over")).toBeNull();
+    expect(document.querySelector(".lighten-banner")?.textContent).toContain(over.textContent);
   });
 
   it("has no over text when the day fits", async () => {
@@ -595,14 +636,15 @@ describe("lightening an overbooked day (v0.4 evaluation, issue 3)", () => {
     // 2h45 over, less the 2 hours of it that are not in a meeting: still over, by 45 minutes.
     expect(banner()?.textContent).toMatch(/~45 min over/);
     expect(banner()?.textContent).not.toBe(before);
-    expect(document.body.textContent).toContain("Moved “Call client ABC” to tomorrow ✓");
+    // The 3 h call overlaps the 11:00 meeting by an hour, which was counted once: it frees 2 h, and the note says so.
+    expect(document.body.textContent).toContain("Moved “Call client ABC” to tomorrow ✓ (frees 2h)");
     await click(rowFor("Plan the next sprint").querySelector(".lighten-go")!);
     await vi_waitFor(() => !banner());
     await act(async () => undefined);
     // It fits now: the banner, the estimates and the buttons are gone, with a word about it.
     expect(banner()).toBeNull();
     expect(document.querySelector(".chip.est, .lighten-go")).toBeNull();
-    expect(document.body.textContent).toContain("Moved “Plan the next sprint” to tomorrow ✓ Nice, today fits now ✓");
+    expect(document.body.textContent).toContain("Moved “Plan the next sprint” to tomorrow ✓ (frees 4h) Nice, today fits now ✓");
     expect(document.querySelector(".ds-over")).toBeNull();
   });
 
@@ -681,6 +723,25 @@ describe("a bubble over the open board (v0.4 evaluation, issues 1 and 8)", () =>
     brain.dismissBubble(brain.getSnapshot().bubble!.id, "closed");
     await say({ text: "Still there?", seconds: 30, actions: [{ title: "Yes", run: () => undefined }] }, "a nudge");
     expect(banner()).toBeNull();
+  });
+
+  // v0.4 evaluation round 2, minor: Esc on a banner's button closed the whole board, losing it for a one-key dismiss.
+  it("closes only the banner with Escape from its buttons, and leaves the board open with the keyboard in it", async () => {
+    await mount();
+    await say({ text: "⏰ In 8 min: “Call client ABC”", seconds: 40, urgent: true, actions: [{ title: "OK", run: () => undefined }] }, "task due");
+    const ok = [...banner()!.querySelectorAll<HTMLButtonElement>("button")].find((x) => x.textContent === "OK")!;
+    ok.focus();
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    await act(async () => void ok.dispatchEvent(esc));
+    // Taken: the overlay closes the board only on an Escape nobody took.
+    expect(esc.defaultPrevented).toBe(true);
+    expect(banner()).toBeNull();
+    expect(document.activeElement?.closest(".board")).not.toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    // With nothing in front, Escape is left to the overlay (it closes the board).
+    const again = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    await act(async () => void document.querySelector("#add-task")!.dispatchEvent(again));
+    expect(again.defaultPrevented).toBe(false);
   });
 
   it("drops a banner that went stale before anyone read it", async () => {
@@ -871,5 +932,270 @@ describe("opening a task from a bubble (v0.4 evaluation, issue 13)", () => {
     await render(request({ seq: 2, focusTaskId: "2" }));
     expect(document.querySelector(".sheet.wrap")).toBeNull();
     expect(document.activeElement?.getAttribute("data-task-id")).toBe("2");
+  });
+});
+
+describe("'Move some?' over the open board (v0.4 evaluation round 2, issue 2)", () => {
+  const heavy = (b: DemoBackend) => b.demo.setHeavyDay(true);
+  const banner = () => document.querySelector<HTMLElement>(".bubble.banner");
+
+  it("shows as a banner with its two buttons, and 'Pick tasks to move' opens the lighten view", async () => {
+    await mount(request(), { now: WED_9AM, setup: heavy });
+    await act(async () => brain.demoOverbooked());
+    const b = banner()!;
+    expect(b).not.toBeNull();
+    expect(b.textContent).toContain("Today looks overbooked");
+    const titles = [...b.querySelectorAll(".bubble-actions button")].map((x) => x.textContent);
+    expect(titles).toEqual(["Pick tasks to move", "It's fine"]);
+    await click(b.querySelector(".bubble-actions button")!);
+    expect(banner()).toBeNull();
+  });
+
+  it("is not shown over the pet when the board closes, since it was read there", async () => {
+    await mount(request(), { now: WED_9AM, setup: heavy });
+    await act(async () => brain.demoOverbooked());
+    expect(banner()).not.toBeNull();
+    await act(async () => root.unmount());
+    expect(brain.getSnapshot().bubble).toBeNull();
+    // (The harness unmounts once more in afterEach.)
+    root = createRoot(container);
+  });
+
+  it("is dropped when the lighten view is opened from the strip's chip", async () => {
+    await mount(request(), { now: WED_9AM, setup: heavy });
+    await act(async () => brain.demoOverbooked());
+    expect(banner()).not.toBeNull();
+    await click(document.querySelector(".ds-over")!);
+    expect(document.querySelector(".lighten-banner")).not.toBeNull();
+    expect(banner()).toBeNull();
+    expect(brain.getSnapshot().bubble).toBeNull();
+  });
+
+  it("is dropped when the board opens already lightening", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    await act(async () => brain.demoOverbooked());
+    await act(async () => undefined);
+    expect(banner()).toBeNull();
+  });
+});
+
+describe("Escape in the split sheet and the wardrobe (v0.4 evaluation round 2, issue 5)", () => {
+  const rowFor = (title: string) => [...document.querySelectorAll<HTMLElement>(".board li.task")].find((r) => r.textContent?.includes(title))!;
+  const splitButton = (title: string) => rowFor(title).querySelector<HTMLButtonElement>('button[aria-label="Split"]')!;
+  const escape = async (el: Element) => {
+    const e = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    await act(async () => void el.dispatchEvent(e));
+    return e;
+  };
+
+  it("takes the keyboard to its heading when it opens (a mouse click leaves the focus nowhere otherwise)", async () => {
+    await mount();
+    const split = splitButton("Plan the next sprint");
+    split.focus();
+    await click(split);
+    expect(document.querySelector(".sheet h2")?.textContent).toContain("Split the task");
+    expect(document.activeElement?.tagName).toBe("H2");
+    expect(document.activeElement?.closest(".board")).not.toBeNull();
+  });
+
+  it("goes back to the list with Escape, to the button that opened it, instead of closing the board", async () => {
+    await mount();
+    const split = splitButton("Plan the next sprint");
+    split.focus();
+    await click(split);
+    const e = await escape(document.activeElement!);
+    // Taken by the board (the overlay closes the board only on an Escape nobody took).
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.querySelector(".sheet")).toBeNull();
+    expect(document.activeElement).toBe(splitButton("Plan the next sprint"));
+  });
+
+  it("does the same when a bubble opened it (the stuck task's Split it)", async () => {
+    await mount(request({ seq: 2, split: null }));
+    const task = brain.getSnapshot().day.overdue[0];
+    await render(request({ seq: 3, split: task }));
+    expect(document.activeElement?.tagName).toBe("H2");
+    const e = await escape(document.activeElement!);
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.querySelector(".sheet")).toBeNull();
+    expect(document.activeElement?.closest(".board")).not.toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("focuses the wardrobe's heading too, and Escape goes back to the button that opened it", async () => {
+    await mount();
+    const wardrobeButton = () => document.querySelector<HTMLButtonElement>(".board-head button[data-wardrobe]")!;
+    const open = wardrobeButton();
+    open.focus();
+    await click(open);
+    expect(document.querySelector(".sheet h2")).not.toBeNull();
+    expect(document.activeElement?.tagName).toBe("H2");
+    const e = await escape(document.activeElement!);
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.querySelector(".sheet")).toBeNull();
+    expect(document.activeElement).toBe(wardrobeButton());
+  });
+});
+
+describe("the lighten view's keyboard (v0.4 evaluation round 2, issue 6)", () => {
+  const heavy = (b: DemoBackend) => b.demo.setHeavyDay(true);
+  const rows = () => [...document.querySelectorAll<HTMLElement>(".board li.task.lightening")];
+  const rowFor = (title: string) => rows().find((r) => r.textContent?.includes(title))!;
+  const goOf = (title: string) => rowFor(title).querySelector<HTMLButtonElement>(".lighten-go")!;
+  const settle = async (gone: string) => {
+    await vi_waitFor(() => !brain.getSnapshot().day.today.some((t) => t.id === gone));
+    await act(async () => undefined);
+  };
+
+  it("hands the keyboard to the first '→ Tomorrow' when the chip opens the view", async () => {
+    await mount(request(), { now: WED_9AM, setup: heavy });
+    const chip = document.querySelector<HTMLButtonElement>(".ds-over")!;
+    chip.focus();
+    await click(chip);
+    expect(rows().length).toBeGreaterThan(0);
+    expect(document.activeElement).toBe(rows()[0].querySelector(".lighten-go"));
+  });
+
+  it("does the same when the board opens ready to lighten (from the bubble's button)", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    expect(document.activeElement).toBe(rows()[0].querySelector(".lighten-go"));
+  });
+
+  it("has no hover icons in the rows while lightening (they cut the title and were 5 more Tab stops each)", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    expect(document.querySelector(".task.lightening .t-actions")).toBeNull();
+    // Each row is two stops: tick it off, or move it.
+    const stops = rows().flatMap((r) => [...r.querySelectorAll<HTMLElement>("button")].filter((b) => !(b as HTMLButtonElement).disabled && b.tabIndex >= 0));
+    expect(stops).toHaveLength(rows().length * 2);
+    // They are back once the view closes.
+    await click(document.querySelector<HTMLElement>(".lighten-banner button")!);
+    expect(document.querySelector(".task .t-actions")).not.toBeNull();
+  });
+
+  it("goes down and up the '→ Tomorrow' buttons with the arrow keys", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    const gos = rows().map((r) => r.querySelector<HTMLButtonElement>(".lighten-go")!);
+    await key(gos[0], "ArrowDown");
+    expect(document.activeElement).toBe(gos[1]);
+    await key(gos[1], "ArrowDown");
+    expect(document.activeElement).toBe(gos[2]);
+    await key(gos[2], "ArrowDown");
+    expect(document.activeElement).toBe(gos[2]);
+    await key(gos[2], "ArrowUp");
+    expect(document.activeElement).toBe(gos[1]);
+    await key(gos[1], "Home");
+    expect(document.activeElement).toBe(gos[0]);
+    await key(gos[0], "End");
+    expect(document.activeElement).toBe(gos[2]);
+  });
+
+  it("moves on to the next row's '→ Tomorrow' after a move, never to the page", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    expect(rows().map((r) => r.querySelector(".t-title")?.textContent)).toEqual(["Write the weekly report", "Call client ABC", "Plan the next sprint"]);
+    const go = goOf("Call client ABC");
+    go.focus();
+    await click(go);
+    await settle("2");
+    // Still over (by 45 minutes): the one that took its place.
+    expect(document.querySelector(".lighten-banner")).not.toBeNull();
+    expect(document.activeElement).toBe(goOf("Plan the next sprint"));
+  });
+
+  it("goes back to the row before when the last one moved", async () => {
+    // The last row is the light one, so moving it leaves the day over.
+    await mount(request({ lighten: true }), {
+      now: WED_9AM,
+      setup: (b) => {
+        const minutes: Record<string, number> = { "1": 360, "2": 180, "4": 30 };
+        const t = b.todoist.tasks.bind(b.todoist);
+        b.todoist.tasks = async (f) => (await t(f)).map((x) => (minutes[x.id] ? { ...x, duration: { amount: minutes[x.id], unit: "minute" } } : x));
+      },
+    });
+    const go = goOf("Plan the next sprint");
+    go.focus();
+    await click(go);
+    await settle("4");
+    expect(document.querySelector(".lighten-banner")).not.toBeNull();
+    expect(document.activeElement).toBe(goOf("Call client ABC"));
+  });
+
+  it("lands on the add field when that move made the day fit and the view closed (a second Enter must not finish a task)", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    const go = goOf("Write the weekly report");
+    go.focus();
+    await click(go);
+    await settle("1");
+    await vi_waitFor(() => !document.querySelector(".lighten-banner"));
+    await act(async () => undefined);
+    expect(document.querySelector(".lighten-banner")).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector("#add-task"));
+    // Its note says what happened.
+    expect(document.body.textContent).toContain("today fits now");
+  });
+
+  it("hands the keyboard to the chip when the view's close button ends it", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    const close = document.querySelector<HTMLButtonElement>(".lighten-banner button")!;
+    close.focus();
+    await click(close);
+    expect(document.querySelector(".lighten-banner")).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector(".ds-over"));
+  });
+});
+
+describe("the lighten view makes room for the rows (v0.4 evaluation round 2, issue 8)", () => {
+  const heavy = (b: DemoBackend) => b.demo.setHeavyDay(true);
+  const fold = () => document.querySelector<HTMLElement>(".ds-fold")!;
+
+  it("folds the timeline away while lightening, keeping the strip's header, and brings it back", async () => {
+    await mount(request(), { now: WED_9AM, setup: heavy });
+    expect(fold().hasAttribute("inert")).toBe(false);
+    await click(document.querySelector(".ds-over")!);
+    expect(document.querySelector(".daystrip")?.classList.contains("is-lighten")).toBe(true);
+    // Folded away from the keyboard and screen readers as well (its bars are a tab stop).
+    expect(fold().hasAttribute("inert")).toBe(true);
+    expect(document.querySelector(".daystrip .ds-head")?.textContent).toContain("left");
+    await click(document.querySelector(".lighten-banner button")!);
+    expect(fold().hasAttribute("inert")).toBe(false);
+    expect(document.querySelector(".daystrip")?.classList.contains("is-lighten")).toBe(false);
+    expect(document.querySelector(".ds-over")).not.toBeNull();
+  });
+
+  it("says how far over the day is once: in the banner, not also in the strip", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    const over = /~\d+h\d* over|~\d+ min over/g;
+    const board = document.querySelector(".board")!.cloneNode(true) as HTMLElement;
+    board.querySelectorAll(".sr-only, [title]").forEach((e) => e.removeAttribute("title"));
+    expect(board.textContent!.match(over)).toHaveLength(1);
+    expect(document.querySelector(".lighten-banner")?.textContent).toMatch(over);
+  });
+});
+
+describe("a short board (v0.4 evaluation round 2, issue 4)", () => {
+  it("gives the Wrap up sheet its compact layout when it opened above the pet, and not on a tall board", async () => {
+    await mount(wrapRequest(), { placement: { side: "above", top: 16, height: 505 } });
+    expect(document.querySelector(".board")?.classList.contains("compact")).toBe(true);
+    expect(sheet().classList.contains("compact")).toBe(true);
+    // Back and the title share one wrapper, the one-line wins show one win.
+    expect(sheet().querySelector(".wrap-top > .btn + h2")).not.toBeNull();
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await mount(wrapRequest(), { placement: { height: 628 } });
+    expect(document.querySelector(".board")?.classList.contains("compact")).toBe(false);
+    expect(sheet().classList.contains("compact")).toBe(false);
+  });
+
+  it("shows one win and 'and N more' on a short board, three on a tall one", async () => {
+    const done = (b: DemoBackend) => {
+      const completed = b.todoist.completed.bind(b.todoist);
+      b.todoist.completed = async (a, z) => [
+        ...(await completed(a, z)),
+        ...["Pay the invoice", "Water the plants", "Send the minutes"].map((content, i) => ({ id: `w${i}`, content, checked: true, completed_at: new Date().toISOString() })),
+      ];
+    };
+    await mount(wrapRequest(), { placement: { height: 505 }, setup: done });
+    const shown = () => [...sheet().querySelectorAll(".wrap-wins li:not(.more)")];
+    expect(shown().length).toBe(1);
+    expect(sheet().querySelector(".wrap-wins li.more")?.textContent).toMatch(/and \d+ more/);
   });
 });

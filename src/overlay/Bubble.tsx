@@ -52,6 +52,18 @@ export const BubbleView = forwardRef<HTMLDivElement, { bubble: Bubble; brain: Br
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
       }}
+      onKeyDown={
+        banner
+          ? (e) => {
+              // Escape on a banner closes the banner, not the board it sits in; the keyboard stays in the board.
+              if (e.key !== "Escape" || e.defaultPrevented) return;
+              e.preventDefault();
+              const board = e.currentTarget.closest<HTMLElement>(".board");
+              brain.dismissBubble(bubble.id, "closed");
+              board?.focus({ preventScroll: true });
+            }
+          : undefined
+      }
     >
       <div className="bubble-text">{bubble.text}</div>
       {bubble.detail && <div className="bubble-detail">{bubble.detail}</div>}

@@ -197,20 +197,34 @@ describe("Brain and forgiving streaks", () => {
   };
   /** As if `count` tasks were done on the 27th in the evening. */
   const doneOn27 = (count: number) => alsoDone(...Array.from({ length: count }, (_, i) => at(27, 20, i)));
+  /** Past the gap after the demo's hello: the tasks sync again, and then the greeting (with the kind words in it) can come. */
+  const laterThanHello = async (brain: Brain, clock: { t: number }) => {
+    clock.t += 16 * MIN;
+    brain.onSample(work(clock.t));
+    brain.tick();
+    await vi.waitFor(() => expect(brain.getSnapshot().loading).toBe(false));
+    brain.tick();
+  };
 
-  it("explains a frozen day kindly the next morning, as a reply rather than a reminder", async () => {
-    const { brain } = await boot({ streak: 5, snacks: 1 });
+  it("explains a frozen day kindly the next morning, in the greeting, as one bubble", async () => {
+    const { brain, clock } = await boot({ streak: 5, snacks: 1 });
     try {
       expect(brain.getSnapshot().life.snacks).toBe(0);
       expect(brain.getSnapshot().life.streak).toBe(5);
+      // The demo hello just spoke: the greeting (and with it the kind word) waits for the gap between bubbles.
       brain.tick();
+      expect(brain.getSnapshot().bubble).toBeNull();
+      await laterThanHello(brain, clock);
       const b = brain.getSnapshot().bubble;
+      expect(b?.text).toContain("Good morning");
       expect(b?.text).toContain("🍪");
       expect(b?.text).toContain("5");
-      expect(b?.reminder).toBe(false);
-      expect(b?.seconds).toBe(12);
+      expect(b?.text.indexOf("Good morning")).toBeLessThan(b?.text.indexOf("🍪") ?? -1);
+      // A check-in like the greeting it rides in: never counted against the day's reminders.
+      expect(b?.kind).toBeUndefined();
       // Once only.
       brain.dismissBubble(b!.id, "closed");
+      clock.t += 16 * MIN;
       brain.tick();
       expect(brain.getSnapshot().bubble?.text ?? "").not.toContain("🍪");
     } finally {
@@ -219,12 +233,12 @@ describe("Brain and forgiving streaks", () => {
   });
 
   it("offers a repair after a broken streak and brings it back with the second task today", async () => {
-    const { brain } = await boot({ streak: 6, snacks: 0 });
+    const { brain, clock } = await boot({ streak: 6, snacks: 0 });
     try {
       let s = brain.getSnapshot().life;
       expect(s.streak).toBe(0);
       expect(s.repair?.streak).toBe(6);
-      brain.tick();
+      await laterThanHello(brain, clock);
       expect(brain.getSnapshot().bubble?.text).toContain("2 tasks");
       brain.dismissBubble(brain.getSnapshot().bubble!.id, "closed");
       // The demo already has one task done today; one more finishes the quest.
@@ -288,10 +302,10 @@ describe("Brain and forgiving streaks", () => {
 
   it("tells about a growth stage reached overnight with the same words as after a task", async () => {
     // Yesterday was perfect (3 of 3): the sticker's 30 XP takes 290 to 320, a Teen.
-    const { brain } = await boot({ xp: 290, streak: 2 }, doneOn27(3));
+    const { brain, clock } = await boot({ xp: 290, streak: 2 }, doneOn27(3));
     try {
       expect(brain.getSnapshot().life.xp).toBe(320);
-      brain.tick();
+      await laterThanHello(brain, clock);
       expect(brain.getSnapshot().bubble?.text).toContain("I grew up: Teen");
     } finally {
       brain.stop();

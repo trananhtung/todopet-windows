@@ -1153,7 +1153,7 @@ body.overlay {
   -webkit-line-clamp: 1;
   line-clamp: 1;
 }
-/* Title and chips share a line when they fit (one 35 px row); otherwise the chips wrap below. */
+/* Title and chips share a line when they fit (one 35 px row); otherwise the chips wrap below. What is under the hover icons fades out first (--under-actions, below). */
 .t-body {
   min-width: 0;
   display: flex;
@@ -1162,6 +1162,13 @@ body.overlay {
   column-gap: 8px;
   row-gap: 3px;
   min-height: 20px;
+  --under-actions: 0px;
+  --under-fade: 0px;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--under-actions) - var(--under-fade)), transparent calc(100% - var(--under-actions)));
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--under-actions) - var(--under-fade)), transparent calc(100% - var(--under-actions)));
+  transition:
+    --under-actions 0.12s,
+    --under-fade 0.12s;
 }
 .t-title {
   flex: 0 1 auto;
@@ -1208,7 +1215,31 @@ body.overlay {
   background: var(--info-soft);
   color: var(--p3-ink);
 }
-/* Row actions float over the right edge on hover/focus instead of reserving width. */
+/*
+ * Row actions float over the right edge on hover/focus instead of reserving width (a title that moved on hover would
+ * re-wrap the row). What is under them fades out before they start, so a chip or a title is never read through the icons.
+ */
+@property --under-actions {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --under-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+.task:hover .t-body,
+.task:focus-within .t-body,
+.task.active .t-body {
+  --under-actions: 134px;
+  --under-fade: 24px;
+}
+.task.done:hover .t-body,
+.task.done:focus-within .t-body {
+  --under-actions: 0px;
+  --under-fade: 0px;
+}
 .t-actions {
   position: absolute;
   top: 3px;
@@ -1238,10 +1269,19 @@ body.overlay {
 .t-actions .btn.icon.danger {
   color: var(--bad-ink);
 }
+.task.lightening:hover .t-body,
+.task.lightening:focus-within .t-body {
+  --under-actions: 0px;
+  --under-fade: 0px;
+}
 @media (hover: none) {
   .t-actions {
     opacity: 1;
     pointer-events: auto;
+  }
+  .task:not(.done):not(.lightening) .t-body {
+    --under-actions: 134px;
+    --under-fade: 24px;
   }
 }
 .empty {
@@ -1466,7 +1506,6 @@ body.overlay {
 .daystrip {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   padding: 5px 10px 6px;
   border-radius: 12px;
   background: var(--surface);
@@ -1559,8 +1598,38 @@ body.overlay {
 .ds-over[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1.5px var(--bad-ink);
 }
+/* The timeline folds away while the day is being lightened (the rows need the room): its header stays. */
+.ds-fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 0.22s var(--ease-out),
+    opacity 0.16s,
+    visibility 0s;
+}
+.ds-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+  overflow: hidden;
+}
+.daystrip.is-lighten .ds-fold {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows 0.22s var(--ease-out),
+    opacity 0.12s,
+    visibility 0s 0.22s;
+}
+.daystrip.is-lighten .ds-body {
+  padding-top: 0;
+}
 .ds-track {
   position: relative;
+  flex: none;
   border-radius: 7px;
   background: var(--paper-2);
   overflow: hidden;
@@ -1903,6 +1972,16 @@ body.overlay {
 .sheet.wrap {
   gap: 8px;
 }
+/* Back and the title share a line: one less row of chrome above the list. */
+.wrap-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wrap-top h2 {
+  min-width: 0;
+  margin: 0;
+}
 .sheet h3 {
   display: flex;
   align-items: center;
@@ -2089,7 +2168,18 @@ body.overlay {
   gap: 6px;
   margin-bottom: -12px;
   padding: 8px 0 14px;
-  background: linear-gradient(to bottom, transparent, var(--paper) 8px);
+  background: var(--paper);
+}
+/* The rows sliding under the bar fade out above it, instead of being cut by a hard edge. */
+.wrap-actions::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 14px;
+  background: linear-gradient(to bottom, transparent, var(--paper));
+  pointer-events: none;
 }
 .wrap-actions .btn.primary {
   gap: 6px;
@@ -2097,6 +2187,94 @@ body.overlay {
 .wrap-summary {
   margin: 0;
   font-size: 12px;
+}
+
+/*
+ * A short board (it opened above the pet, 505 px at 1024x700): the list has to show on open, so the sheet is tighter.
+ * The intro is for screen readers only, today's wins are one line, each field has its label beside it, and the button
+ * bar is thinner.
+ */
+.sheet.wrap.compact {
+  gap: 6px;
+}
+.sheet.wrap.compact .wrap-intro {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.sheet.wrap.compact .wrap-winsec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sheet.wrap.compact .wrap-winsec h3 {
+  flex: none;
+  margin: 0;
+}
+.sheet.wrap.compact .wrap-wins {
+  flex: 1;
+  min-width: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+}
+.sheet.wrap.compact .wrap-wins li {
+  min-width: 0;
+}
+.sheet.wrap.compact .wrap-wins li.more {
+  flex: none;
+  padding-left: 0;
+}
+/* With nothing ticked off the kind words say it all: the heading and its 0 stay for screen readers only. */
+.sheet.wrap.compact .wrap-winsec.no-wins h3 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.sheet.wrap.compact .wrap-ctl .seg button {
+  padding: 0 6px;
+}
+.sheet.wrap.compact .wrap-empty {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.sheet.wrap.compact .wrap-tomorrow {
+  gap: 6px;
+  padding: 6px 10px;
+}
+.sheet.wrap.compact .wrap-field {
+  display: grid;
+  grid-template-columns: minmax(0, 38%) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.sheet.wrap.compact .wrap-field label {
+  line-height: 1.25;
+}
+.sheet.wrap.compact .wrap-field .field {
+  min-height: 30px;
+}
+.sheet.wrap.compact .wrap-frogdone {
+  margin: -2px 0 0;
+}
+.sheet.wrap.compact .wrap-head {
+  margin-bottom: 2px;
+}
+.sheet.wrap.compact .wrap-actions {
+  padding-top: 4px;
 }
 
 /* ---------- Lighten the day (v0.4): the board opened to move tasks off an overbooked day ---------- */
@@ -2139,9 +2317,6 @@ body.overlay {
 }
 .task.lightening .check {
   align-self: start;
-}
-.task.lightening .t-actions {
-  right: 104px;
 }
 .lighten-go {
   justify-content: center;

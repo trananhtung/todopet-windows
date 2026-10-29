@@ -1,6 +1,6 @@
 // Date parsing, calendar-day math and text cleanup (DateParse, DayMath and TextClean in Models.swift).
 // Everything is local time, like Swift's Calendar.current.
-import { L } from "./l10n";
+import { getLang, L } from "./l10n";
 
 // "2026-10-25T02:00:00Z" or "2026-10-25T09:00:00+07:00" (fractional seconds already stripped).
 const ABSOLUTE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(Z|[+-]\d{2}:\d{2})$/;
@@ -133,4 +133,9 @@ export function shortText(s: string, max = 42): string {
 export function hoursText(minutes: number): string {
   const m = Math.round(minutes);
   return m % 60 === 0 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 60)}h${pad(m % 60)}`;
+}
+
+/** The weekday of a day key in full and in the current language ("Monday", "Thứ Hai"), or null for a bad key. */
+export function weekdayName(day: string): string | null {
+  return parseDate(day)?.toLocaleDateString(getLang() === "vi" ? "vi-VN" : "en-US", { weekday: "long" }) ?? null;
 }

@@ -60,6 +60,19 @@ describe("placeBoard", () => {
     expect(inside(p, W, H)).toBe(true);
   });
 
+  // v0.4 evaluation round 2, issue 4: the 16 px top gap applied to the side boards but not to the one above the pet (8 px).
+  it("leaves the same room above a board that opens above the pet", () => {
+    const panel = { left: 14, top: 14, width: 238, height: 236 };
+    // The pet in the middle of a 1024 px screen: the demo panel takes the left side and there is no room on the right.
+    const p = placeBoard({ stageWidth: 1024, stageHeight: 652, petX: 620, petSize: PET, headTop: head(652), avoid: [panel] });
+    expect(p.side).toBe("above");
+    expect(p.top).toBeGreaterThanOrEqual(16);
+    expect(p.top + p.height).toBeLessThanOrEqual(head(652) - 8);
+    expect(p.bottom).toBe(652 - (p.top + p.height));
+    expect(p.height).toBeGreaterThanOrEqual(300);
+    expect(overlaps(p, petBox(620, 652))).toBe(false);
+  });
+
   it("re-anchors to the new screen size", () => {
     const a = placeBoard({ stageWidth: 1366, stageHeight: 720, petX: 900, petSize: PET, headTop: head(720) });
     const b = placeBoard({ stageWidth: 1024, stageHeight: 652, petX: 900, petSize: PET, headTop: head(652) });

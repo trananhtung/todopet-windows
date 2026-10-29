@@ -1,20 +1,18 @@
 // The Wrap up sheet (SPEC v0.4 §3): the shutdown ritual in the board.
 import { useEffect, useId, useRef, useState } from "react";
 import type { Brain, BrainState } from "../core/brain";
-import { parseDate } from "../core/dates";
-import { getLang, L, plural } from "../core/l10n";
+import * as lines from "../core/lines";
+import { L, plural } from "../core/l10n";
 import { openTasks, taskTitle } from "../core/models";
 import { canMove, chooseFrog, chooseMove, moveAllToTomorrow, MAX_NOTE_LENGTH, setNote, wrapMoves, type WrapMove } from "../core/wrapup";
 import { Icon } from "../ui/icons";
-import { localeTag } from "../ui/lang";
 import { hh } from "./DayStrip";
 
 const short = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
 
 /** The next workday's name ("Monday") when it isn't tomorrow; null for tomorrow. */
 export function nextWorkdayName(brain: Brain): string | null {
-  const next = brain.wrapDay();
-  return next.isTomorrow ? null : (parseDate(next.day)?.toLocaleDateString(localeTag(getLang()), { weekday: "long" }) ?? null);
+  return brain.wrapDayName();
 }
 
 /**
@@ -73,7 +71,7 @@ function MoveChoice({
  * are never far to scroll to), each unfinished task (Tomorrow / No date / Keep, one line each), and **Done for today**
  * in a bar that stays in reach. The choices are made here and applied together when you press the button.
  */
-export function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: BrainState; onBack: () => void; onDone: () => void }) {
+export function WrapUpSheet({ brain, s, compact = false, onBack, onDone }: { brain: Brain; s: BrainState; /** A short board (above the pet, or on a short screen): the sheet is tighter, so the list shows. */ compact?: boolean; onBack: () => void; onDone: () => void }) {
   // The draft lives in the brain (for the day), so closing the board doesn't lose it.
   const draft = s.wrapDraft ?? brain.wrapDraft();
   const [busy, setBusy] = useState(false);
@@ -87,6 +85,8 @@ export function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: Bra
   const overdue = new Set(s.day.overdue.map((t) => t.id));
   const wins = s.day.completed;
   const { tomorrow, none } = wrapMoves(draft, tasks);
+  // Short board: one win and "and N more", on the line with its heading.
+  const shownWins = compact ? 1 : 3;
   // "Tomorrow" is the next workday: its name when that isn't tomorrow.
   const dayName = nextWorkdayName(brain);
   const choices: [WrapMove, string][] = [
@@ -116,40 +116,40 @@ export function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: Bra
     none.length > 0 && L(`bỏ ${none.length} việc khỏi kế hoạch`, `take ${plural(none.length, "", "task", "tasks").trim()} off the plan`),
   ].filter(Boolean);
   const doneLabel = L("Xong hôm nay", "Done for today");
-  const frogLabel = dayName ? L(`Làm đầu tiên vào ${dayName}`, `First on ${dayName}`) : L("Làm đầu tiên ngày mai", "First tomorrow");
+  const frogLabel = lines.wrapFrogLabel(dayName);
   return (
-    <div className="sheet wrap">
-      <div>
+    <div className={`sheet wrap${compact ? " compact" : ""}`}>
+      <div className="wrap-top">
         <button className="btn ghost small" onClick={onBack} disabled={busy}>
           <Icon name="arrowLeft" size={14} /> {L("Quay lại", "Back")}
         </button>
+        <h2 ref={heading} tabIndex={-1}>
+          <Icon name="moon" size={18} /> {L("Tổng kết ngày", "Wrap up the day")}
+        </h2>
       </div>
-      <h2 ref={heading} tabIndex={-1}>
-        <Icon name="moon" size={18} /> {L("Tổng kết ngày", "Wrap up the day")}
-      </h2>
-      <p className="muted wrap-intro">{L("Vài cú chạm là xong, không có đúng sai: chỉ là dọn bàn cho mai.", "A few taps, no right answers: just a tidy desk for tomorrow.")}</p>
+      <p className="muted wrap-intro">{lines.wrapIntro(dayName)}</p>
 
-      <section aria-labelledby="wrap-wins">
+      <section aria-labelledby="wrap-wins" className={`wrap-winsec${wins.length === 0 ? " no-wins" : ""}`}>
         <h3 id="wrap-wins">
           {L("Hôm nay bạn đã làm", "Today's wins")} <span className="count good">{wins.length}</span>
         </h3>
         {wins.length === 0 ? (
-          <p className="wrap-empty">{L("Hôm nay chưa tick việc nào, và vậy cũng không sao. Mai là một trang mới 🌱", "Nothing ticked off today, and that's okay. Tomorrow is a fresh page 🌱")}</p>
+          <p className="wrap-empty">{lines.wrapNoWins(dayName)}</p>
         ) : (
           <ul className="wrap-wins">
-            {wins.slice(0, 3).map((t) => (
+            {wins.slice(0, shownWins).map((t) => (
               <li key={t.id} title={taskTitle(t)}>
                 <Icon name="check" size={13} />
                 <span>{taskTitle(t)}</span>
               </li>
             ))}
-            {wins.length > 3 && <li className="more">{L(`và ${wins.length - 3} việc nữa`, `and ${wins.length - 3} more`)}</li>}
+            {wins.length > shownWins && <li className="more">{L(`và ${wins.length - shownWins} việc nữa`, `and ${wins.length - shownWins} more`)}</li>}
           </ul>
         )}
       </section>
 
       {/* Tomorrow: the first task and the one line, up here where they are never far to scroll to. */}
-      <section className="wrap-tomorrow" aria-label={L("Cho ngày mai", "For tomorrow")}>
+      <section className="wrap-tomorrow" aria-label={lines.wrapForLabel(dayName)}>
         <div className="wrap-field">
           <label htmlFor={`${id}-frog`}>🐸 {frogLabel}</label>
           <select
@@ -159,7 +159,7 @@ export function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: Bra
             disabled={tasks.length === 0}
             onChange={(e) => brain.editWrapDraft((d, all) => chooseFrog(d, all, e.target.value === "" ? null : e.target.value))}
           >
-            <option value="">{L("Mai mình chọn sau", "I'll decide tomorrow")}</option>
+            <option value="">{lines.wrapDecideLater(dayName)}</option>
             {tasks.map((t) => (
               <option key={t.id} value={t.id} disabled={(draft.moves[t.id] ?? "keep") === "none"}>
                 {short(taskTitle(t), 60)}
@@ -169,11 +169,11 @@ export function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: Bra
         </div>
         {draft.frogDone && (
           <p className="muted wrap-frogdone" role="status">
-            🐸 {L(`“${short(draft.frogDone, 40)}” đã xong rồi, giỏi quá! Chọn việc khác hoặc để mai tính.`, `“${short(draft.frogDone, 40)}” is already done, nice! Pick another, or decide tomorrow.`)}
+            🐸 {lines.wrapFrogDone(short(draft.frogDone, 40), dayName)}
           </p>
         )}
         <div className="wrap-field wrap-note">
-          <label htmlFor="wrap-note">{L("Mai mình bắt đầu từ đâu?", "Where do I start tomorrow?")}</label>
+          <label htmlFor="wrap-note">{lines.wrapNoteLabel(dayName)}</label>
           <input
             id="wrap-note"
             className="field"

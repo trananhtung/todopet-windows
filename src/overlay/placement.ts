@@ -93,7 +93,8 @@ export function placeBoard(input: PlacementInput): BoardPlacement {
   }
   {
     const width = Math.min(i.maxWidth, W - 2 * m);
-    const height = Math.min(i.maxHeight, i.headTop - 2 * m);
+    // The same room above it as a side board has (`topMargin`), not flush to the top of the screen.
+    const height = Math.min(i.maxHeight, i.headTop - m - i.topMargin);
     const left = Math.min(Math.max(petX - width / 2, m), W - width - m);
     candidates.push({ side: "above", left, top: i.headTop - m - height, width, height, bottom: H - i.headTop + m });
   }

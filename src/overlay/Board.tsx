@@ -28,6 +28,22 @@ type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "ward
 const PRIO_INK = ["", "var(--p1-ink)", "var(--p2-ink)", "var(--p3-ink)", "var(--p4-ink)"];
 const PRIO_LINE = ["", "var(--p1-line)", "var(--p2-line)", "var(--p3-line)", "var(--p4-line)"];
 
+/**
+ * A sheet that replaces the list takes the keyboard to its heading when it opens. Without it a mouse click on a button
+ * of the list leaves the focus on the page (that button is gone), and Escape would close the whole board instead of
+ * going back to the list.
+ */
+function useHeadingFocus() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true });
+  }, []);
+  return heading;
+}
+
+/** A board shorter than this (px) is "compact": the Wrap up sheet fits its list in. */
+const COMPACT_BELOW = 600;
+
 /** "Start when…" lists this many of today's meetings. */
 const MAX_MEETING_CHOICES = 4;
 
@@ -48,6 +64,8 @@ function IconButton({
   ref?: Ref<HTMLButtonElement>;
   "aria-expanded"?: boolean;
   "aria-haspopup"?: "menu" | "dialog";
+  "data-split"?: "";
+  "data-wardrobe"?: "";
 }) {
   return (
     <button ref={ref} type="button" className={`btn ghost icon${danger ? " danger" : ""}`} title={label} aria-label={label} onClick={onClick} {...aria}>
@@ -87,26 +105,46 @@ export function Board(props: {
     if (request.fromKeyboard && !request.focusAdd) ref.current?.focus({ preventScroll: true });
   }, [request]);
 
-  // Back from the Wrap up sheet: focus goes to the button that opened it.
-  const lastView = useRef(view.kind);
+  // Back from a sheet: focus goes to the button that opened it (the Wrap up button, the task's Split, the Wardrobe button).
+  const lastView = useRef<View>(view);
   useEffect(() => {
+    const was = lastView.current;
+    lastView.current = view;
+    if (was.kind === view.kind || view.kind !== "main") return;
     // (Unless something else asked for the focus: a bubble's "Open" on a task.)
-    if (lastView.current === "wrapup" && view.kind !== "wrapup" && !request.focusTaskId) ref.current?.querySelector<HTMLElement>("[data-wrap-up]")?.focus();
-    lastView.current = view.kind;
+    if (request.focusTaskId) return;
+    const board = ref.current;
+    if (!board) return;
+    let target: HTMLElement | null = null;
+    if (was.kind === "wrapup") target = board.querySelector<HTMLElement>("[data-wrap-up]");
+    else if (was.kind === "wardrobe") target = board.querySelector<HTMLElement>("[data-wardrobe]");
+    else if (was.kind === "split") {
+      const row = [...board.querySelectorAll<HTMLElement>("li.task")].find((e) => e.dataset.taskId === was.task.id);
+      target = row?.querySelector<HTMLElement>("[data-split]") ?? row ?? null;
+    }
+    (target ?? board).focus({ preventScroll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.kind]);
+  }, [view]);
 
   const needsToken = !s.hasToken || s.authError;
+  // A board that is short (it opened above the pet, or the screen is) gives its sheets a tighter layout.
+  const compact = placement.height < COMPACT_BELOW;
   const origin = placement.side === "left" ? "100% 100%" : placement.side === "right" ? "0% 100%" : "50% 100%";
   // An urgent bubble (a meeting, a timed task) is not held back by the open board: it shows here, with its buttons.
   const banner = s.bubble && showsOverBoard(s.bubble) && !brain.bubbleStale(s.bubble) ? s.bubble : null;
+  // A check-in shown here ("Move some?") is read here: once the board closes it isn't shown again over the pet.
+  const bannerId = banner?.id ?? null;
+  useEffect(() => {
+    if (bannerId !== null) brain.bannerRead(bannerId);
+  }, [brain, bannerId]);
+  useEffect(() => () => brain.boardClosed(), [brain]);
 
   return (
     <section
       ref={ref}
       tabIndex={-1}
       role="dialog"
-      className={`board side-${placement.side}`}
+      className={`board side-${placement.side}${compact ? " compact" : ""}`}
       data-hit=""
       // Anchored by its bottom edge and as tall as its content, up to the room it was given.
       style={{ left: placement.left, bottom: placement.bottom, width: placement.width, maxHeight: placement.height, transformOrigin: origin }}
@@ -130,7 +168,7 @@ export function Board(props: {
         ) : view.kind === "wardrobe" ? (
           <Wardrobe brain={brain} s={s} onBack={() => setView({ kind: "main" })} />
         ) : view.kind === "wrapup" ? (
-          <WrapUpSheet brain={brain} s={s} onBack={() => setView({ kind: "main" })} onDone={onClose} />
+          <WrapUpSheet brain={brain} s={s} compact={compact} onBack={() => setView({ kind: "main" })} onDone={onClose} />
         ) : (
           <Main
             brain={brain}
@@ -211,7 +249,7 @@ function Header({ s, backend, onClose, onWardrobe }: { s: BrainState; backend: B
         </div>
       </div>
       <div className="head-tools">
-        <IconButton icon="hanger" label={L("Tủ đồ & thành tích", "Wardrobe & achievements")} onClick={onWardrobe} />
+        <IconButton icon="hanger" label={L("Tủ đồ & thành tích", "Wardrobe & achievements")} onClick={onWardrobe} data-wardrobe="" />
         <IconButton icon="book" label={L("Nhật ký của pet", "Pet diary")} onClick={() => void backend.system.openWindow("diary")} />
         <IconButton icon="gear" label={L("Cài đặt", "Settings")} onClick={() => void backend.system.openWindow("settings")} />
         <IconButton icon="close" label={L("Đóng (Esc)", "Close (Esc)")} onClick={onClose} />
@@ -456,6 +494,10 @@ function Main({
   // One confirmation line under the add form, for adds and for moves.
   const [note, setNote] = useState<Note | null>(null);
 
+  // Opening the lighten view answers the "Move some?" bubble: it isn't shown again.
+  useEffect(() => {
+    brain.setLightening(lighten);
+  }, [brain, lighten]);
   // Lightening the day: it goes on until the day fits (the strip updates as tasks move), or you close it.
   const load = brain.currentLoad();
   const over = load.overBy;
@@ -467,15 +509,59 @@ function Main({
     onLighten(false);
     if (!moving.current) setNote({ n: Date.now(), text: lines.dayFits(), error: false });
   }, [lighten, fits, onLighten]);
-  // After a task leaves the list, the keyboard stays in the list instead of falling to the top of the board.
+  // After a task leaves the list, the keyboard stays in the board instead of falling to the page: on the next row's
+  // "→ Tomorrow" (the one before it when it was the last), or, when that move made the day fit and the view closed,
+  // on the add field.
   const listRef = useRef<HTMLElement>(null);
-  const refocus = useRef(false);
+  const refocus = useRef<{ index: number; until: number } | null>(null);
   useEffect(() => {
-    if (!refocus.current) return;
-    refocus.current = false;
-    const next = listRef.current?.querySelector<HTMLElement>(".lighten-go:not(:disabled)") ?? listRef.current?.querySelector<HTMLElement>(".lighten-banner button");
-    (next ?? listRef.current?.closest<HTMLElement>(".board"))?.focus({ preventScroll: true });
+    const at = refocus.current;
+    if (!at) return;
+    refocus.current = null;
+    if (Date.now() > at.until) return;
+    const rows = [...(listRef.current?.querySelectorAll<HTMLElement>("li.task") ?? [])];
+    const goOf = (r: HTMLElement) => r.querySelector<HTMLButtonElement>(".lighten-go:not(:disabled)");
+    const stays = lighten && !fits;
+    let target: HTMLElement | null | undefined;
+    if (stays) {
+      target = rows.slice(at.index).map(goOf).find(Boolean) ?? rows.slice(0, at.index).reverse().map(goOf).find(Boolean) ?? listRef.current?.querySelector<HTMLElement>(".lighten-banner button");
+    } else {
+      // The day fits and the view closed: back to the top of the board, where the add field and the note about it are
+      // (not on the next row's tick: a second Enter would finish a task you only meant to move).
+      target = listRef.current?.closest(".board")?.querySelector<HTMLElement>("#add-task");
+    }
+    (target ?? listRef.current?.closest<HTMLElement>(".board"))?.focus({ preventScroll: true });
   }, [day.today.length]);
+  // The view opens on its first "→ Tomorrow" (whoever opened it: the chip, a bubble's button), so the keyboard
+  // continues in the list; when it ends and the focus has nowhere to be, it goes to the chip it came from.
+  const wasLightening = useRef(false);
+  useEffect(() => {
+    if (lighten && !wasLightening.current) {
+      wasLightening.current = true;
+      const go = listRef.current?.querySelector<HTMLElement>(".lighten-go:not(:disabled)");
+      go?.focus({ preventScroll: true });
+      // The timeline folds away over a fifth of a second; once it has, the first rows are brought into view (scrolling
+      // before would aim at where they were).
+      const id = window.setTimeout(() => {
+        const body = go?.closest(".board-body");
+        const rows = [...(listRef.current?.querySelectorAll<HTMLElement>("li.task") ?? [])];
+        if (!go || !body || rows.length === 0) return;
+        // The first few rows all in view: that is what lightening is about. If they are not, the list starts at the top.
+        const b = body.getBoundingClientRect();
+        const first = rows[0].getBoundingClientRect();
+        const last = rows[Math.min(rows.length, 3) - 1].getBoundingClientRect();
+        if (first.top < b.top || last.bottom > b.bottom) listRef.current?.scrollIntoView?.({ block: "start" });
+      }, 260);
+      return () => window.clearTimeout(id);
+    } else if (!lighten && wasLightening.current) {
+      const a = document.activeElement;
+      if (!a || a === document.body || !a.isConnected) {
+        const board = listRef.current?.closest<HTMLElement>(".board");
+        (board?.querySelector<HTMLElement>(".ds-over") ?? board?.querySelector<HTMLElement>("#add-task") ?? board)?.focus({ preventScroll: true });
+      }
+    }
+    wasLightening.current = lighten;
+  }, [lighten]);
 
   // "Open" on a meeting's related task: scroll to it, give it the focus, and flash it so the eye finds it.
   const [flash, setFlash] = useState<string | null>(null);
@@ -555,9 +641,11 @@ function Main({
                 flash={flash === t.id}
                 lighten={lighten}
                 dayName={dayName}
-                onMoved={(phase) => {
+                onMoved={(phase, ok) => {
                   moving.current = phase === "start";
-                  if (phase === "start") refocus.current = true;
+                  if (phase === "start") refocus.current = { index: day.today.findIndex((x) => x.id === t.id), until: Date.now() + 4000 };
+                  // It didn't move: nothing leaves the list, so the keyboard stays on the button it is on.
+                  else if (ok === false) refocus.current = null;
                 }}
                 onSplit={onSplit}
                 onNote={setNote}
@@ -621,7 +709,7 @@ function TaskRow({
   lighten?: boolean;
   /** The next workday's name when it isn't tomorrow. */
   dayName?: string | null;
-  onMoved?: (phase: "start" | "end") => void;
+  onMoved?: (phase: "start" | "end", ok?: boolean) => void;
   onSplit: (t: TodoTask) => void;
   onNote: (n: Note) => void;
 }) {
@@ -642,14 +730,33 @@ function TaskRow({
   const moveOne = () => {
     onMoved?.("start");
     const name = short(title, 40);
+    const before = brain.currentLoad();
     void brain.moveToNextWorkday(t).then((ok) => {
-      onMoved?.("end");
+      onMoved?.("end", ok);
+      const after = brain.currentLoad();
+      // What it bought back (a task inside a meeting frees less than its estimate), so the arithmetic is no surprise.
+      const freed = Math.round(before.taskMinutes - after.taskMinutes);
       onNote(
         ok
-          ? { n: Date.now(), text: L(`Đã dời “${name}” sang ${where} ✓`, `Moved “${name}” to ${where} ✓`) + (brain.currentLoad().overBy <= 0 ? ` ${lines.dayFits()}` : ""), error: false }
+          ? {
+              n: Date.now(),
+              text: L(`Đã dời “${name}” sang ${where} ✓`, `Moved “${name}” to ${where} ✓`) + (freed >= 15 ? lines.freesTime(freed) : "") + (after.overBy <= 0 ? ` ${lines.dayFits()}` : ""),
+              error: false,
+            }
           : { n: Date.now(), text: brain.getSnapshot().errorText ?? L("Chưa dời được, thử lại nhé.", "Couldn't move it, try again."), error: true },
       );
     });
+  };
+  // Up and down the "→ Tomorrow" buttons, like the rows of a list.
+  const goKeys = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+    if (!keys.includes(e.key)) return;
+    const gos = [...(e.currentTarget.closest("ul")?.querySelectorAll<HTMLButtonElement>(".lighten-go:not(:disabled)") ?? [])];
+    const i = gos.indexOf(e.currentTarget);
+    const to = e.key === "ArrowDown" ? gos[Math.min(gos.length - 1, i + 1)] : e.key === "ArrowUp" ? gos[Math.max(0, i - 1)] : e.key === "Home" ? gos[0] : gos[gos.length - 1];
+    if (!to) return;
+    e.preventDefault();
+    to.focus();
   };
   const meta = [
     est && (
@@ -726,13 +833,16 @@ function TaskRow({
         </div>
         {meta.length > 0 && <div className="t-meta">{meta}</div>}
       </div>
-      <div className="t-actions">
-        <IconButton icon="play" label={L("Tập trung", "Focus")} onClick={() => brain.startFocus(t)} />
-        <IconButton icon="scissors" label={L("Chia nhỏ", "Split")} onClick={() => onSplit(t)} />
-        <IconButton ref={moveRef} icon="reschedule" label={L("Dời", "Move")} aria-haspopup="menu" aria-expanded={pop === "move"} onClick={() => setPop(pop === "move" ? null : "move")} />
-        <IconButton ref={moreRef} icon="more" label={L("Thêm: thử 2 phút, bắt đầu khi…", "More: try 2 minutes, start when…")} aria-haspopup="menu" aria-expanded={pop === "more" || pop === "when" || pop === "whenApp" || pop === "replace"} onClick={() => setPop(pop === "more" || pop === "when" || pop === "whenApp" || pop === "replace" ? null : "more")} />
-        <IconButton ref={deleteRef} icon="trash" danger label={L("Xoá", "Delete")} aria-haspopup="dialog" aria-expanded={pop === "delete"} onClick={() => setPop(pop === "delete" ? null : "delete")} />
-      </div>
+      {/* Lightening the day, a row is its tick and its "→ Tomorrow": five hover icons would cover its title and add Tab stops. */}
+      {!lighten && (
+        <div className="t-actions">
+          <IconButton icon="play" label={L("Tập trung", "Focus")} onClick={() => brain.startFocus(t)} />
+          <IconButton icon="scissors" label={L("Chia nhỏ", "Split")} onClick={() => onSplit(t)} data-split="" />
+          <IconButton ref={moveRef} icon="reschedule" label={L("Dời", "Move")} aria-haspopup="menu" aria-expanded={pop === "move"} onClick={() => setPop(pop === "move" ? null : "move")} />
+          <IconButton ref={moreRef} icon="more" label={L("Thêm: thử 2 phút, bắt đầu khi…", "More: try 2 minutes, start when…")} aria-haspopup="menu" aria-expanded={pop === "more" || pop === "when" || pop === "whenApp" || pop === "replace"} onClick={() => setPop(pop === "more" || pop === "when" || pop === "whenApp" || pop === "replace" ? null : "more")} />
+          <IconButton ref={deleteRef} icon="trash" danger label={L("Xoá", "Delete")} aria-haspopup="dialog" aria-expanded={pop === "delete"} onClick={() => setPop(pop === "delete" ? null : "delete")} />
+        </div>
+      )}
       {lighten && (
         <button
           type="button"
@@ -741,6 +851,7 @@ function TaskRow({
           title={canMove(t) ? L(`Dời “${short(title, 40)}” sang ${where}`, `Move “${short(title, 40)}” to ${where}`) : L("Việc lặp lại giữ lịch riêng của nó", "A repeating task keeps its own schedule")}
           aria-label={L(`Dời “${short(title, 40)}” sang ${where}`, `Move “${short(title, 40)}” to ${where}`)}
           onClick={(e) => e.detail < 2 && moveOne()}
+          onKeyDown={goKeys}
         >
           <span aria-hidden>→</span> {dayName ?? L("Ngày mai", "Tomorrow")}
         </button>
@@ -1396,6 +1507,7 @@ function SplitSheet({ brain, s, task, onDone }: { brain: Brain; s: BrainState; t
     else setError(brain.getSnapshot().errorText ?? L("Không lưu được.", "Couldn't save."));
   };
   const days = s.stuck.find((x) => x.task.id === task.id)?.days;
+  const heading = useHeadingFocus();
   return (
     <div className="sheet">
       <div>
@@ -1403,7 +1515,7 @@ function SplitSheet({ brain, s, task, onDone }: { brain: Brain; s: BrainState; t
           <Icon name="arrowLeft" size={14} /> {L("Quay lại", "Back")}
         </button>
       </div>
-      <h2>
+      <h2 ref={heading} tabIndex={-1}>
         <Icon name="scissors" size={18} /> {L("Chia nhỏ việc", "Split the task")}
       </h2>
       <div className="muted sheet-sub" title={title}>
@@ -1469,6 +1581,7 @@ function Wardrobe({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: (
     const p = life.accessoryProgress(a, s.life);
     return `${p.have}/${p.need}`;
   };
+  const heading = useHeadingFocus();
   return (
     <div className="sheet">
       <div>
@@ -1476,7 +1589,7 @@ function Wardrobe({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: (
           <Icon name="arrowLeft" size={14} /> {L("Quay lại", "Back")}
         </button>
       </div>
-      <h2>
+      <h2 ref={heading} tabIndex={-1}>
         <Icon name="hanger" size={18} /> {L("Tủ đồ", "Wardrobe")}
       </h2>
       <div className="wardrobe">
