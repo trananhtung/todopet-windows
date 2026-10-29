@@ -18,6 +18,10 @@ export interface MotionInput {
   /** Sit in the corner during a focus session (not during breaks). */
   focusing: boolean;
   antic: "grumble" | "parade" | "block" | null;
+  /** A little act is playing (a wave, a fidget, a shake): stand still for it. */
+  acting?: boolean;
+  /** Px at the left edge kept for the home corner: the pet walks beside it, never through it. */
+  reserveLeft?: number;
 }
 
 export interface MotionState {
@@ -81,6 +85,8 @@ export class PetMotion {
     const s = this.s;
     const ground = i.height;
     const margin = i.size * 0.4;
+    // Left end of the walking strip, past the home corner (the pet may still be dropped onto it).
+    const lo = Math.min(Math.max(margin, (i.reserveLeft ?? 0) + i.size * 0.32), i.width - margin);
     dt = Math.min(dt, 0.1);
 
     if (i.antic !== this.lastAntic) this.onAnticChange(i);
@@ -117,12 +123,12 @@ export class PetMotion {
     s.y = ground;
 
     if (i.antic === "parade") {
-      const edge = this.paradeDir > 0 ? i.width - margin : margin;
+      const edge = this.paradeDir > 0 ? i.width - margin : lo;
       this.walkToward(edge, SPEED[i.gait] * 2.1, dt, i.gait);
       if (Math.abs(edge - s.x) < 4) s.paradeDone = true;
       return;
     }
-    if (i.antic === "grumble" || i.hovered || i.mood === "celebrating" || i.mood === "sleeping") {
+    if (i.antic === "grumble" || i.hovered || i.acting || i.mood === "celebrating" || i.mood === "sleeping") {
       s.walking = false;
       return;
     }
@@ -135,7 +141,7 @@ export class PetMotion {
       return;
     }
     if (i.mood === "angry" && i.chase && i.cursor) {
-      const tx = Math.min(Math.max(i.cursor.x, margin), i.width - margin);
+      const tx = Math.min(Math.max(i.cursor.x, lo), i.width - margin);
       if (Math.abs(tx - s.x) > i.size * 0.35) {
         this.walkToward(tx, SPEED[i.gait] * 2, dt, i.gait);
         return;
@@ -145,6 +151,8 @@ export class PetMotion {
       return;
     }
 
+    // Dropped onto the home corner: step back out onto the strip.
+    if (this.target === null && s.x < lo - 2) this.target = lo + 16;
     // Wander: walk somewhere, pause, repeat. Happy pets wander more, annoyed ones mope.
     if (this.target === null) {
       s.walking = false;
@@ -153,16 +161,16 @@ export class PetMotion {
         const span = 120 + this.random() * 380;
         const dir = this.random() < 0.5 ? -1 : 1;
         let t = s.x + dir * span;
-        if (t < margin || t > i.width - margin) t = s.x - dir * span;
-        this.target = Math.min(Math.max(t, margin), i.width - margin);
+        if (t < lo || t > i.width - margin) t = s.x - dir * span;
+        this.target = Math.min(Math.max(t, lo), i.width - margin);
       }
       return;
     }
     const speed = SPEED[i.gait] * (i.mood === "happy" ? 1.15 : i.mood === "annoyed" ? 0.7 : 1);
     if (this.walkToward(this.target, speed, dt, i.gait)) {
       this.target = null;
-      const [lo, hi] = i.mood === "happy" ? [2, 7] : i.mood === "annoyed" ? [8, 20] : [4, 13];
-      this.pauseLeft = lo + this.random() * (hi - lo);
+      const [min, max] = i.mood === "happy" ? [2, 7] : i.mood === "annoyed" ? [8, 20] : [4, 13];
+      this.pauseLeft = min + this.random() * (max - min);
     }
   }
 

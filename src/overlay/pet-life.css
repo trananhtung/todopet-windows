@@ -1,0 +1,294 @@
+/* v0.5 pet life on the overlay: the trip sign, the home corner and the chest reveal.
+   (overlay.css keeps the pet, bubbles, board and the older effects.) */
+
+/* ---------- Trip sign ---------- */
+
+/* Planted where the pet stood. The frame loop sets left/top to the pet's feet; the sign hangs above that point. */
+.trip-sign {
+  position: absolute;
+  left: -9999px;
+  top: -9999px;
+  bottom: auto;
+  margin: 0;
+  padding: 0 0 18px;
+  border: 0;
+  background: none;
+  color: #4a2e16;
+  font: inherit;
+  cursor: pointer;
+  translate: -50% -100%;
+  transform-origin: 50% 100%;
+  animation:
+    trip-sign-in 0.45s var(--ease-spring) both,
+    trip-sway 3.4s ease-in-out 0.45s infinite alternate;
+}
+/* The stake, planted in the ground. */
+.trip-sign::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 5px;
+  height: 20px;
+  margin-left: -2.5px;
+  border-radius: 2px 2px 1px 1px;
+  background: linear-gradient(90deg, #8a5a2b, #a87140 55%, #8a5a2b);
+}
+.trip-sign .plank {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 6px 12px 7px;
+  border: 2px solid #8a5a2b;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fff6df, #fbe7bf);
+  box-shadow:
+    inset 0 -2px 0 rgba(138, 90, 43, 0.14),
+    0 4px 10px rgba(60, 35, 15, 0.2);
+  font: 700 12.5px/1.3 var(--font);
+  white-space: nowrap;
+  text-align: center;
+  transition:
+    translate 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out);
+}
+/* Two little nails. */
+.trip-sign .plank::before,
+.trip-sign .plank::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 50%;
+  background: #b9875a;
+}
+.trip-sign .plank::before {
+  left: 5px;
+}
+.trip-sign .plank::after {
+  right: 5px;
+}
+.trip-sign .pack {
+  margin-right: 4px;
+}
+/* The hint only shows on hover or keyboard focus, so the resting sign stays one quiet line. */
+.trip-sign small {
+  display: block;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  font: 600 10.5px/1.35 var(--font);
+  color: #9a5a26;
+  transition:
+    max-height 0.2s var(--ease-out),
+    opacity 0.2s var(--ease-out);
+}
+.trip-sign:hover .plank,
+.trip-sign:focus-visible .plank {
+  translate: 0 -2px;
+  box-shadow:
+    inset 0 -2px 0 rgba(138, 90, 43, 0.14),
+    0 7px 14px rgba(60, 35, 15, 0.24);
+}
+.trip-sign:hover small,
+.trip-sign:focus-visible small {
+  max-height: 1.6em;
+  opacity: 1;
+}
+.trip-sign:focus-visible {
+  outline: none;
+}
+.trip-sign:focus-visible .plank {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+@keyframes trip-sign-in {
+  from {
+    scale: 0.4;
+    opacity: 0;
+  }
+  to {
+    scale: 1;
+    opacity: 1;
+  }
+}
+@keyframes trip-sway {
+  from {
+    rotate: -1.6deg;
+  }
+  to {
+    rotate: 1.6deg;
+  }
+}
+
+/* ---------- Home corner ---------- */
+
+/* On the ground at the left end of the pet's strip; still, slightly muted, never in the way of clicks. */
+.home-corner {
+  position: absolute;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  pointer-events: none;
+  opacity: 0.9;
+  filter: saturate(0.88);
+}
+.home-item {
+  flex: none;
+  /* The drawings stand on a floor line ~8% above their box bottom. */
+  margin-bottom: -3px;
+}
+.home-item svg {
+  display: block;
+}
+
+/* ---------- Chest reveal ---------- */
+
+/* Anchored at the ground beside the pet; --d is when it starts (after the ponder and the confetti). */
+.chest-pop {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  --spark: #ffd166;
+  --spark-2: #ffb4a2;
+  --glow: rgba(255, 209, 102, 0.55);
+}
+.chest-pop.tier-rare {
+  --spark: #8ecbff;
+  --spark-2: #c7a8ff;
+  --glow: rgba(142, 203, 255, 0.55);
+}
+.chest-pop.tier-legendary {
+  --spark: #ffd700;
+  --spark-2: #fff3b0;
+  --glow: rgba(255, 200, 0, 0.7);
+}
+.chest-box,
+.chest-prize,
+.chest-glow,
+.chest-spark {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+}
+.chest-box {
+  font-size: 26px;
+  line-height: 1;
+  translate: -50% 0;
+  transform-origin: 50% 100%;
+  animation: chest-box 1.5s var(--ease-out) var(--d, 0s) both;
+}
+.chest-glow {
+  width: 56px;
+  height: 56px;
+  margin: 0 0 -6px -28px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow), transparent 68%);
+  animation: chest-glow 1.1s ease-out calc(var(--d, 0s) + 0.45s) both;
+}
+.chest-prize {
+  font-size: 20px;
+  line-height: 1;
+  translate: -50% 0;
+  animation: chest-prize 1.4s var(--ease-out) calc(var(--d, 0s) + 0.55s) both;
+}
+/* Four-point sparkles flying out of the open lid. */
+.chest-spark {
+  width: 11px;
+  height: 11px;
+  margin: 0 0 22px -5.5px;
+  background: var(--spark);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  animation: chest-spark 0.85s ease-out both;
+}
+.chest-spark:nth-child(even) {
+  background: var(--spark-2);
+}
+@keyframes chest-box {
+  0% {
+    opacity: 0;
+    scale: 0.2;
+    translate: -50% 10px;
+  }
+  18% {
+    opacity: 1;
+    scale: 1.12;
+    translate: -50% -6px;
+  }
+  28% {
+    scale: 1;
+    translate: -50% 0;
+    rotate: 0deg;
+  }
+  34% {
+    rotate: -9deg;
+  }
+  40% {
+    rotate: 8deg;
+  }
+  46% {
+    rotate: 0deg;
+    scale: 1;
+  }
+  52% {
+    scale: 1.22 0.86;
+  }
+  60% {
+    scale: 1;
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    scale: 0.92;
+  }
+}
+@keyframes chest-glow {
+  0% {
+    opacity: 0;
+    scale: 0.4;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    scale: 1.6;
+  }
+}
+@keyframes chest-prize {
+  0% {
+    opacity: 0;
+    translate: -50% 0;
+    scale: 0.4;
+  }
+  22% {
+    opacity: 1;
+    translate: -50% -34px;
+    scale: 1.15;
+  }
+  70% {
+    opacity: 1;
+    translate: -50% -48px;
+    scale: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: -50% -60px;
+  }
+}
+@keyframes chest-spark {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.2);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) scale(var(--s)) rotate(90deg);
+  }
+}

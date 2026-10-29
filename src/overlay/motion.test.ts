@@ -78,4 +78,25 @@ describe("PetMotion", () => {
     expect(m.s.y).toBe(700);
     expect(m.s.scale).toBe(1);
   });
+
+  it("stands still for an act and stays out of the home corner", () => {
+    const m = new PetMotion(600, 700, () => 0.9);
+    run(m, 20, input({ acting: true }));
+    expect(m.s.walking).toBe(false);
+    expect(m.s.x).toBe(600);
+
+    let r = 0;
+    const w = new PetMotion(300, 700, () => ((r = (r + 0.37) % 1), r));
+    for (let k = 0; k < 120 * 30; k++) {
+      w.step(1 / 30, input({ reserveLeft: 160 }));
+      expect(w.s.x).toBeGreaterThanOrEqual(160 + 150 * 0.32 - 0.01);
+    }
+    // Dropped onto the corner, it walks back out.
+    const d = new PetMotion(600, 700);
+    d.grab(600, 650);
+    d.drag(80, 650);
+    d.release();
+    run(d, 8, input({ reserveLeft: 160 }));
+    expect(d.s.x).toBeGreaterThanOrEqual(160 + 150 * 0.32);
+  });
 });

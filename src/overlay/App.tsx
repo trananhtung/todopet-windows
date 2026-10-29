@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Backend } from "../backend/types";
 import type { Brain, BrainState } from "../core/brain";
+import { currentEvent } from "../core/calendar";
 import { getLang, L } from "../core/l10n";
 import { stageOf } from "../core/life";
 import type { TodoTask } from "../core/models";
-import type { Mood } from "../core/types";
+import type { DecorId, Mood } from "../core/types";
 import { defaultPose, renderPet, speciesInfo } from "../pets";
 import { Board } from "./Board";
 import { BubbleView } from "./Bubble";
 import { DemoDesktop, DemoPanel } from "./Demo";
 import { Effects } from "./Effects";
+import { HomeCorner, homeCornerWidth, homeItems, TripSign } from "./Home";
+import { INTERACT, PetLife, type InteractOutput } from "./interact";
 import { PetMotion } from "./motion";
 import { placeBoard, type BoardPlacement, type Rect } from "./placement";
 import { playChime, speak } from "./sound";
@@ -24,6 +27,8 @@ const FAST = 1 / 32;
 const SLOW = 1 / 10;
 /** How often click-through is re-checked under a still cursor (a bubble appearing, the board closing). */
 const HIT_TEST_MS = 100;
+/** A key pressed this recently (s) counts as typing: no fidgets, yawns or clumsy moments (as the brain's calm). */
+const TYPING_SEC = 20;
 
 export interface BoardRequest {
   /** Bumped every time the board is asked to open, so the same request can repeat. */
@@ -55,6 +60,13 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
   const clickThrough = useRef(true);
   const boardOpen = useRef(false);
   const anchor = useRef({ x: 0, top: 0, feetY: 0, size: BASE_SIZE });
+  const tripRef = useRef<HTMLButtonElement>(null);
+  /** Acts, petting, drowsiness and head tilt (pure; fed by the frame loop and the pointer handlers). */
+  const lifeRef = useRef<PetLife | null>(null);
+  lifeRef.current ??= new PetLife();
+  /** The latest system sample (idle and key timers), with when it arrived (s, performance clock). */
+  const sampleRef = useRef({ idle: 0, key: 999, at: 0 });
+  const homeWidth = useRef(0);
 
   const species = speciesInfo(s.prefs.species);
   brain.speciesSound = species.sound[getLang()];
@@ -145,6 +157,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     };
     const unsub = backend.system.onCursor((c) => {
       cursor.current = c;
+      lifeRef.current?.pointer(c.x, c.y, performance.now() / 1000);
       hitTest();
     });
     const id = setInterval(hitTest, HIT_TEST_MS);
@@ -195,6 +208,15 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     };
   }, [boardIsOpen, badge, s.prefs.petScale, computePlacement]);
 
+  // Idle and typing timers for the pet's little acts (the brain keeps its own copy).
+  useEffect(
+    () =>
+      backend.system.onSample((x) => {
+        sampleRef.current = { idle: x.idleSeconds, key: x.secondsSinceKey, at: performance.now() / 1000 };
+      }),
+    [backend],
+  );
+
   // Tray tooltip ticks every second during focus.
   useEffect(() => {
     if (!s.focus) return;
@@ -215,18 +237,31 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     let shownMood: Mood = prevMood;
     let blendStart = -10;
     let lastSvg = "";
+    const life = lifeRef.current!;
+    let fx: InteractOutput | null = null;
+    // Celebrations already under way when the loop starts get no ponder.
+    let seenCelebration = brain.getSnapshot().celebration?.id ?? null;
+    /** Seconds the current celebration was held back for the ponder. */
+    let celShift = 0;
+    let meeting = false;
+    let meetingAt = -10;
+    let wokeForHello = false;
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       const st = brain.getSnapshot();
       const motion = motionRef.current!;
-      const hiddenNow = isHidden(st);
+      const away = st.trip !== null;
+      const hiddenNow = isHidden(st) || away;
       const antic = st.antic?.kind.type ?? null;
-      const slow = !motion.s.held && antic === null && (hiddenNow || st.mood === "sleeping" || st.calmMotion);
+      // An act or petting plays at full rate even while you type (they are short, and you asked for them).
+      const lively = fx !== null && (fx.acting || fx.petting > 0);
+      const slow = !motion.s.held && antic === null && !lively && (hiddenNow || st.mood === "sleeping" || st.calmMotion);
       const dt = (now - last) / 1000;
       if (dt < (slow ? SLOW : FAST)) return;
       last = now;
       t += dt;
+      const nowS = now / 1000;
 
       // Read layout first, then write: no forced reflow in the middle of the frame.
       const W = stage.clientWidth;
@@ -237,52 +272,97 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       const sign = signRef.current;
       const sw = sign?.offsetWidth ?? 0;
       const sh = sign?.offsetHeight ?? 0;
+      const tripSign = tripRef.current;
+      const tw = tripSign?.offsetWidth ?? 0;
+      const th = tripSign?.offsetHeight ?? 0;
 
       const size = BASE_SIZE * st.prefs.petScale;
       const info = speciesInfo(st.prefs.species);
-      motion.step(dt, {
-        width: W,
-        height: H,
-        size,
-        mood: st.mood,
-        gait: info.gait,
-        calm: st.calmMotion,
-        // The pet waits beside its open board instead of wandering under it.
-        hovered: hovered.current || boardOpen.current,
-        cursor: cursor.current,
-        chase: st.prefs.chaseWhenAngry,
-        focusing: !!st.focus && !st.focus.isBreak,
-        antic,
-      });
+      const focusing = !!st.focus && !st.focus.isBreak;
+      // Away on a trip: the pet stays where its sign stands.
+      if (!away) {
+        motion.step(dt, {
+          width: W,
+          height: H,
+          size,
+          mood: st.mood,
+          gait: info.gait,
+          calm: st.calmMotion,
+          // The pet waits beside its open board instead of wandering under it.
+          hovered: hovered.current || boardOpen.current,
+          cursor: cursor.current,
+          chase: st.prefs.chaseWhenAngry,
+          focusing,
+          antic,
+          acting: !!fx && (fx.acting || fx.curious),
+          reserveLeft: homeWidth.current,
+        });
+      }
       if (antic === "parade" && motion.s.paradeDone) brain.endAntic();
       if (antic === "grumble" && st.antic && Date.now() - st.antic.start > 6000) brain.endAntic();
+      const m = motion.s;
 
-      if (st.mood !== shownMood) {
+      // The pet's little acts: what the user is doing (sampled ~1/s, extrapolated) and where the cursor is.
+      if (nowS - meetingAt >= 1) {
+        meetingAt = nowS;
+        meeting = currentEvent(st.events, new Date()) !== null;
+      }
+      const smp = sampleRef.current;
+      const since = smp.at > 0 ? Math.max(0, nowS - smp.at) : 0;
+      const cel = st.celebration;
+      if (cel && cel.id !== seenCelebration) {
+        seenCelebration = cel.id;
+        celShift = shownMood !== "celebrating" && Date.now() - cel.start < 1500 ? life.celebrate(nowS) : 0;
+      }
+      fx = life.step({
+        now: nowS,
+        pet: { x: m.x, y: m.y, size },
+        cursor: cursor.current,
+        held: m.held,
+        grounded: m.y >= H - 0.5,
+        walking: m.walking,
+        idleSec: smp.at > 0 ? smp.idle + since : 0,
+        typing: smp.at > 0 && smp.key + since < TYPING_SEC,
+        focus: focusing,
+        meeting,
+        mood: st.mood,
+        busy: antic !== null || (st.mood === "angry" && st.prefs.chaseWhenAngry && cursor.current !== null && !focusing),
+        away: hiddenNow,
+      });
+      // Back after a long time away while the pet is asleep: wake it now rather than at the brain's next tick.
+      if (fx.greeting && st.mood === "sleeping" && !wokeForHello) {
+        wokeForHello = true;
+        brain.recompute();
+      }
+      if (!fx.greeting) wokeForHello = false;
+
+      // Half a beat of pondering before a celebration: the old mood stays on screen for it.
+      const moodNow = fx.pondering && st.mood === "celebrating" ? shownMood : st.mood;
+      if (moodNow !== shownMood) {
         prevMood = shownMood;
-        shownMood = st.mood;
+        shownMood = moodNow;
         blendStart = t;
       }
-      const m = motion.s;
       const boxTop = m.y - size * FEET * m.scale;
       const visualTop = boxTop + size * HEAD * m.scale;
-      // Bubbles go above the focus badge when there is one.
-      const headTop = hasBadge(st) ? boxTop - 8 * m.scale : visualTop;
+      // Bubbles go above the focus badge when there is one, and above the trip sign while away.
+      const headTop = away && tripSign ? m.y - th : hasBadge(st) ? boxTop - 8 * m.scale : visualTop;
       anchor.current = { x: m.x, top: visualTop, feetY: m.y, size };
 
       if (!hiddenNow) {
-        const cel = st.celebration;
-        const celT = cel ? (Date.now() - cel.start) / 1000 : 99;
-        const look = cursor.current;
+        const celT = cel ? (Date.now() - cel.start) / 1000 - celShift : 99;
+        const look = fx.lookAtUser ? null : cursor.current;
         const headY = m.y - size * 0.55;
         const pose = defaultPose({
-          mood: st.mood,
+          mood: shownMood,
           t,
           facing: m.facing,
           walking: m.walking,
           walkPhase: m.walkPhase,
           lookX: look ? Math.max(-1, Math.min(1, (look.x - m.x) / 320)) : 0,
           lookY: look ? Math.max(-1, Math.min(1, (look.y - headY) / 320)) : 0,
-          hovered: hovered.current && !m.held,
+          // An act has its own face; the hover smile would cover a pout or a shake.
+          hovered: hovered.current && !m.held && !fx.act,
           held: m.held,
           prevMood,
           blend: Math.min(1, (t - blendStart) / 0.8),
@@ -295,6 +375,11 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
           golden: !!cel && cel.golden && celT < 6,
           food: cel && celT < 1.2 ? cel.food : null,
           foodT: celT,
+          act: fx.act,
+          petting: fx.petting,
+          drowsy: fx.drowsy,
+          headTilt: fx.headTilt,
+          craft: st.craft,
         });
         const svg = renderPet(st.prefs.species, pose, { size, idPrefix: "pet" });
         if (svg !== lastSvg && svgRef.current) {
@@ -321,6 +406,11 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
         sign.style.left = `${sx}px`;
         sign.style.top = `${m.y - sh - 26}px`;
       }
+      if (tripSign) {
+        // Planted where the pet stood (CSS hangs it above this point), kept on screen.
+        tripSign.style.left = `${Math.min(Math.max(m.x, tw / 2 + 8), W - tw / 2 - 8)}px`;
+        tripSign.style.top = `${m.y}px`;
+      }
       const flip = flipRef.current;
       if (flip) {
         // The speech bubble sits above the pet, so the shout goes under its feet: both stay readable.
@@ -341,12 +431,16 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       if (!d) return;
       if (d.moved) {
         motionRef.current?.release();
+        lifeRef.current?.drop(performance.now() / 1000);
         // Dropped somewhere else with the board open: follow the pet once it has landed.
         if (boardOpen.current) setTimeout(() => setPlacement(computePlacement()), 450);
         return;
       }
       if (!asClick) return;
+      // Quick pokes (the third click in a row and on) make the pet giggle or get dizzy, not flip the board.
+      const poke = lifeRef.current?.click(performance.now() / 1000) ?? false;
       brain.petClicked();
+      if (poke) return;
       if (boardOpen.current) closeBoard();
       else openBoard(false);
     },
@@ -372,6 +466,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 5) {
       d.moved = true;
       motionRef.current?.grab(d.startX, d.startY);
+      lifeRef.current?.grab(performance.now() / 1000);
       petRef.current?.classList.add("dragging");
     }
     if (d.moved) motionRef.current?.drag(e.clientX, e.clientY);
@@ -389,7 +484,14 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
   };
 
   const hidden = isHidden(s);
+  const away = s.trip !== null;
   const showBubble = s.bubble && !board && (!hidden || s.bubble.urgent);
+  // The home corner: up to 3 decorations (same list, same array, until it really changes).
+  const homeKey = homeItems(s.prefs.showHome, s.prefs.homeItems, s.life.decor).join(",");
+  const home = useMemo(() => (homeKey ? (homeKey.split(",") as DecorId[]) : []), [homeKey]);
+  useEffect(() => {
+    homeWidth.current = homeCornerWidth(home.length);
+  }, [home]);
 
   return (
     <>
@@ -406,12 +508,14 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
             (╯°□°)╯︵ ┻━┻
           </div>
         )}
+        {!hidden && <HomeCorner items={home} />}
+        {!hidden && s.trip && <TripSign ref={tripRef} trip={s.trip} brain={brain} />}
         <div
-          className={`pet${hidden ? " hidden" : ""}`}
+          className={`pet${hidden || away ? " hidden" : ""}`}
           ref={petRef}
           data-hit=""
           role="button"
-          tabIndex={hidden ? -1 : 0}
+          tabIndex={hidden || away ? -1 : 0}
           aria-label={`${s.prefs.petName}: ${L("mở bảng việc", "open the task board")}`}
           aria-haspopup="dialog"
           aria-expanded={board !== null}
@@ -428,7 +532,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
           <div ref={svgRef} />
           <PetBadge brain={brain} />
         </div>
-        <Effects celebration={s.celebration} anchor={anchor} />
+        <Effects celebration={s.celebration} reveal={s.reveal} anchor={anchor} delay={INTERACT.ponder} />
         {showBubble && s.bubble && <BubbleView key={s.bubble.id} ref={bubbleRef} bubble={s.bubble} brain={brain} />}
         {board && placement && <Board key="board" brain={brain} backend={backend} request={board} placement={placement} onClose={closeBoard} />}
         {demo && <DemoPanel brain={brain} backend={backend} />}
