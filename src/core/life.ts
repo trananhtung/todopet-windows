@@ -353,6 +353,8 @@ export function demoLife(): LifeState {
     distraction: { "youtube.com": 720, "facebook.com": 300 },
     // A chest to open with the next task, a decoration half knitted, a home corner and a souvenir shelf.
     chests: 1,
+    chestsToday: 1,
+    chestDay: dayKey(new Date()),
     workSec: 600,
     craft: 0.4,
     decor: ["rug", "plant", "mug"],

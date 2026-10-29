@@ -108,6 +108,9 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             <button className="btn" title={L("Giả vờ hôm qua chưa xong việc nào, rồi sang ngày mới", "Pretend nothing got done yesterday, then wake up to it")} onClick={() => brain.demoMissDay()}>
               🍪 {L("Lỡ một ngày", "Miss a day")}
             </button>
+            <button className="btn" title={L("Pet đi chơi (mỗi ngày một chuyến)", "Send the pet on today's trip (one a day)")} onClick={() => (s.trip ? brain.callBack() : brain.goOnTrip())}>
+              🎒 {s.trip ? L("Gọi về", "Call back") : L("Đi phiêu lưu", "Go on a trip")}
+            </button>
             <button className="btn" onClick={() => brain.tick()}>
               ⏱ {L("Chạy luật", "Run rules")}
             </button>
