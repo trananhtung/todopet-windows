@@ -5,6 +5,7 @@
 //! `src/backend/types.ts` for the contract the commands implement.
 
 mod calendar;
+mod cards;
 mod claude;
 mod diary;
 mod events;
@@ -134,6 +135,10 @@ fn main() {
             diary::diary_append,
             diary::diary_read,
             diary::diary_days,
+            cards::card_public_key,
+            cards::card_sign,
+            cards::card_verify,
+            cards::card_reset_key,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

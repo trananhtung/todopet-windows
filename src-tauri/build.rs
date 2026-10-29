@@ -35,6 +35,10 @@ const COMMANDS: &[&str] = &[
     "diary_append",
     "diary_read",
     "diary_days",
+    "card_public_key",
+    "card_sign",
+    "card_verify",
+    "card_reset_key",
 ];
 
 fn main() {

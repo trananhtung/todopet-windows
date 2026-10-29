@@ -12,3 +12,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 percent-encoding = "2.3"
 url = "2.5"
+base64 = "0.23"
+# Pet-card signatures (v0.6): Ed25519 with a key from the OS's secure random source.
+ed25519-dalek = { version = "2.2", default-features = false, features = ["std", "fast", "zeroize", "rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }

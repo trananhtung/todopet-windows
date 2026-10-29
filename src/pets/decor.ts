@@ -2,7 +2,7 @@
 // style (tinted outlines, soft gradients, rounded corners), each with one tiny cute detail. Pure: the same
 // id and options always give the same SVG.
 import type { DecorId } from "../core/types";
-import { sparkle } from "./svg";
+import { checkIdPrefix, sparkle } from "./svg";
 
 export interface DecorOptions {
   /** Outer width/height in px (default 64; the viewBox is always 0 0 64 64). */
@@ -368,7 +368,7 @@ const DRAW: Readonly<Record<DecorId, (P: string) => Part>> = {
 /** One decoration as an `<svg>` string (viewBox 0 0 64 64, transparent background). */
 export function renderDecor(id: DecorId, opts: DecorOptions = {}): string {
   const draw = DRAW[id] ?? DRAW.plant;
-  const P = opts.idPrefix ?? `decor-${id}`;
+  const P = checkIdPrefix(opts.idPrefix ?? `decor-${id}`);
   const size = opts.size ?? 64;
   const { defs, body } = draw(P);
   return (

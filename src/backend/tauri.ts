@@ -163,6 +163,14 @@ export function createTauriBackend(): Backend {
       days: () => call<string[]>("diary_days"),
     },
 
+    // The card key stays in Rust (Credential Manager); these commands are in the overlay window's capability alone.
+    cards: {
+      publicKey: () => call<string>("card_public_key"),
+      sign: (payload) => call<string>("card_sign", { payload }),
+      verify: (pk, payload, sig) => call<boolean>("card_verify", { pk, payload, sig }),
+      resetKey: () => call<void>("card_reset_key"),
+    },
+
     // A JS-side event broadcast to every window (the sender receives it too).
     bus: {
       emit: async (e) => {

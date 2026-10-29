@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "overlay",
-  "description": "The overlay runs the Brain: Todoist sync and actions, secrets status and the token/key changes the board offers, Ask Claude, calendar fetches, the overlay window, tray, links, extra windows, storage and diary writes. Events: the cross-window bus and the Rust samples/commands.",
+  "description": "The overlay runs the Brain: Todoist sync and actions, secrets status and the token/key changes the board offers, Ask Claude, calendar fetches, the overlay window, tray, links, extra windows, storage and diary writes, and the pet-card key (public key, sign, verify, new identity). Events: the cross-window bus and the Rust samples/commands.",
   "windows": [
     "overlay"
   ],
@@ -32,6 +32,10 @@
     "allow-system-locale",
     "allow-store-load",
     "allow-store-save",
-    "allow-diary-append"
+    "allow-diary-append",
+    "allow-card-public-key",
+    "allow-card-sign",
+    "allow-card-verify",
+    "allow-card-reset-key"
   ]
 }

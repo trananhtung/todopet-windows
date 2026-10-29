@@ -65,10 +65,17 @@ impl Store {
     ///
     /// A document that is not valid JSON (edited by hand, disk error) is renamed to `<key>.json.bad` and
     /// reported as missing, so the app starts with defaults instead of failing on every launch; the bad
-    /// copy stays on disk for recovery.
+    /// copy stays on disk for recovery. A file over the key's size cap (see `validate::max_doc_bytes`) is
+    /// treated the same way, without being read.
     pub fn load(&self, key: &str) -> CmdResult<Option<Value>> {
         let key = validate::store_key(key)?;
         let path = self.file(key);
+        // A file bigger than the key's cap was never written by the app: set it aside unread, like a damaged one.
+        let limit = validate::max_doc_bytes(key);
+        if fs::metadata(&path).is_ok_and(|m| m.len() > limit as u64) {
+            let _ = fs::rename(&path, self.dir.join(format!("{key}.json.bad")));
+            return Ok(None);
+        }
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -86,8 +93,14 @@ impl Store {
     pub fn save(&self, key: &str, value: &Value) -> CmdResult<()> {
         let key = validate::store_key(key)?;
         let bytes = serde_json::to_vec_pretty(value).map_err(|e| CmdError::internal(e.to_string()))?;
-        if bytes.len() > MAX_DOC_BYTES {
-            return Err(CmdError::invalid(format!("{key} is larger than 4 MB")));
+        let limit = validate::max_doc_bytes(key);
+        if bytes.len() > limit {
+            let size = if limit >= 1024 * 1024 {
+                format!("{} MB", limit / (1024 * 1024))
+            } else {
+                format!("{} KB", limit / 1024)
+            };
+            return Err(CmdError::invalid(format!("{key} is larger than {size}")));
         }
         write_atomic(&self.file(key), &bytes).map_err(|e| CmdError::internal(format!("Could not save {key}: {e}")))
     }
@@ -158,6 +171,53 @@ mod tests {
         let big = Value::String("x".repeat(MAX_DOC_BYTES + 1));
         assert!(store.save("prefs", &big).is_err());
         assert!(!dir.join("prefs.json").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn friends_is_capped_at_64_kb_when_written() {
+        let dir = test_dir("store-friends-big");
+        let store = Store::new(&dir);
+        // Twelve friends are about 10 KB; 64 KB is generous, and a bigger document is a bug or tampering.
+        assert_eq!(validate::max_doc_bytes("friends"), 64 * 1024);
+        let small = json!({"friends": "x".repeat(60 * 1024)});
+        store.save("friends", &small).unwrap();
+        let big = json!({"friends": "x".repeat(64 * 1024)});
+        let err = store.save("friends", &big).unwrap_err();
+        assert!(err.message.contains("64 KB"), "{}", err.message);
+        // The document that was there stays.
+        assert_eq!(store.load("friends").unwrap(), Some(small));
+        // Other keys keep the general 4 MB cap.
+        assert_eq!(validate::max_doc_bytes("prefs"), MAX_DOC_BYTES);
+        store.save("prefs", &json!({"x": "y".repeat(100 * 1024)})).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_friends_file_over_64_kb_is_quarantined_and_read_as_missing() {
+        let dir = test_dir("store-friends-read");
+        let store = Store::new(&dir);
+        let text = serde_json::to_string(&json!({"friends": "x".repeat(70 * 1024)})).unwrap();
+        fs::write(dir.join("friends.json"), text).unwrap();
+        assert_eq!(store.load("friends").unwrap(), None);
+        assert!(dir.join("friends.json.bad").exists());
+        assert!(!dir.join("friends.json").exists());
+        // A file at the cap is read.
+        let ok = json!({"friends": []});
+        store.save("friends", &ok).unwrap();
+        assert_eq!(store.load("friends").unwrap(), Some(ok));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_over_the_general_cap_is_quarantined_without_being_read_whole() {
+        let dir = test_dir("store-prefs-read");
+        let store = Store::new(&dir);
+        let f = fs::File::create(dir.join("prefs.json")).unwrap();
+        f.set_len(MAX_DOC_BYTES as u64 + 1).unwrap(); // a sparse file: nothing is allocated for it
+        drop(f);
+        assert_eq!(store.load("prefs").unwrap(), None);
+        assert!(dir.join("prefs.json.bad").exists());
         fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -34,7 +34,7 @@ impl Account {
     }
 }
 
-fn store_error(e: keyring::Error) -> CmdError {
+pub(crate) fn store_error(e: keyring::Error) -> CmdError {
     CmdError::internal(format!("Windows Credential Manager: {e}"))
 }
 

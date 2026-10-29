@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { ACCESSORIES, CELEBRATIONS, MOODS, SPECIES_IDS, type Mood, type StageIndex } from "../core/types";
 import { appIconSvg } from "./icon";
+import { renderDecor } from "./decor";
 import { SPECIES, defaultPose, petBounds, renderPet, speciesInfo, type PetPose } from "./index";
 
 const parser = new DOMParser();
@@ -132,6 +133,24 @@ describe("renderPet", () => {
     check(a, "left");
     check(b, "right");
     expect(a.replaceAll("left-", "X-")).toBe(b.replaceAll("right-", "X-"));
+  });
+
+  it("only takes an id prefix of letters, digits, dash and underscore (it goes into markup, and a friend's key is in one)", () => {
+    // Nothing else may reach `id="…"` and `url(#…)`: a quote, a bracket or a space would end the attribute or the reference.
+    const bad = ['a"b', "a b", "a)b", "a(b", "a<b", "a>b", "a#b", "a'b", "a&b", "a\nb", "a;b", "a.b", "a:b", "é", "", "x\u0000", '"/><script>x</script>', "a".repeat(81)];
+    for (const idPrefix of bad) {
+      expect(() => renderPet("fox", busyPose(), { idPrefix }), JSON.stringify(idPrefix)).toThrow(/idPrefix/);
+      expect(() => renderDecor("plant", { idPrefix }), JSON.stringify(idPrefix)).toThrow(/idPrefix/);
+    }
+    // What the app uses is fine, including a public key (base64url: letters, digits, - and _).
+    const key = "AbC-_0123456789AbC-_0123456789AbC-_0123456789A";
+    for (const idPrefix of ["pet", "visitor", `friend-${key}`, "wear-fox-2-bow", "board-plant-48", "p0", "a".repeat(80)]) {
+      expect(() => renderPet("fox", busyPose(), { idPrefix }), idPrefix).not.toThrow();
+      expect(() => renderDecor("plant", { idPrefix }), idPrefix).not.toThrow();
+    }
+    // And with no prefix there is a default.
+    expect(() => renderPet("fox", busyPose())).not.toThrow();
+    expect(() => renderDecor("plant")).not.toThrow();
   });
 
   it("is deterministic", () => {

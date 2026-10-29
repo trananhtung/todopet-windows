@@ -6,10 +6,12 @@ import { daysBetween, dayKey } from "../core/dates";
 import { bossName, MAX_FRIENDS, VISIT_MAX_CARD_AGE_DAYS, type Boss, type Friend } from "../core/friends";
 import { getLang, L, plural } from "../core/l10n";
 import { stageName } from "../core/life";
+import type { SpeciesId } from "../core/types";
 import { speciesInfo } from "../pets";
 import { Icon } from "../ui/icons";
 import { localeTag } from "../ui/lang";
 import { PetStill } from "../ui/PetArt";
+import { FriendName, shownName } from "./FriendName";
 import { Popover } from "./Popover";
 
 /** "Card from today", "…yesterday", "…3 days ago", or its date; and what an old card means for visits. */
@@ -36,12 +38,33 @@ function Head({ id, title, count }: { id: string; title: string; count?: string 
   );
 }
 
-/** Mine: the card as read-only text with Copy. Without the clipboard, the text is selected for Ctrl+C. */
-function MyCard({ brain }: { brain: Brain }) {
+/**
+ * Mine: the card as read-only text with Copy. It is signed by the backend with this install's key (the secret never comes
+ * here), so it is asked for, and asked for again when what is on the card changes. "Make a new card identity" is here
+ * too, behind a question.
+ */
+function MyCard({ brain, s }: { brain: Brain; s: BrainState }) {
   const head = useId();
   const area = useRef<HTMLTextAreaElement>(null);
-  const [note, setNote] = useState<"copied" | "select" | null>(null);
-  const text = brain.myCard();
+  const resetButton = useRef<HTMLButtonElement>(null);
+  const [note, setNote] = useState<"copied" | "select" | "renewed" | null>(null);
+  const [card, setCard] = useState<{ text: string } | { error: string } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  // What the card says changes with the pet and the day, and with the key: the signature is asked for again.
+  const payload = brain.myCardPayload();
+  useEffect(() => {
+    let alive = true;
+    brain.myCard().then(
+      (text) => alive && setCard({ text }),
+      (e: unknown) => alive && setCard({ error: e instanceof Error ? e.message : String(e) }),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [brain, payload, s.myKey]);
+  const text = card && "text" in card ? card.text : "";
+  const problem = card && "error" in card ? card.error : resetError;
   const copy = async () => {
     try {
       if (!navigator.clipboard?.writeText) throw new Error("no clipboard");
@@ -53,6 +76,14 @@ function MyCard({ brain }: { brain: Brain }) {
       area.current?.select();
       setNote("select");
     }
+  };
+  const renew = async () => {
+    setAsking(false);
+    setResetError(null);
+    const out = await brain.resetCardKey();
+    if (out.ok) setNote("renewed");
+    else setResetError(out.message);
+    resetButton.current?.focus({ preventScroll: true });
   };
   return (
     <section className="w-group friends-mine" aria-labelledby={head}>
@@ -68,39 +99,106 @@ function MyCard({ brain }: { brain: Brain }) {
         onFocus={(e) => e.currentTarget.select()}
       />
       <div className="friends-row">
-        <button type="button" className="btn small primary" onClick={() => void copy()}>
+        <button type="button" className="btn small primary" disabled={text === ""} onClick={() => void copy()}>
           <Icon name="copy" size={14} />
           {L("Chép thẻ", "Copy my card")}
         </button>
         <span className="friends-note" role="status">
           {note === "copied" && L("Đã chép ✔︎ Gửi cho bạn bè nhé.", "Copied ✔︎ Send it to a friend.")}
           {note === "select" && L("Chưa tự chép được. Thẻ đã được chọn: bấm Ctrl+C nhé.", "Couldn't copy by itself. The card is selected: press Ctrl+C.")}
+          {note === "renewed" && L("Xong! Thẻ từ giờ là của một danh tính thẻ mới.", "Done! Your cards are from a new card identity now.")}
         </span>
       </div>
+      {problem && (
+        <p className="friends-error" role="alert">
+          <Icon name="warning" size={15} />
+          <span>{problem}</span>
+        </p>
+      )}
+      <div className="friends-row friends-identity">
+        <button
+          ref={resetButton}
+          type="button"
+          className="btn ghost small"
+          data-reset-identity=""
+          aria-haspopup="dialog"
+          aria-expanded={asking}
+          onClick={() => setAsking(true)}
+        >
+          <Icon name="refresh" size={14} />
+          {L("Tạo danh tính thẻ mới", "Make a new card identity")}
+        </button>
+      </div>
+      {asking && (
+        <Popover
+          anchor={resetButton}
+          role="alertdialog"
+          label={L("Tạo danh tính thẻ mới", "Make a new card identity")}
+          className="confirm"
+          onClose={(restoreFocus) => {
+            setAsking(false);
+            if (restoreFocus) resetButton.current?.focus({ preventScroll: true });
+          }}
+        >
+          <p>
+            {L(
+              "Tạo danh tính thẻ mới? Bạn bè sẽ thấy bạn như một người mới và có thể xoá mục cũ của bạn khỏi danh sách của họ. Các thẻ bạn đã gửi không còn khớp với bạn nữa. Danh sách bạn bè của bạn vẫn còn nguyên.",
+              "Make a new card identity? Friends will see you as a new person, and can remove your old entry from their list. Cards you already sent stop matching you. Your own friends list stays.",
+            )}
+          </p>
+          <div className="pop-actions">
+            <button
+              type="button"
+              className="btn small"
+              data-autofocus
+              onClick={() => {
+                setAsking(false);
+                resetButton.current?.focus({ preventScroll: true });
+              }}
+            >
+              {L("Huỷ", "Cancel")}
+            </button>
+            <button type="button" className="btn small primary" onClick={() => void renew()}>
+              <Icon name="refresh" size={14} />
+              {L("Tạo danh tính mới", "Make a new identity")}
+            </button>
+          </div>
+        </Popover>
+      )}
     </section>
   );
 }
 
-/** Theirs: paste a card, then Add. A card that can't be read gets kind words and changes nothing. */
-function AddFriend({ brain, area }: { brain: Brain; area: React.RefObject<HTMLTextAreaElement | null> }) {
+/** Theirs: paste a card, then Add. A card that can't be read or doesn't check out gets kind words and changes nothing. */
+function AddFriend({ brain, area, myPetName }: { brain: Brain; area: React.RefObject<HTMLTextAreaElement | null>; myPetName: string }) {
   const head = useId();
   const field = useId();
   const errorId = useId();
-  const [value, setValue] = useState("");
+  // What was pasted and not yet added is kept in the brain, so that Escape back to the board doesn't lose it.
+  const [value, setValue] = useState(brain.friendDraft);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<string | null>(null);
-  const add = () => {
-    if (value.trim() === "") return;
-    const out = brain.addFriendCard(value);
-    if (!out.ok) {
-      setError(out.message);
-      setDone(null);
+  const [done, setDone] = useState<{ name: string; species: SpeciesId; replaced: boolean } | null>(null);
+  const pending = useRef(false);
+  const add = async () => {
+    if (pending.current || value.trim() === "") return;
+    pending.current = true;
+    try {
+      const out = await brain.addFriendCard(value);
+      if (!out.ok) {
+        setError(out.message);
+        setDone(null);
+        area.current?.focus();
+        return;
+      }
+      setValue("");
+      brain.friendDraft = "";
+      setError(null);
+      setDone({ name: out.friend.name, species: out.friend.species, replaced: out.replaced });
+      // The Add button goes disabled with the box emptied: keep the keyboard in the box, ready for the next card.
       area.current?.focus();
-      return;
+    } finally {
+      pending.current = false;
     }
-    setValue("");
-    setError(null);
-    setDone(out.replaced ? L(`Đã cập nhật thẻ của ${out.friend.name}.`, `Updated ${out.friend.name}'s card.`) : L(`Đã thêm ${out.friend.name}! 🎉`, `Added ${out.friend.name}! 🎉`));
   };
   return (
     <section className="w-group friends-add" aria-labelledby={head}>
@@ -122,22 +220,38 @@ function AddFriend({ brain, area }: { brain: Brain; area: React.RefObject<HTMLTe
         aria-describedby={error ? errorId : undefined}
         onChange={(e) => {
           setValue(e.target.value);
+          brain.friendDraft = e.target.value;
           if (error) setError(null);
+          // "Added Mai!" was about the last card, not this one.
+          setDone(null);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
-            add();
+            void add();
           }
         }}
       />
       <div className="friends-row">
-        <button type="button" className="btn small primary" disabled={value.trim() === ""} onClick={add}>
+        <button type="button" className="btn small primary" disabled={value.trim() === ""} onClick={() => void add()}>
           <Icon name="plus" size={14} />
           {L("Thêm", "Add")}
         </button>
         <span className="friends-note" role="status">
-          {done}
+          {done &&
+            (done.replaced ? (
+              <>
+                {L("Đã cập nhật thẻ của ", "Updated ")}
+                <FriendName name={done.name} species={done.species} myPetName={myPetName} />
+                {L(".", "'s card.")}
+              </>
+            ) : (
+              <>
+                {L("Đã thêm ", "Added ")}
+                <FriendName name={done.name} species={done.species} myPetName={myPetName} />
+                {L("! 🎉", "! 🎉")}
+              </>
+            ))}
         </span>
       </div>
       {error && (
@@ -151,7 +265,7 @@ function AddFriend({ brain, area }: { brain: Brain; area: React.RefObject<HTMLTe
 }
 
 /** One friend: their pet (a still), name, buddy streak, the date of their card, and Remove behind a confirmation. */
-function FriendRow({ friend, streak, today, onRemove }: { friend: Friend; streak: number; today: string; onRemove: () => void }) {
+function FriendRow({ friend, streak, today, myPetName, onRemove }: { friend: Friend; streak: number; today: string; myPetName: string; onRemove: () => void }) {
   const [asking, setAsking] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const species = speciesInfo(friend.species);
@@ -166,13 +280,13 @@ function FriendRow({ friend, streak, today, onRemove }: { friend: Friend; streak
       <PetStill
         species={friend.species}
         size={52}
-        idPrefix={`friend-${friend.id}`}
+        idPrefix={`friend-${friend.pk}`}
         className="friend-pet"
         pose={{ mood: "happy", t: 0.6, stage: friend.stage, wearing: friend.accessories }}
       />
       <div className="friend-info">
         <b className="friend-name" title={friend.name}>
-          {friend.name}
+          <FriendName name={friend.name} species={friend.species} myPetName={myPetName} />
         </b>
         <small className="friend-kind">
           {species.emoji} {species.name[getLang()]} · {stageName(friend.stage)}
@@ -191,7 +305,7 @@ function FriendRow({ friend, streak, today, onRemove }: { friend: Friend; streak
         type="button"
         className="btn ghost small friend-remove"
         data-friend-remove=""
-        aria-label={L(`Xoá ${friend.name}`, `Remove ${friend.name}`)}
+        aria-label={L(`Xoá ${shownName(friend.name, friend.species, myPetName)}`, `Remove ${shownName(friend.name, friend.species, myPetName)}`)}
         aria-haspopup="dialog"
         aria-expanded={asking}
         onClick={() => setAsking(true)}
@@ -211,9 +325,11 @@ function FriendRow({ friend, streak, today, onRemove }: { friend: Friend; streak
           }}
         >
           <p>
+            {L("Xoá ", "Remove ")}
+            <FriendName name={friend.name} species={friend.species} myPetName={myPetName} />
             {L(
-              `Xoá ${friend.name} khỏi danh sách? Thẻ của bạn ấy sẽ mất khỏi máy này; bạn ấy gửi lại là thêm được ngay.`,
-              `Remove ${friend.name}? Their card leaves this PC; you can add it again whenever they send it.`,
+              " khỏi danh sách? Thẻ của bạn ấy sẽ mất khỏi máy này; bạn ấy gửi lại là thêm được ngay.",
+              "? Their card leaves this PC; you can add it again whenever they send it.",
             )}
           </p>
           <div className="pop-actions">
@@ -246,7 +362,7 @@ function FriendRow({ friend, streak, today, onRemove }: { friend: Friend; streak
   );
 }
 
-function FriendList({ brain, s, today, onRemoved }: { brain: Brain; s: BrainState; today: string; onRemoved: (index: number, name: string) => void }) {
+function FriendList({ brain, s, today, onRemoved }: { brain: Brain; s: BrainState; today: string; onRemoved: (index: number, name: string, species: SpeciesId) => void }) {
   const head = useId();
   return (
     <section className="w-group" aria-labelledby={head}>
@@ -257,12 +373,13 @@ function FriendList({ brain, s, today, onRemoved }: { brain: Brain; s: BrainStat
         <ul className="friend-list">
           {s.friends.map((f, i) => (
             <FriendRow
-              key={f.id}
+              key={f.pk}
               friend={f}
-              streak={s.buddyStreaks[f.id] ?? 0}
+              streak={s.buddyStreaks[f.pk] ?? 0}
               today={today}
+              myPetName={s.prefs.petName}
               onRemove={() => {
-                if (brain.removeFriend(f.id)) onRemoved(i, f.name);
+                if (brain.removeFriend(f.pk)) onRemoved(i, f.name, f.species);
               }}
             />
           ))}
@@ -310,7 +427,9 @@ function WeekBoss({ s }: { s: BrainState }) {
       <ul className="boss-who" aria-label={L("Ai đã ra tay", "Who has helped")}>
         {boss.members.map((m) => (
           <li key={m.id} className={m.me ? "me" : undefined}>
-            <b title={m.name}>{m.name}</b>
+            <b title={m.name}>
+              <FriendName name={m.name} species={m.species} myPetName={s.prefs.petName} />
+            </b>
             <span>
               {m.done}
               <span className="sr-only">{L(" việc", m.done === 1 ? " task" : " tasks")}</span>
@@ -324,8 +443,10 @@ function WeekBoss({ s }: { s: BrainState }) {
       {boss.waiting > 0 && (
         <p className="friends-sub">
           {L(
-            `${boss.waiting} thẻ bạn bè cũ hơn tuần này nên chưa tính. Xin thẻ mới để cùng đánh nhé.`,
-            `${plural(boss.waiting, "", "friend's card is", "friends' cards are").trim()} older than this week, so not counted yet. A fresh card brings them in.`,
+            `${boss.waiting} thẻ bạn bè không phải của tuần này nên chưa tính. Xin thẻ mới để cùng đánh nhé.`,
+            boss.waiting === 1
+              ? "1 friend's card isn't from this week, so it isn't counted yet. A fresh card brings them in."
+              : `${boss.waiting} friends' cards aren't from this week, so they aren't counted yet. A fresh card brings them in.`,
           )}
         </p>
       )}
@@ -344,7 +465,7 @@ export function FriendsSheet({ brain, s, onBack }: { brain: Brain; s: BrainState
   }, []);
   const today = dayKey(new Date(brain.clockNow()));
   // After a removal the keyboard goes to the next friend's Remove (or the one before it), else to the paste box.
-  const [after, setAfter] = useState<{ index: number; name: string } | null>(null);
+  const [after, setAfter] = useState<{ index: number; name: string; species: SpeciesId } | null>(null);
   useEffect(() => {
     if (!after) return;
     const buttons = root.current?.querySelectorAll<HTMLElement>("[data-friend-remove]");
@@ -367,19 +488,24 @@ export function FriendsSheet({ brain, s, onBack }: { brain: Brain; s: BrainState
           "Swap pet cards with friends over any chat app. There is no server: a card is one line of text that you send yourself.",
         )}
       </p>
-      <MyCard brain={brain} />
-      <AddFriend brain={brain} area={area} />
-      <FriendList brain={brain} s={s} today={today} onRemoved={(index, name) => setAfter({ index, name })} />
+      <MyCard brain={brain} s={s} />
+      <AddFriend brain={brain} area={area} myPetName={s.prefs.petName} />
+      <FriendList brain={brain} s={s} today={today} onRemoved={(index, name, species) => setAfter({ index, name, species })} />
       <span className="sr-only" role="status">
-        {after && L(`Đã xoá ${after.name}.`, `Removed ${after.name}.`)}
+        {after && (
+          <>
+            {L("Đã xoá ", "Removed ")}
+            <FriendName name={after.name} species={after.species} myPetName={s.prefs.petName} />.
+          </>
+        )}
       </span>
       <WeekBoss s={s} />
       <p className="friends-privacy">
         <Icon name="shield" size={14} />
         <span>
           {L(
-            "Thẻ chỉ có tên, loài, phụ kiện và độ lớn của pet, chuỗi ngày, số việc xong tuần này và 28 ngày gần đây (đạt mục tiêu, có làm, hay nghỉ). Không bao giờ có tên việc, giờ giấc, tên ứng dụng hay tên bạn.",
-            "A card holds your pet's name, species, accessories and stage, your streaks, this week's finished-task count and a 28-day record of goal, kept and rest days. Never task titles, times, app names or your name.",
+            "Thẻ có: tên, loài, phụ kiện và độ lớn của pet; số việc bạn xong tuần này; 28 ngày gần đây (đạt mục tiêu, nghỉ — ngày nghỉ cũng có thể là ngày lịch quá kín để tính —, hay chưa có gì); ngày làm thẻ; và khoá công khai của bạn, thứ nối các thẻ của bạn lại với nhau cho tới khi bạn tạo danh tính thẻ mới. Không bao giờ có tên việc, giờ giấc, tên ứng dụng hay tên bạn.",
+            "A card holds your pet's name, species, accessories and stage; the number of tasks you finished this week; a 28-day record of goal days and rest days (a rest day can also be a day too packed with meetings to count), or nothing; the date it was made; and your public key, which links your cards together until you make a new card identity. Never task titles, times, app names or your name.",
           )}
         </span>
       </p>

@@ -229,6 +229,24 @@ export interface DiaryApi {
   days(): Promise<string[]>;
 }
 
+// ---------- Pet cards (v0.6 "Friends"): the signing key lives in Rust, the overlay window alone may use it ----------
+
+/**
+ * This install's Ed25519 key for pet cards. The secret half is kept in Windows Credential Manager and never comes back
+ * to JavaScript: only the public key, signatures and a yes or no do. Keys are base64url without padding (43
+ * characters); signatures too (86). The payload is a card's JSON text (at most 2 KB); the signature covers its UTF-8 bytes.
+ */
+export interface CardsApi {
+  /** This install's public key, made on first use. It is the identity friends know you by. */
+  publicKey(): Promise<string>;
+  /** Signs a card's payload with this install's key. */
+  sign(payload: string): Promise<string>;
+  /** Does `sig` sign `payload` under `pk`? Rejects with kind "invalid" for a key or signature that isn't the right size or isn't strict base64url. */
+  verify(pk: string, payload: string, sig: string): Promise<boolean>;
+  /** Replaces the key with a new one: cards made from now on carry a new public key, and friends see a new person. */
+  resetKey(): Promise<void>;
+}
+
 // ---------- Cross-window events ----------
 
 export type BusEvent =
@@ -252,5 +270,6 @@ export interface Backend {
   system: SystemApi;
   storage: StorageApi;
   diary: DiaryApi;
+  cards: CardsApi;
   bus: BusApi;
 }

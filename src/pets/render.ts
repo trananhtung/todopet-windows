@@ -11,7 +11,7 @@ import { STAGE_SCALE, dirt, sprouts } from "./life";
 import { arms, feet } from "./limbs";
 import { dynamics, pettable } from "./motion";
 import { blendBase, goldenBase, moodBase, toColors, type Base } from "./palette";
-import { about, apply, clamp, ell, mul, matAttr, path, r, rotate, scale, smooth, type Mat } from "./svg";
+import { about, apply, checkIdPrefix, clamp, ell, mul, matAttr, path, r, rotate, scale, smooth, type Mat } from "./svg";
 import type { PetPose, RenderOptions } from "./types";
 
 export interface PetRenderOptions extends RenderOptions {
@@ -197,7 +197,7 @@ export function layout(def: SpeciesDef, pose: PetPose, idPrefix: string): Layout
 }
 
 export function renderSpecies(def: SpeciesDef, pose: PetPose, opts: PetRenderOptions = {}): string {
-  const id = opts.idPrefix ?? "pet";
+  const id = checkIdPrefix(opts.idPrefix ?? "pet");
   const size = opts.size ?? 160;
   const { ctx: c, body, outer } = layout(def, pose, id);
   const an = def.anchors(c);

@@ -574,6 +574,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
             visit={s.visitor}
             anchor={anchor}
             hideLabel={!!showBubble}
+            petName={s.prefs.petName}
             onOpen={() => {
               brain.endVisit();
               openBoard(false, { friends: true });

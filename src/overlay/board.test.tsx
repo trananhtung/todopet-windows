@@ -4,9 +4,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDemoBackend, type DemoBackend } from "../backend/demo";
+import { demoCardSignature, demoPublicKey, demoSignedCard } from "../backend/demoCards";
+import { BackendError } from "../backend/types";
 import { Brain } from "../core/brain";
 import { dayKey } from "../core/dates";
-import { encodeCard, isoWeekKey, type PetCard } from "../core/friends";
+import { cardPayload, isoWeekKey, type PetCard } from "../core/friends";
 import { setLang } from "../core/l10n";
 import type { BoardRequest } from "./App";
 import { Board } from "./Board";
@@ -1225,6 +1227,7 @@ describe("the wardrobe and its Home sheet (v0.5)", () => {
 });
 
 describe("the Friends sheet (v0.6)", () => {
+  const MAI = demoPublicKey("mai");
   const friendsButton = () => document.querySelector<HTMLButtonElement>(".board-head button[data-friends]")!;
   const sheetButton = (text: string) => [...document.querySelectorAll<HTMLButtonElement>(".sheet button")].find((b) => b.textContent?.trim() === text)!;
   const areaOf = (selector: string) => document.querySelector<HTMLTextAreaElement>(selector)!;
@@ -1233,29 +1236,39 @@ describe("the Friends sheet (v0.6)", () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area, value);
       area.dispatchEvent(new Event("input", { bubbles: true }));
     });
-  /** A friend's card text for today (the real day: the board runs on the real clock). */
-  const cardText = (patch: Partial<PetCard> = {}) => {
+  /** Lets the promises behind a click (the backend checking a card, signing mine) finish and the sheet draw them. */
+  const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 15))));
+  const clickAndSettle = async (el: Element) => {
+    await click(el);
+    await settle();
+  };
+  /** A friend's card text for today (the real day: the board runs on the real clock), signed with the demo's stand-in key. */
+  const cardOf = (patch: Partial<PetCard> = {}): PetCard => {
     const today = dayKey(new Date(brain.clockNow()));
-    return encodeCard({
-      id: "friend-mai-0001",
+    return {
+      pk: MAI,
       name: "Mai",
       species: "shiba",
       accessories: ["flowercrown"],
       stage: 2,
-      streak: 6,
-      best: 12,
       week: isoWeekKey(today),
       weekDone: 9,
       history: "G".repeat(28),
       date: today,
       ...patch,
-    });
+    };
   };
+  const cardText = (patch: Partial<PetCard> = {}) => demoSignedCard(cardOf(patch));
   const addBox = () => document.querySelector<HTMLTextAreaElement>("textarea[placeholder^='TODOPET1']")!;
   const addButton = () => sheetButton("Add");
   const openFriends = async () => {
     friendsButton().focus();
     await click(friendsButton());
+    await settle();
+  };
+  const addCard = async (text: string) => {
+    await typeInto(addBox(), text);
+    await clickAndSettle(addButton());
   };
   const setClipboard = (clipboard: unknown) => Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
   afterEach(() => {
@@ -1287,13 +1300,45 @@ describe("the Friends sheet (v0.6)", () => {
     expect(document.activeElement?.tagName).toBe("H2");
   });
 
-  it("shows my card as read-only text, the one the brain would copy", async () => {
+  it("shows my card as read-only text, signed by the backend: the one the brain would copy", async () => {
     await mount();
     await openFriends();
     const mine = areaOf("textarea[readonly]");
-    expect(mine.value).toBe(brain.myCard());
-    expect(mine.value.startsWith("TODOPET1.")).toBe(true);
+    expect(mine.value).toBe(await brain.myCard());
+    expect(mine.value).toMatch(/^TODOPET1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{86}$/);
     expect(mine.getAttribute("aria-label")).toMatch(/My pet card/);
+    // Its signature checks out under my public key.
+    const [, payload, signature] = mine.value.split(".");
+    const json = new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (payload.length % 4)) % 4)), (c) => c.charCodeAt(0)));
+    expect(await backend.cards.verify(brain.getSnapshot().myKey!, json, signature)).toBe(true);
+  });
+
+  it("keeps my card up to date while the sheet is open, and says so when the key can't be read", async () => {
+    await mount();
+    await openFriends();
+    const before = areaOf("textarea[readonly]").value;
+    await act(async () => void (await brain.updatePrefs({ petName: "Kem" })));
+    await settle();
+    const after = areaOf("textarea[readonly]").value;
+    expect(after).not.toBe(before);
+    expect(after).toBe(await brain.myCard());
+    brain.stop();
+    await act(async () => root.unmount());
+    document.body.replaceChildren();
+    await mount(request({ friends: true }), {
+      setup: (b) => {
+        b.cards.publicKey = async () => {
+          throw new BackendError({ kind: "internal", message: "locked" });
+        };
+        b.cards.sign = async () => {
+          throw new BackendError({ kind: "internal", message: "locked" });
+        };
+      },
+    });
+    await settle();
+    expect(areaOf("textarea[readonly]").value).toBe("");
+    expect(document.querySelector(".friends-mine .friends-error")?.textContent).toMatch(/card key/i);
+    expect(sheetButton("Copy my card").disabled).toBe(true);
   });
 
   it("copies my card with the clipboard, and says so", async () => {
@@ -1301,8 +1346,8 @@ describe("the Friends sheet (v0.6)", () => {
     setClipboard({ writeText });
     await mount();
     await openFriends();
-    await click(sheetButton("Copy my card"));
-    expect(writeText).toHaveBeenCalledWith(brain.myCard());
+    await clickAndSettle(sheetButton("Copy my card"));
+    expect(writeText).toHaveBeenCalledWith(await brain.myCard());
     expect(document.querySelector(".friends-mine [role=status]")?.textContent).toMatch(/Copied/);
   });
 
@@ -1336,7 +1381,7 @@ describe("the Friends sheet (v0.6)", () => {
     expect(document.querySelector(".friends-empty")?.textContent).toMatch(/No friends yet/);
     await typeInto(addBox(), cardText());
     expect(addButton().disabled).toBe(false);
-    await click(addButton());
+    await clickAndSettle(addButton());
     expect(brain.getSnapshot().friends.map((f) => f.name)).toEqual(["Mai"]);
     const row = document.querySelector(".friend-list .friend")!;
     expect(row.querySelector(".friend-name")?.textContent).toBe("Mai");
@@ -1348,11 +1393,30 @@ describe("the Friends sheet (v0.6)", () => {
     expect(document.querySelector(".friends .w-group-head .count")?.textContent).toBeTruthy();
   });
 
+  it("puts the keyboard back in the paste box after an Add, so the next card can go straight in (review LOW 8)", async () => {
+    await mount();
+    await openFriends();
+    await typeInto(addBox(), cardText());
+    addButton().focus();
+    await clickAndSettle(addButton());
+    expect(brain.getSnapshot().friends).toHaveLength(1);
+    // The Add button went disabled with the box emptied: the focus would have fallen to the page.
+    expect(document.activeElement).toBe(addBox());
+  });
+
+  it("takes 'Added Mai!' away as soon as typing starts again", async () => {
+    await mount();
+    await openFriends();
+    await addCard(cardText());
+    expect(document.querySelector(".friends-add [role=status]")?.textContent).toContain("Added Mai");
+    await typeInto(addBox(), "T");
+    expect(document.querySelector(".friends-add [role=status]")?.textContent?.trim()).toBe("");
+  });
+
   it("says what is wrong with a card in kind words, keeps the text, and adds nobody", async () => {
     await mount();
     await openFriends();
-    await typeInto(addBox(), "hello there");
-    await click(addButton());
+    await addCard("hello there");
     const alert = document.querySelector<HTMLElement>(".friends-error[role=alert]")!;
     expect(alert.textContent).toMatch(/doesn't look like a pet card/);
     expect(alert.textContent).not.toMatch(/undefined|Error|prefix/);
@@ -1366,42 +1430,90 @@ describe("the Friends sheet (v0.6)", () => {
     expect(document.querySelector(".friends-error")).toBeNull();
   });
 
+  it("says a changed card doesn't check out, kindly, without repeating its name, and keeps the text", async () => {
+    await mount();
+    await openFriends();
+    const good = cardOf({ name: "Mai" });
+    const forged = demoSignedCard({ ...good, name: "Imposter", weekDone: 900 }).replace(/\.[^.]+$/, `.${demoCardSignature(MAI, cardPayload(good))}`);
+    await addCard(forged);
+    const alert = document.querySelector<HTMLElement>(".friends-error[role=alert]")!;
+    expect(alert.textContent).toContain("This card doesn't check out; ask your friend to copy it again.");
+    expect(alert.textContent).not.toMatch(/Imposter|Mai/);
+    expect(brain.getSnapshot().friends).toEqual([]);
+    expect(addBox().value).toBe(forged);
+    expect(document.activeElement).toBe(addBox());
+  });
+
   it("refuses its own card, and a damaged one, kindly", async () => {
     await mount();
     await openFriends();
-    await typeInto(addBox(), brain.myCard());
-    await click(addButton());
+    await addCard(await brain.myCard());
     expect(document.querySelector(".friends-error")?.textContent).toMatch(/your own card/);
-    await typeInto(addBox(), cardText().slice(0, 60));
-    await click(addButton());
+    await addCard(cardText().slice(0, 60));
     expect(document.querySelector(".friends-error")?.textContent).toMatch(/damaged|missing/);
     expect(brain.getSnapshot().friends).toEqual([]);
   });
 
-  it("adds with Ctrl+Enter too", async () => {
+  it("adds with Ctrl+Enter too, and not twice when pressed twice", async () => {
     await mount();
     await openFriends();
     await typeInto(addBox(), cardText());
     await key(addBox(), "Enter", { ctrlKey: true });
+    await key(addBox(), "Enter", { ctrlKey: true });
+    await settle();
     expect(brain.getSnapshot().friends).toHaveLength(1);
   });
 
-  it("shows a name as plain text, never as markup", async () => {
+  it("shows a name as plain text, never as markup, isolated in a <bdi>", async () => {
     await mount();
     await openFriends();
-    await typeInto(addBox(), cardText({ name: "<img src=x>" }));
-    await click(addButton());
+    await addCard(cardText({ name: "<img src=x>" }));
     const row = document.querySelector(".friend-list .friend")!;
     expect(row.querySelector(".friend-name")?.textContent).toBe("<img src=x>");
+    expect(row.querySelector(".friend-name bdi")?.textContent).toBe("<img src=x>");
     expect(row.querySelector("img")).toBeNull();
     expect(document.querySelector(".friends img")).toBeNull();
+  });
+
+  it("isolates every name from the words around it: the list, the boss's helpers and the status (SECURITY L1)", async () => {
+    await mount();
+    await openFriends();
+    await addCard(cardText({ name: "דניאל" }));
+    expect(document.querySelector(".friends-add [role=status] bdi")?.textContent).toBe("דניאל");
+    expect(document.querySelector(".friend-name bdi")).not.toBeNull();
+    const helpers = [...document.querySelectorAll(".boss-who li b")].map((b) => b.querySelector("bdi")?.textContent);
+    expect(helpers).toEqual(["You", "דניאל"]);
+    await click(document.querySelector("[data-friend-remove]")!);
+    expect(popover("alertdialog")!.querySelector("bdi")?.textContent).toBe("דניאל");
+  });
+
+  it("shows a friend whose name passes for mine, or for 'You', with their species beside it", async () => {
+    await mount();
+    await openFriends();
+    const mineName = brain.getSnapshot().prefs.petName;
+    await addCard(cardText({ name: "Mai" }));
+    await addCard(cardText({ pk: demoPublicKey("a"), name: mineName.toUpperCase(), species: "fox" }));
+    await addCard(cardText({ pk: demoPublicKey("b"), name: "You", species: "panda" }));
+    await addCard(cardText({ pk: demoPublicKey("c"), name: "Ｂạｎ", species: "owl" }));
+    const rows = [...document.querySelectorAll(".friend-list .friend")];
+    expect(rows).toHaveLength(4);
+    const tag = (row: Element) => row.querySelector(".friend-name .friend-lookalike")?.textContent ?? null;
+    expect(tag(rows[0])).toBeNull();
+    expect(tag(rows[1])).toMatch(/Fox/);
+    expect(tag(rows[2])).toMatch(/Panda/);
+    expect(tag(rows[3])).toMatch(/Owl/);
+    // Everywhere: the boss's list and what Remove asks.
+    const who = [...document.querySelectorAll(".boss-who li")].map((li) => li.textContent);
+    expect(who.filter((t) => /Fox|Panda|Owl/.test(t ?? ""))).toHaveLength(3);
+    expect(who[0]).not.toMatch(/Shiba|Fox|Panda|Owl/); // me
+    expect(who.find((t) => t?.startsWith("Mai"))).not.toMatch(/Shiba/);
+    expect(rows[2].querySelector("[data-friend-remove]")?.getAttribute("aria-label")).toMatch(/Remove You \(.*Panda\)/);
   });
 
   it("removes a friend only after a confirmation, and puts the keyboard somewhere sensible", async () => {
     await mount();
     await openFriends();
-    await typeInto(addBox(), cardText());
-    await click(addButton());
+    await addCard(cardText());
     const remove = document.querySelector<HTMLButtonElement>("[data-friend-remove]")!;
     expect(remove.getAttribute("aria-label")).toBe("Remove Mai");
     await click(remove);
@@ -1430,12 +1542,11 @@ describe("the Friends sheet (v0.6)", () => {
   it("lists several friends, each with its own Remove", async () => {
     await mount();
     await openFriends();
-    for (const [id, name] of [
-      ["friend-a-000001", "Ann"],
-      ["friend-b-000002", "Bao"],
+    for (const [n, name] of [
+      ["a", "Ann"],
+      ["b", "Bao"],
     ]) {
-      await typeInto(addBox(), cardText({ id, name }));
-      await click(addButton());
+      await addCard(cardText({ pk: demoPublicKey(n), name }));
     }
     expect([...document.querySelectorAll(".friend-name")].map((e) => e.textContent)).toEqual(["Ann", "Bao"]);
     expect([...document.querySelectorAll("[data-friend-remove]")].map((b) => b.getAttribute("aria-label"))).toEqual(["Remove Ann", "Remove Bao"]);
@@ -1445,11 +1556,26 @@ describe("the Friends sheet (v0.6)", () => {
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Remove Bao");
   });
 
+  it("keeps what was pasted when Escape takes you back to the board, and gives it back when you return (review LOW 8)", async () => {
+    await mount();
+    await openFriends();
+    await typeInto(addBox(), "TODOPET1.half-pasted");
+    await key(addBox(), "Escape");
+    expect(document.querySelector(".sheet")).toBeNull();
+    await openFriends();
+    expect(addBox().value).toBe("TODOPET1.half-pasted");
+    // Added, it is gone for good.
+    await addCard(cardText());
+    expect(addBox().value).toBe("");
+    await key(addBox(), "Escape");
+    await openFriends();
+    expect(addBox().value).toBe("");
+  });
+
   it("shows this week's boss: an HP bar a screen reader can read, and who has helped", async () => {
     await mount();
     await openFriends();
-    await typeInto(addBox(), cardText({ weekDone: 4 }));
-    await click(addButton());
+    await addCard(cardText({ weekDone: 4 }));
     const bar = document.querySelector<HTMLElement>(".boss-bar[role=progressbar]")!;
     const boss = brain.getSnapshot().boss;
     expect(boss.maxHp).toBe(30);
@@ -1467,8 +1593,7 @@ describe("the Friends sheet (v0.6)", () => {
   it("says the blob is beaten, and the sticker page gets the 🏅", async () => {
     await mount();
     await openFriends();
-    await typeInto(addBox(), cardText({ weekDone: 60 }));
-    await click(addButton());
+    await addCard(cardText({ weekDone: 60 }));
     expect(document.querySelector(".boss.beaten")).not.toBeNull();
     expect(document.querySelector(".friends-boss")?.textContent).toMatch(/Beaten!/);
     expect(brain.getSnapshot().life.pageMedals).toBe(1);
@@ -1478,11 +1603,101 @@ describe("the Friends sheet (v0.6)", () => {
     expect(document.querySelector(".sticker-page .slot.medal")?.textContent).toBe("🏅");
   });
 
-  it("states what a card holds, and that it never holds titles, times, app names or your name", async () => {
+  it("counts friends whose card is not from this week neutrally: one that is older and one that is ahead are both just 'not from this week' (review LOW 9)", async () => {
+    await mount();
+    await openFriends();
+    const today = dayKey(new Date(brain.clockNow()));
+    const old = (n: number) => {
+      const d = new Date(brain.clockNow() - n * 86_400_000);
+      const date = dayKey(d);
+      return { date, week: isoWeekKey(date) };
+    };
+    await addCard(cardText({ pk: demoPublicKey("old"), name: "Old", ...old(8) }));
+    const note = () => [...document.querySelectorAll(".friends-boss .friends-sub")].map((p) => p.textContent).join(" | ");
+    expect(note()).toMatch(/1 friend's card isn't from this week, so it isn't counted yet\. A fresh card brings them in\./);
+    expect(note()).not.toMatch(/older/);
+    await addCard(cardText({ pk: demoPublicKey("old2"), name: "Old2", ...old(9) }));
+    expect(note()).toMatch(/2 friends' cards aren't from this week, so they aren't counted yet/);
+    expect(today).toBeTruthy();
+  });
+
+  it("states exactly what a card holds (SECURITY M3, review LOW 10)", async () => {
     await mount();
     await openFriends();
     const note = document.querySelector(".friends-privacy")!.textContent!;
     expect(note).toMatch(/pet's name, species, accessories and stage/);
+    expect(note).toMatch(/tasks you finished this week/);
+    expect(note).toMatch(/28-day record/);
+    expect(note).toMatch(/goal/);
+    expect(note).toMatch(/rest/);
+    expect(note).toMatch(/too packed|packed/i);
+    expect(note).toMatch(/date/);
+    expect(note).toMatch(/public key/);
+    expect(note).toMatch(/until you make a new (card )?identity/);
     expect(note).toMatch(/Never task titles, times, app names or your name/);
+    // No streaks are on a card any more, and the note must not say so.
+    expect(note).not.toMatch(/streak/i);
+    expect(note).not.toMatch(/install id|random id/i);
+  });
+
+  describe("a new card identity (SECURITY M2)", () => {
+    const resetButton = () => document.querySelector<HTMLButtonElement>("[data-reset-identity]")!;
+    const confirmButton = () => [...popover("alertdialog")!.querySelectorAll("button")].find((b) => /Make a new identity/.test(b.textContent ?? ""))!;
+
+    it("asks first, in kind words, and says what it does", async () => {
+      await mount();
+      await openFriends();
+      expect(resetButton().textContent).toMatch(/Make a new card identity/);
+      expect(resetButton().getAttribute("aria-haspopup")).toBe("dialog");
+      const before = brain.getSnapshot().myKey;
+      await click(resetButton());
+      const ask = popover("alertdialog")!;
+      expect(ask.textContent).toMatch(/new person/);
+      expect(ask.textContent).toMatch(/remove (the|your) old/i);
+      expect(ask.textContent).toMatch(/already sent|cards you sent/i);
+      expect(ask.textContent).toMatch(/friends list stays|keep your friends|friends stay/i);
+      // Cancel changes nothing and gives the keyboard back.
+      await click([...ask.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Cancel")!);
+      expect(popover("alertdialog")).toBeNull();
+      expect(brain.getSnapshot().myKey).toBe(before);
+      expect(document.activeElement).toBe(resetButton());
+      // Escape closes the question, not the sheet.
+      await click(resetButton());
+      await key(document.activeElement!, "Escape");
+      expect(popover("alertdialog")).toBeNull();
+      expect(document.querySelector(".sheet h2")?.textContent).toContain("Friends");
+      expect(brain.getSnapshot().myKey).toBe(before);
+    });
+
+    it("makes a new key, shows the new card, keeps the friends and tells the user", async () => {
+      await mount();
+      await openFriends();
+      await addCard(cardText());
+      const before = brain.getSnapshot().myKey;
+      const card = areaOf("textarea[readonly]").value;
+      await click(resetButton());
+      await clickAndSettle(confirmButton());
+      const after = brain.getSnapshot().myKey;
+      expect(after).not.toBe(before);
+      expect(popover("alertdialog")).toBeNull();
+      expect(areaOf("textarea[readonly]").value).not.toBe(card);
+      expect(areaOf("textarea[readonly]").value).toBe(await brain.myCard());
+      expect(brain.getSnapshot().friends.map((f) => f.name)).toEqual(["Mai"]);
+      expect(document.querySelector(".friends-mine [role=status]")?.textContent).toMatch(/new (card )?identity/i);
+      expect(document.activeElement).toBe(resetButton());
+    });
+
+    it("says so, and changes nothing, when the new key can't be made", async () => {
+      await mount();
+      await openFriends();
+      const before = brain.getSnapshot().myKey;
+      vi.spyOn(backend.cards, "resetKey").mockRejectedValueOnce(new BackendError({ kind: "internal", message: "Windows Credential Manager: access denied" }));
+      await click(resetButton());
+      await clickAndSettle(confirmButton());
+      expect(brain.getSnapshot().myKey).toBe(before);
+      const alert = document.querySelector<HTMLElement>(".friends-mine .friends-error")!;
+      expect(alert.textContent).toMatch(/try again/i);
+      expect(alert.textContent).not.toMatch(/Credential|denied/);
+    });
   });
 });

@@ -1,6 +1,7 @@
 // The pet's brain (Brain.swift): Todoist sync, mood, reminder rules, focus timer, pet life and mischief.
 // It never touches the OS directly: everything goes through the Backend, so it runs in Tauri, in the
 // browser demo and in unit tests with a fake clock.
+import { demoSignedCard } from "../backend/demoCards";
 import { BackendError, type AppCommand, type Backend, type ForegroundApp, type SecretsStatus, type SystemSample } from "../backend/types";
 import * as calm from "./calm";
 import {
@@ -90,6 +91,10 @@ import * as fr from "./friends";
 
 const MIN = 60_000;
 const NEVER = -8.64e15;
+/** Idle for this long is "away" (the pet sleeps, nobody to see a visit). */
+const AWAY_SECONDS = 300;
+/** Away for this long and back: the day's first visit waits again (see `noteAway`). */
+const LONG_AWAY_MS = 30 * MIN;
 
 /**
  * Unsolicited reminders (see `REMINDER_KINDS`). Each one counts against the daily nudge budget; the repeating ones
@@ -289,15 +294,17 @@ export interface BrainState {
   // v0.6 "Friends".
   /** The friends' latest pet cards (kept in storage, up to 12). */
   friends: fr.Friend[];
-  /** Days in a row you both reached your goal, per friend id, against your card as it is now. */
+  /** Days in a row you both reached your goal, per friend (their public key), against your card as it is now. */
   buddyStreaks: Record<string, number>;
   /** This week's Procrastination Blob: its HP, who has hurt it, and whether it is beaten. */
   boss: fr.Boss;
   /** A friend's pet that is dropping by (ambient: not a bubble), or null. */
   visitor: fr.Visit | null;
+  /** This install's public key for pet cards (base64url), or null when Credential Manager couldn't give it. It is not a secret: it is on every card. */
+  myKey: string | null;
 }
 
-/** What adding a friend's card came to: the friend, or the kind words for why not. */
+/** What adding a friend's card came to: the friend, or the kind words for why not (which never repeat what the card says). */
 export type FriendAdd =
   | { ok: true; friend: fr.Friend; replaced: boolean }
   | { ok: false; error: fr.CardError | "self" | "older" | "full"; message: string };
@@ -345,16 +352,7 @@ export interface BrainOptions {
   demo?: boolean;
   now?: () => number;
   random?: () => number;
-  /** The source for this install's id (v0.6): the game's own `random` is never used for it. Default: the browser's secure one. */
-  idRandom?: () => number;
   effects?: BrainEffects;
-}
-
-/** A random number in [0, 1) from the system's secure source when there is one (the install id isn't a secret, but should never repeat). */
-function secureRandom(): number {
-  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint32Array) => Uint32Array } }).crypto;
-  if (c?.getRandomValues) return c.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
-  return Math.random();
 }
 
 /** Kind words for the day (`yyyy-MM-dd`) they were written on. */
@@ -515,14 +513,22 @@ export class Brain {
   private chestNotice = false;
   /** v0.5: the bubble that offers today's trip (a check-in, so it has no kind): closing it is a "Stay". */
   private tripOfferId: number | null = null;
-  /** v0.6: the friends' cards, this install's id and today's visits (the `friends` storage key). */
-  private friendsDoc: fr.FriendsDoc = { installId: "", friends: [], visits: { day: "", count: 0, lastAt: null } };
+  /** v0.6: the friends' cards and today's visits (the `friends` storage key). */
+  private friendsDoc: fr.FriendsDoc = { friends: [], visits: { day: "", count: 0, lastAt: null } };
+  /** v0.6: this install's public key (from the backend; the secret half never leaves Rust), null until it could be read. */
+  private myKey: string | null = null;
   /** False after a failed read at startup: never overwrite what's on disk. */
   private persistFriends = true;
   /** v0.6: no visit before this (epoch ms): a session and a day start quietly. */
   private visitAfter = 0;
-  /** v0.6: the words for a won boss that haven't been said yet (a reply, so never counted). */
-  private bossNotice: string | null = null;
+  /** v0.6: the words for a won boss that haven't been said yet (a reply, so never counted), and the ISO week they are about: once it is over they are not news any more. Kept in memory only. */
+  private bossNotice: { text: string; week: string } | null = null;
+  /** v0.6: a beaten blob whose last finished task is still being closed in Todoist. It is paid (for that week, even if the week turns meanwhile) when the closing is done. */
+  private pendingWin: { week: string; day: string; together: boolean } | null = null;
+  /** v0.6: when the current time away began (epoch ms), or null while you are here. */
+  private awayFrom: number | null = null;
+  /** v0.6: a friend's card pasted into the Friends sheet but not added yet, so that going back to the board doesn't lose it. */
+  friendDraft = "";
   /** v0.6: the board is open (a visitor makes way for it, and none comes). */
   private boardIsOpen = false;
 
@@ -585,6 +591,7 @@ export class Brain {
       buddyStreaks: {},
       boss: fr.bossOf({ today: this.dayKey, myDone: 0, friends: [] }),
       visitor: null,
+      myKey: null,
     };
     Object.assign(this.state, this.gameView());
   }
@@ -592,13 +599,15 @@ export class Brain {
   /** Loads prefs, the pet's life and the postponed-task log, then picks the language. */
   static async create(backend: Backend, opts: BrainOptions = {}): Promise<Brain> {
     const now = (opts.now ?? Date.now)();
-    const [p, l, st, tr, pl, fd, locale] = await Promise.all([
+    const [p, l, st, tr, pl, fd, key, locale] = await Promise.all([
       loadRetrying<unknown>(backend, "prefs"),
       loadRetrying<unknown>(backend, "life"),
       loadRetrying<SeenLog>(backend, "stuck"),
       loadRetrying<unknown>(backend, "triggers"),
       loadRetrying<unknown>(backend, "plan"),
       loadRetrying<unknown>(backend, "friends"),
+      // The public key of this install (made on first use); a PC whose Credential Manager says no still has a pet.
+      backend.cards.publicKey().catch(() => null),
       backend.system.systemLocale().catch(() => "en"),
     ]);
     const prefs = prefsFromJson(p.ok ? p.value : null, now, now);
@@ -619,12 +628,12 @@ export class Brain {
     brain.plan = planFromJson(pl.ok ? pl.value : null, now);
     brain.state.todayPlan = planFor(brain.plan, dayKey(new Date(now)));
     brain.state.doneUntil = isDoneForToday(brain.plan, now) ? brain.plan.doneUntil : null;
-    // v0.6: the friends and this install's id (made once; a failed read is not a missing file, so it is kept in memory only).
-    const loaded = fr.docFromJson(fd.ok ? fd.value : null, () => fr.newInstallId(opts.idRandom ?? secureRandom));
-    brain.friendsDoc = loaded.doc;
+    // v0.6: this install's public key, and the friends (a failed read is not a missing file, so it is kept in memory only).
+    brain.myKey = fr.isPublicKey(key) ? key : null;
+    brain.state.myKey = brain.myKey;
+    brain.friendsDoc = fr.docFromJson(fd.ok ? fd.value : null, brain.myKey, now);
     brain.persistFriends = fd.ok;
-    brain.visitAfter = now + fr.visitDelayMs(loaded.doc.installId, dayKey(new Date(now)));
-    if (fd.ok && loaded.fresh) await backend.storage.save("friends", fr.docToJson(loaded.doc)).catch(() => undefined);
+    brain.visitAfter = now + fr.visitDelayMs(brain.myKey ?? "", dayKey(new Date(now)));
     Object.assign(brain.state, brain.friendsView(now));
     if (!p.ok || !l.ok || !tr.ok || !fd.ok) {
       brain.diary.add("system", L("Không đọc được dữ liệu đã lưu — phiên này sẽ không ghi đè lên nó", "Couldn't read saved data — this session won't overwrite it"));
@@ -862,6 +871,7 @@ export class Brain {
     const now = this.now();
     const prev = this.sample;
     this.sample = s;
+    this.noteAway(now, s.idleSeconds);
     if (prev.fullscreen !== s.fullscreen) this.set({ fullscreen: s.fullscreen });
     // First, while the work app from before is still the last one known.
     this.noteMeetings(now, s);
@@ -1192,7 +1202,7 @@ export class Brain {
     const plan = prunePlans(this.plan, this.dayKey);
     if (plan !== this.plan) this.setPlanDoc(plan);
     // A new day starts quietly for the friends too.
-    this.visitAfter = this.now() + fr.visitDelayMs(this.friendsDoc.installId, this.dayKey);
+    this.visitAfter = this.now() + fr.visitDelayMs(this.myKey ?? "", this.dayKey);
   }
 
   // ---------- Mood ----------
@@ -3001,6 +3011,8 @@ export class Brain {
     try {
       await this.backend.todoist.close(task.id);
     } catch (e) {
+      // The win this task was part of (if it was one) may not stand: whatever still stands is found again just below.
+      this.pendingWin = null;
       this.completed = this.completed.filter((t) => t.id !== task.id);
       this.completedViaPet.delete(task.id);
       this.knownCompleted.delete(task.id);
@@ -3020,9 +3032,15 @@ export class Brain {
     } finally {
       this.closing.delete(task.id);
     }
+    // Nothing is being closed any more: a beaten blob that waited for it is paid now (see `settleBoss`).
+    this.settleBoss(this.now());
     void this.refresh();
   }
 
+  /**
+   * Undoes a finished task. It takes back what the task gave (`unfeed`: its XP, the satiety, the combo, the week's count) and nothing else:
+   * if it was the task that beat the weekly blob, the 🏅 and its 50 XP stay (see `settleBoss`).
+   */
   async undoComplete(task: TodoTask): Promise<void> {
     if (!this.completed.some((t) => t.id === task.id)) return;
     const gained = this.feeds.get(task.id);
@@ -3620,7 +3638,10 @@ export class Brain {
 
   // ---------- v0.6 Friends: cards, the weekly boss, visits ----------
 
-  /** My pet card as it stands now (not the text): the pet, its streaks, this week's tasks and the last 28 days. */
+  /**
+   * My pet card as it stands now (not the text): the pet, this week's tasks and the last 28 days, with this install's public key
+   * (an empty one while the key is unknown: that card is only good for the buddy streaks, never sent).
+   */
   private cardData(nowMs: number): fr.PetCard {
     const date = new Date(nowMs);
     const today = dayKey(date);
@@ -3632,22 +3653,70 @@ export class Brain {
     };
     const mark = fr.todayMark(s.day.completed.length, s.target, this.workdayOn(date));
     return fr.buildCard({
-      installId: this.friendsDoc.installId,
+      pk: this.myKey ?? "",
       petName: s.prefs.petName,
       species: s.prefs.species,
       wearing: l.wearing,
       stage: life.stageOf(l.xp),
-      streak: l.streak,
-      bestStreak: l.bestStreak,
       weekDone: fr.weekDoneOf(l.week, today),
       history: fr.cardHistory(l.history, today, mark, isWorkday),
       today,
     });
   }
 
-  /** The text of my card, built live from the pet and the settings: what the Friends sheet copies for you to send. */
-  myCard(): string {
-    return fr.encodeCard(this.cardData(this.now()));
+  /** The text that my card signs, as it stands now, or null while this PC's key is unknown. The UI watches it to know when to ask for a new card. */
+  myCardPayload(): string | null {
+    return this.myKey === null ? null : fr.cardPayload(this.cardData(this.now()));
+  }
+
+  /** Asks the backend for this install's key if it isn't known yet (Credential Manager may have been busy at the start). */
+  private async ensureKey(): Promise<string | null> {
+    if (this.myKey !== null) return this.myKey;
+    try {
+      const key = await this.backend.cards.publicKey();
+      if (fr.isPublicKey(key)) {
+        this.myKey = key;
+        this.patchState({ myKey: key });
+      }
+    } catch {
+      // Still unknown: the caller says so.
+    }
+    return this.myKey;
+  }
+
+  /**
+   * The text of my card, signed with this install's key by the backend (the secret never comes here): what the Friends sheet
+   * copies for you to send. Built live from the pet and the settings. Rejects with kind words when the key can't be read.
+   */
+  async myCard(): Promise<string> {
+    if ((await this.ensureKey()) === null) throw new Error(L("Không đọc được khoá thẻ của máy này (Windows Credential Manager). Bạn thử lại sau nhé.", "Couldn't read this PC's card key (Windows Credential Manager). Please try again in a moment."));
+    const card = this.cardData(this.now());
+    return fr.encodeCard(card, await this.backend.cards.sign(fr.cardPayload(card)));
+  }
+
+  /**
+   * Makes a new card identity: a new key pair, so the cards you send from now on carry a new public key and friends see a
+   * new person (they can remove the old entry). The friends you have stay; the first visit waits again. The old key is gone
+   * once the new one is stored.
+   */
+  async resetCardKey(): Promise<{ ok: true } | { ok: false; message: string }> {
+    const sorry = { ok: false as const, message: L("Chưa tạo được danh tính thẻ mới. Danh tính cũ vẫn như cũ, bạn thử lại sau nhé.", "Couldn't make a new card identity just now. Nothing changed; please try again in a moment.") };
+    try {
+      await this.backend.cards.resetKey();
+    } catch {
+      return sorry;
+    }
+    let key: unknown = null;
+    try {
+      key = await this.backend.cards.publicKey();
+    } catch {
+      // The key is replaced, but the new one can't be read yet: forget the old, and ask again when it is needed.
+    }
+    this.myKey = fr.isPublicKey(key) ? key : null;
+    this.visitAfter = this.now() + fr.visitDelayMs(this.myKey ?? "", this.dayKey);
+    this.diary.add("system", L("Tạo danh tính thẻ mới (bạn bè sẽ thấy bạn như một người mới)", "Made a new card identity (friends will see you as a new person)"));
+    this.patchState({ myKey: this.myKey, ...this.friendsView(this.now()) });
+    return this.myKey === null ? sorry : { ok: true };
   }
 
   /** The friends, their buddy streaks and this week's boss, from the document and the pet as they are now. */
@@ -3657,7 +3726,7 @@ export class Brain {
     const mine = this.cardData(nowMs);
     return {
       friends,
-      buddyStreaks: Object.fromEntries(friends.map((f) => [f.id, fr.buddyStreak(mine, f)])),
+      buddyStreaks: Object.fromEntries(friends.map((f) => [f.pk, fr.buddyStreak(mine, f)])),
       boss: fr.bossOf({ today, myDone: fr.weekDoneOf(this.state.life.week, today), friends }),
     };
   }
@@ -3680,31 +3749,41 @@ export class Brain {
   }
 
   /**
-   * Adds the friend whose card was pasted. Strict about what it reads (see `decodeCard`); a bad card, your own, an older
-   * one than you have, or a 13th friend gets kind words and changes nothing. A newer card from a friend replaces theirs.
+   * Adds the friend whose card was pasted. Strict about what it reads (see `parseCard`), and a card is only accepted once
+   * the backend has checked its signature against the key it names; a card that doesn't check out, your own, an older one
+   * than you have, or a 13th friend gets kind words (never repeating what the card says) and changes nothing. A newer card
+   * from the same key replaces theirs: only that key could have signed it.
    */
-  addFriendCard(raw: string): FriendAdd {
-    const nowMs = this.now();
-    const decoded = fr.decodeCard(raw, dayKey(new Date(nowMs)));
-    if (!decoded.ok) return { ok: false, error: decoded.error, message: decoded.message };
-    const out = fr.addFriend(this.friendsDoc.friends, decoded.card, this.friendsDoc.installId);
+  async addFriendCard(raw: string): Promise<FriendAdd> {
+    const parsed = fr.parseCard(raw, dayKey(new Date(this.now())));
+    if (!parsed.ok) return { ok: false, error: parsed.error, message: parsed.message };
+    const refused = (error: "signature" | "unchecked"): FriendAdd => ({ ok: false, error, message: fr.cardErrorText(error) });
+    try {
+      if (!(await this.backend.cards.verify(parsed.card.pk, parsed.payload, parsed.signature))) return refused("signature");
+    } catch (e) {
+      // A key or signature the backend finds malformed is a card that doesn't check out; anything else is not the card's fault.
+      return refused(e instanceof BackendError && e.kind === "invalid" ? "signature" : "unchecked");
+    }
+    await this.ensureKey();
+    // From here to the end nothing waits: another card added meanwhile is already in the list.
+    const out = fr.addFriend(this.friendsDoc.friends, parsed.card, this.myKey);
     if (!out.ok) return out;
     this.friendsDoc = { ...this.friendsDoc, friends: out.friends };
     this.saveFriends();
     // The diary is on disk: it says a card came, never whose.
     this.diary.add("system", out.replaced ? L("Cập nhật thẻ của một người bạn", "Updated a friend's card") : L("Thêm một người bạn mới", "Added a friend"));
     this.refreshFriends();
-    this.settleBoss(nowMs);
+    this.settleBoss(this.now());
     return { ok: true, friend: out.friend, replaced: out.replaced };
   }
 
   /** Takes a friend off the list (their card is gone from this PC; they can send it again). */
-  removeFriend(id: string): boolean {
-    if (!this.friendsDoc.friends.some((f) => f.id === id)) return false;
-    this.friendsDoc = { ...this.friendsDoc, friends: fr.removeFriend(this.friendsDoc.friends, id) };
+  removeFriend(pk: string): boolean {
+    if (!this.friendsDoc.friends.some((f) => f.pk === pk)) return false;
+    this.friendsDoc = { ...this.friendsDoc, friends: fr.removeFriend(this.friendsDoc.friends, pk) };
     this.saveFriends();
     this.diary.add("system", L("Xoá một người bạn khỏi danh sách", "Removed a friend"));
-    if (this.state.visitor?.friend.id === id) this.set({ visitor: null });
+    if (this.state.visitor?.friend.pk === pk) this.set({ visitor: null });
     this.refreshFriends();
     this.settleBoss(this.now());
     return true;
@@ -3713,39 +3792,68 @@ export class Brain {
   /**
    * The week's blob is beaten: +50 XP and a 🏅 on the sticker page, once a week, and a few kind words when you are
    * around (a reply: never counted). Not while a task is still being closed in Todoist (if it refuses, the task comes
-   * back and the win would have been undeserved).
+   * back and the win would have been undeserved): a win that stands meanwhile is remembered and paid when the closing is
+   * done, for the week it was won in even if Sunday midnight passed meanwhile.
+   *
+   * **A win is final.** Once paid it stays: undoing the task that beat the blob takes that task's own XP back
+   * (`undoComplete`), not the 🏅 or its 50 XP, and finishing it again pays nothing more (one reward per ISO week). The
+   * week was beaten; a changed mind is not a loss. (SPEC v0.6 §6.)
    */
   private settleBoss(nowMs: number): void {
+    if (!this.state.hasToken) return;
     const boss = this.state.boss;
-    if (!this.state.hasToken || !boss.defeated || this.closing.size > 0) return;
-    if (this.state.life.bossWins.includes(boss.week)) return;
     const today = dayKey(new Date(nowMs));
-    const reward = this.mutateLife((l) => life.winBoss(l, boss.week, today));
+    if (this.closing.size > 0) {
+      if (boss.defeated && !this.state.life.bossWins.includes(boss.week) && this.pendingWin?.week !== boss.week) {
+        this.pendingWin = { week: boss.week, day: today, together: boss.members.length > 1 };
+      }
+      return;
+    }
+    const pending = this.pendingWin;
+    this.pendingWin = null;
+    // A win remembered from an earlier week: nothing more to check, the closing it waited for went through.
+    if (pending && pending.week !== boss.week) this.payBoss(pending.week, pending.day, pending.together, nowMs);
+    if (boss.defeated) this.payBoss(boss.week, today, boss.members.length > 1, nowMs);
+  }
+
+  /** Pays the blob of ISO `week`, beaten on `day`: once per week. */
+  private payBoss(week: string, day: string, together: boolean, nowMs: number): void {
+    if (this.state.life.bossWins.includes(week)) return;
+    const reward = this.mutateLife((l) => life.winBoss(l, week, day));
     if (!reward) return;
     this.diary.add(
       "life",
-      L(`Cả nhóm hạ gục Quái Vật Trì Hoãn tuần ${boss.week}: +${reward.xp} XP và một sticker 🏅`, `Beat the Procrastination Blob of ${boss.week}: +${reward.xp} XP and a 🏅 sticker`),
-      { tag: "sticker", day: today },
+      L(`Cả nhóm hạ gục Quái Vật Trì Hoãn tuần ${week}: +${reward.xp} XP và một sticker 🏅`, `Beat the Procrastination Blob of ${week}: +${reward.xp} XP and a 🏅 sticker`),
+      { tag: "sticker", day },
     );
-    const parts = [fr.bossWinText(boss.members.length > 1)];
+    const parts = [fr.bossWinText(together)];
     if (reward.levelUp !== null) parts.push(lines.levelUp(reward.levelUp));
     if (reward.unlocked.length > 0) parts.push(lines.unlocked(reward.unlocked));
     if (reward.pageDone) parts.push(lines.pageDone(this.state.life.stickerPage - 1, reward.snack));
-    this.bossNotice = parts.join("\n");
+    this.bossNotice = { text: parts.join("\n"), week };
     this.celebrateUntil = nowMs + 4000;
     this.set({ celebration: { id: ++this.bubbleSeq, kind: "dance", food: "", golden: false, combo: 0, start: nowMs } });
   }
 
-  /** Says a won boss once you're around and nothing else is showing (like a chest: a small reply, never counted). */
+  /**
+   * Says a won boss once you're around and nothing else is showing (like a chest: a small reply, never counted). It is about
+   * the week it was won in: once that week is over it is no news and is dropped. It never takes the morning greeting's
+   * place or makes it wait: while today's greeting is still to come, this waits for it.
+   */
   private tellBoss(nowMs: number): void {
-    const text = this.bossNotice;
-    if (text === null) return;
+    const notice = this.bossNotice;
+    if (notice === null) return;
+    if (notice.week !== fr.isoWeekKey(dayKey(new Date(nowMs)))) {
+      this.bossNotice = null;
+      return;
+    }
     const f = this.state.focus;
     if (this.state.bubble || this.outOfTheWay || this.state.flow || (f && !f.isBreak) || this.sample.idleSeconds > 300 || isDoneForToday(this.plan, nowMs)) return;
     if (this.state.quietUntil !== null && nowMs < this.state.quietUntil) return;
+    if (this.greetingComes(nowMs)) return;
     if (!calm.atBreakpoint(this.sample.secondsSinceKey, this.secondsSinceAppSwitch())) return;
     this.bossNotice = null;
-    this.say({ text, seconds: 14 }, { chime: "celebrate" });
+    this.say({ text: notice.text, seconds: 14 }, { chime: "celebrate" });
   }
 
   /** What stands in the way of company right now (see `CalmMoment`). */
@@ -3766,7 +3874,26 @@ export class Brain {
       bubble: s.bubble !== null,
       boardOpen: this.boardIsOpen,
       mischief: s.antic !== null,
+      inCall: isConferencing(this.sample.app, this.sample.url),
     });
+  }
+
+  /**
+   * Notes when you leave and come back. Coming back after a long time away (30 minutes or more, a night) starts the wait for
+   * the day's first visit again: it is not for the moment you sit down. Once the day's first visit has come, being away
+   * changes nothing (the two hours between visits are all there is).
+   */
+  private noteAway(nowMs: number, idleSeconds: number): void {
+    if (idleSeconds > AWAY_SECONDS) {
+      this.awayFrom ??= nowMs - idleSeconds * 1000;
+      return;
+    }
+    const from = this.awayFrom;
+    this.awayFrom = null;
+    if (from === null || nowMs - from < LONG_AWAY_MS) return;
+    const visits = this.friendsDoc.visits;
+    if (visits.day === dayKey(new Date(nowMs)) && visits.count > 0) return;
+    this.visitAfter = Math.max(this.visitAfter, nowMs + fr.visitDelayMs(this.myKey ?? "", dayKey(new Date(nowMs))));
   }
 
   /**
@@ -3780,7 +3907,8 @@ export class Brain {
       else this.checkVisit();
       return;
     }
-    if (nowMs < this.visitAfter || !this.state.hasToken || this.settling) return;
+    // Never before today's morning greeting has been told: a visitor is the second thing of the day, not the first.
+    if (nowMs < this.visitAfter || !this.state.hasToken || this.settling || this.greetingComes(nowMs)) return;
     const doc = this.friendsDoc;
     const friend = fr.pickVisitor({ friends: doc.friends, today: dayKey(new Date(nowMs)), now: nowMs, log: doc.visits, calm: this.calmNow(nowMs) }, this.random);
     if (friend) this.startVisit(friend, nowMs, true);
@@ -3788,13 +3916,13 @@ export class Brain {
 
   private startVisit(friend: fr.Friend, nowMs: number, record: boolean): void {
     if (record) {
-      this.friendsDoc = fr.recordVisit(this.friendsDoc, friend.id, nowMs, dayKey(new Date(nowMs)));
+      this.friendsDoc = fr.recordVisit(this.friendsDoc, friend.pk, nowMs, dayKey(new Date(nowMs)));
       this.saveFriends();
     }
     const id = ++this.bubbleSeq;
     const end = nowMs + fr.VISIT_SECONDS * 1000;
-    const here = this.friendsDoc.friends.find((f) => f.id === friend.id) ?? friend;
-    this.set({ visitor: { id, friend: here, streak: this.state.buddyStreaks[friend.id] ?? 0, start: nowMs, end } });
+    const here = this.friendsDoc.friends.find((f) => f.pk === friend.pk) ?? friend;
+    this.set({ visitor: { id, friend: here, streak: this.state.buddyStreaks[friend.pk] ?? 0, start: nowMs, end } });
     // The diary is on disk: it says a visit happened, never whose.
     this.diary.add("system", L("Pet của một người bạn ghé chơi", "A friend's pet dropped by"));
     this.later(() => {
@@ -3815,7 +3943,14 @@ export class Brain {
     if (!v) return;
     const nowMs = this.now();
     if (nowMs - v.start < fr.VISIT_WALK_MS) this.set({ visitor: null });
-    else if (v.end - nowMs > fr.VISIT_WALK_MS) this.set({ visitor: { ...v, end: nowMs + fr.VISIT_WALK_MS } });
+    else if (v.end - nowMs > fr.VISIT_WALK_MS) {
+      const end = nowMs + fr.VISIT_WALK_MS;
+      this.set({ visitor: { ...v, end } });
+      // It is gone when its walk is done, with or without another beat to notice.
+      this.later(() => {
+        if (this.state.visitor?.id === v.id && this.now() >= end) this.set({ visitor: null });
+      }, fr.VISIT_WALK_MS + 50);
+    }
   }
 
   /** The board opened: no company while it is open, and a visitor makes way (its click opens the Friends sheet). */
@@ -3824,11 +3959,11 @@ export class Brain {
     this.checkVisit();
   }
 
-  /** Demo: adds the two sample friends (cards made from sample data, added like any pasted card). Returns how many were new. */
-  demoAddFriends(): number {
+  /** Demo: adds the two sample friends (cards made from sample data, "signed" by the demo's stand-in key, added like any pasted card). Returns how many were new. */
+  async demoAddFriends(): Promise<number> {
     let added = 0;
     for (const card of fr.sampleCards(dayKey(new Date(this.now())))) {
-      const out = this.addFriendCard(fr.encodeCard(card));
+      const out = await this.addFriendCard(demoSignedCard(card));
       if (out.ok && !out.replaced) added += 1;
     }
     return added;

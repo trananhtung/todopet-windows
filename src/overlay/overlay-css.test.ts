@@ -77,4 +77,17 @@ describe("overlay.css", () => {
     expect(rule(".daystrip.is-lighten .ds-fold").visibility).toBe("hidden");
     expect(rule(".ds-body").overflow).toBe("hidden");
   });
+
+  // v0.6 review: at 1366 x 768 in English the demo panel's right column of buttons stuck out of the panel by 8 px. Two
+  // `1fr` columns cannot be narrower than their widest button ("Meeting soon", "Next morning"), so the grid has to
+  // let the columns shrink, the buttons wrap instead of overflowing, and the panel be wide enough for most labels in one line.
+  it("keeps the demo panel's buttons inside the panel: shrinkable columns, wrapping labels", () => {
+    expect(rule(".demo-panel .grid")["grid-template-columns"]).toBe("repeat(2, minmax(0, 1fr))");
+    const btn = rule(".demo-panel .btn");
+    expect(btn["white-space"]).toBe("normal");
+    expect(btn["min-width"]).toBe("0");
+    expect(btn["overflow-wrap"]).toBe("anywhere");
+    expect(parseInt(rule(".demo-panel").width, 10)).toBeGreaterThanOrEqual(252);
+  });
+
 });

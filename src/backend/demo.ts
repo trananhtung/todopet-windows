@@ -14,6 +14,7 @@ import type {
 } from "./types";
 import { getLang } from "../core/l10n";
 import { demoLife } from "../core/life";
+import { createDemoCards } from "./demoCards";
 import { BackendError } from "./types";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -409,6 +410,8 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
         return [...keys].sort().reverse();
       },
     },
+    // DEMO ONLY (not cryptography): a stand-in for the card key, so the sample friends' cards can be added through the same path as real ones.
+    cards: createDemoCards(),
     bus: {
       async emit(e) {
         busLocal.emit(e);

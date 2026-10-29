@@ -1,7 +1,9 @@
 // Friends (v0.6): pet cards, the friend list, the buddy streak, the weekly co-op boss and visits. Pure rules: no
 // network, no DOM, no clock of its own. Friends swap short text cards over any chat app; nothing is hosted, and no
 // data leaves the PC unless you send your own card yourself. A pasted card is untrusted input: it is parsed strictly
-// (see `decodeCard`) and only ever shown as plain text.
+// (see `parseCard`), its signature is checked by the backend (the Ed25519 key lives in Rust, never here) and it is
+// only ever shown as plain text.
+import { decodeBase64Url, encodeBase64Url, utf8Bytes } from "./b64";
 import { weekKey as mondayOf } from "./chapters";
 import { addDays, daysBetween, isDayKey, parseDate } from "./dates";
 import { L } from "./l10n";
@@ -10,39 +12,43 @@ import { ACCESSORIES, ACCESSORY_SLOT, SPECIES_IDS, type Accessory, type Accessor
 
 // ---------- Cards ----------
 
-/** A card is this, a dot, and the card's JSON as base64url. The 1 is the format's version. */
+/** A card is this, the card's JSON as base64url, a dot and the signature of that JSON as base64url. The 1 is the format's version. */
 export const CARD_PREFIX = "TODOPET1.";
-/** Longest card text read (whitespace left out). A real card is about 400 characters. */
-export const MAX_CARD_CHARS = 1500;
+/** Longest card text read (whitespace left out): 1500 for the payload as before, and room for the public key (43) and the signature (86). A real card is about 550 characters. */
+export const MAX_CARD_CHARS = 1630;
 export const MAX_NAME_CHARS = 20;
+/** At most this many combining marks in a row in a name (Vietnamese needs 2: a shape mark and a tone). */
+export const MAX_NAME_MARKS = 2;
 export const MAX_CARD_ACCESSORIES = 3;
-/** Streaks on a card are whole numbers up to this; more is a damaged card. */
-export const MAX_STREAK = 9999;
 /** Tasks finished in a week, on a card: up to this many. */
 export const MAX_WEEK_DONE = 999;
 
-const ID_RE = /^[A-Za-z0-9_-]{8,32}$/;
-const HISTORY_RE = new RegExp(`^[GKR-]{${HISTORY_DAYS}}$`);
+/** An Ed25519 public key as text: 32 bytes, base64url, no padding. */
+export const PUBLIC_KEY_CHARS = 43;
+/** An Ed25519 signature as text: 64 bytes, base64url, no padding. */
+export const SIGNATURE_CHARS = 86;
+
+/** The mark of a day on a card: the goal met, a day off, or nothing. A pet also remembers a kept day (`K`), but a card doesn't say it. */
+export type CardMark = "G" | "R" | "-";
+const HISTORY_RE = new RegExp(`^[GR-]{${HISTORY_DAYS}}$`);
 /** A card's date may be this many days ahead of today: a friend in another time zone is already tomorrow. */
 const FUTURE_DAYS = 1;
 
 /** What a card says about a pet and its owner's week. Nothing else: never task titles, times, app names or a user name. */
 export interface PetCard {
-  /** The random id of the install that made it (see `newInstallId`). */
-  id: string;
+  /** The public key of the install that made it (base64url, 43 characters): the friend's identity, and what the signature is checked with. */
+  pk: string;
   /** The pet's name, up to 20 characters of plain text. */
   name: string;
   species: SpeciesId;
   /** Up to 3 worn accessories, one per slot. */
   accessories: Accessory[];
   stage: StageIndex;
-  streak: number;
-  best: number;
   /** ISO week of `date`: "2026-W44". */
   week: string;
   /** Tasks finished in that week, as of the card's date. */
   weekDone: number;
-  /** The last 28 days, oldest first, ending on `date`: `G` goal met, `K` kept, `R` rest, `-` nothing. */
+  /** The last 28 days, oldest first, ending on `date`: `G` goal met, `R` rest (a day off, or a day too full to count), `-` nothing. */
   history: string;
   /** The day the card was made: "yyyy-MM-dd". */
   date: string;
@@ -56,7 +62,7 @@ export type CardError =
   | "json"
   | "shape"
   | "version"
-  | "id"
+  | "key"
   | "name"
   | "species"
   | "accessory"
@@ -64,17 +70,24 @@ export type CardError =
   | "history"
   | "week"
   | "date"
-  | "future";
+  | "future"
+  /** The signature doesn't match the card: it was changed, or isn't from the key it says. */
+  | "signature"
+  /** The backend couldn't check the signature (not that it was wrong). */
+  | "unchecked";
 
-export type CardResult = { ok: true; card: PetCard } | { ok: false; error: CardError; message: string };
+export type CardFailure = { ok: false; error: CardError; message: string };
+export type CardResult = { ok: true; card: PetCard } | CardFailure;
+/** A card whose structure is fine: the card, the exact payload text that was signed, and the signature. Not yet checked with the backend. */
+export type ParsedCard = { ok: true; card: PetCard; payload: string; signature: string } | CardFailure;
 
-/** The kind words for a card that couldn't be read; the reason is never shown raw. */
+/** The kind words for a card that couldn't be read; the reason is never shown raw, and nothing the card says is ever repeated. */
 export function cardErrorText(error: CardError): string {
   switch (error) {
     case "empty":
       return L("Dán thẻ của bạn bè vào ô trên đã nhé.", "Paste your friend's card into the box first.");
     case "tooLong":
-      return L("Đoạn này dài quá nên không phải thẻ thú cưng rồi (tối đa 1500 ký tự).", "That's too long to be a pet card (the most is 1500 characters).");
+      return L(`Đoạn này dài quá nên không phải thẻ thú cưng rồi (tối đa ${MAX_CARD_CHARS} ký tự).`, `That's too long to be a pet card (the most is ${MAX_CARD_CHARS} characters).`);
     case "prefix":
       return L("Đây chưa giống thẻ thú cưng. Thẻ bắt đầu bằng TODOPET1. — bạn chỉ dán đúng dòng đó thôi nhé.", "That doesn't look like a pet card. A card starts with TODOPET1. — paste just that one line.");
     case "version":
@@ -88,69 +101,102 @@ export function cardErrorText(error: CardError): string {
       return L("Ngày trên thẻ này nghe chưa đúng. Bạn nhờ bạn ấy chép lại thẻ giúp nhé.", "The date on that card doesn't look right. Could your friend copy it again?");
     case "future":
       return L("Thẻ này đề ngày ở tương lai. Bạn kiểm tra giúp đồng hồ máy (của bạn hoặc của bạn ấy) nhé.", "That card is dated in the future. Could you check the clock (yours or your friend's)?");
+    case "signature":
+      return L("Thẻ này không khớp chữ ký nên mình chưa tin được. Bạn nhờ bạn ấy chép lại thẻ giúp nhé.", "This card doesn't check out; ask your friend to copy it again.");
+    case "unchecked":
+      return L("Mình chưa kiểm tra được thẻ này lúc này. Bạn thử lại sau một chút nhé.", "I couldn't check that card just now. Please try again in a moment.");
     default:
       return L("Thẻ này có vẻ bị hỏng hoặc thiếu mất một đoạn. Bạn nhờ bạn ấy chép lại thẻ giúp nhé.", "That card looks damaged, or part of it is missing. Could your friend copy it again?");
   }
 }
 
-const fail = (error: CardError): CardResult => ({ ok: false, error, message: cardErrorText(error) });
+const fail = (error: CardError): CardFailure => ({ ok: false, error, message: cardErrorText(error) });
 
-function toBase64Url(text: string): string {
-  let bin = "";
-  for (const b of new TextEncoder().encode(text)) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-/** The UTF-8 text in a base64url string (no padding, no other alphabet), or null when it isn't one. */
-function fromBase64Url(s: string): string | null {
-  if (!/^[A-Za-z0-9_-]+$/.test(s) || s.length % 4 === 1) return null;
+/** The bytes of a base64url string decoded as UTF-8, or null for anything that isn't strictly that. */
+function utf8FromBase64Url(s: string): string | null {
+  const bytes = decodeBase64Url(s);
+  if (bytes === null) return null;
   try {
-    const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/"));
-    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    // `ignoreBOM: true` keeps a byte order mark in the text, where JSON refuses it; the decoder would drop it otherwise.
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     return null;
   }
 }
 
-/** The card as text to send: `TODOPET1.` and the base64url of its JSON. */
-export function encodeCard(card: PetCard): string {
-  return (
-    CARD_PREFIX +
-    toBase64Url(
-      JSON.stringify({
-        v: 1,
-        id: card.id,
-        name: card.name,
-        species: card.species,
-        accessories: card.accessories,
-        stage: card.stage,
-        streak: card.streak,
-        best: card.best,
-        week: card.week,
-        weekDone: card.weekDone,
-        history: card.history,
-        date: card.date,
-      }),
-    )
-  );
+/** Is `x` a public key: 43 characters of strict base64url that make 32 bytes? */
+export function isPublicKey(x: unknown): x is string {
+  return typeof x === "string" && x.length === PUBLIC_KEY_CHARS && decodeBase64Url(x)?.length === 32;
 }
 
-const CARD_KEYS = ["v", "id", "name", "species", "accessories", "stage", "streak", "best", "week", "weekDone", "history", "date"] as const;
+/** Is `x` the text of a signature: 86 characters of strict base64url that make 64 bytes? (Whether it is the right one is the backend's to say.) */
+const isSignatureText = (x: string) => x.length === SIGNATURE_CHARS && decodeBase64Url(x)?.length === 64;
+
+const CARD_KEYS = ["v", "pk", "name", "species", "accessories", "stage", "week", "weekDone", "history", "date"] as const;
+
+/** The exact text that gets signed and sent: the card's JSON, keys in this order. */
+export function cardPayload(card: PetCard): string {
+  return JSON.stringify({
+    v: 1,
+    pk: card.pk,
+    name: card.name,
+    species: card.species,
+    accessories: card.accessories,
+    stage: card.stage,
+    week: card.week,
+    weekDone: card.weekDone,
+    history: card.history,
+    date: card.date,
+  });
+}
+
+/** The card as text to send: `TODOPET1.`, the base64url of its payload, a dot and the signature (see `cardPayload`; sign that exact text). */
+export function encodeCard(card: PetCard, signature: string): string {
+  return `${CARD_PREFIX}${encodeBase64Url(utf8Bytes(cardPayload(card)))}.${signature}`;
+}
 
 /**
  * Control, format (bidi marks, zero-width spaces), lone-surrogate and private-use characters, and line and paragraph
  * separators. The zero-width joiner stays: emoji sequences are built with it. (Unassigned characters are fine: a newer
  * emoji in a friend's pet's name is still just text, drawn as a box by an older system.)
  */
-const FORBIDDEN_IN_NAME = /[\p{Cc}\p{Cs}\p{Co}\p{Zl}\p{Zp}]|(?!\u200d)\p{Cf}/u;
+const FORBIDDEN_IN_NAME = /[\p{Cc}\p{Cs}\p{Co}\p{Zl}\p{Zp}]|(?!‍)\p{Cf}/u;
+/**
+ * Characters that draw nothing but pass for letters or marks: the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0), the
+ * blank braille pattern (U+2800) and the combining grapheme joiner (U+034F). They don't count as something to see.
+ */
+const FILLERS = /[ᅟᅠㅤﾠ⠀͏]/gu;
 const VISIBLE_IN_NAME = /[\p{L}\p{N}\p{Extended_Pictographic}]/u;
+/** More than `MAX_NAME_MARKS` combining marks in a row. */
+const TOO_MANY_MARKS = new RegExp(`\\p{M}{${MAX_NAME_MARKS + 1},}`, "u");
 
 const codePoints = (s: string) => Array.from(s).length;
 
-/** A pet name a card can carry: non-empty, trimmed, at most 20 code points of plain text. */
+/** A pet name a card can carry: trimmed, at most 20 code points of plain text with something to see in it, and no pile of combining marks. */
 export function isCardName(x: unknown): x is string {
-  return typeof x === "string" && x !== "" && x === x.trim() && codePoints(x) <= MAX_NAME_CHARS && !FORBIDDEN_IN_NAME.test(x) && VISIBLE_IN_NAME.test(x);
+  return (
+    typeof x === "string" &&
+    x !== "" &&
+    x === x.trim() &&
+    codePoints(x) <= MAX_NAME_CHARS &&
+    !FORBIDDEN_IN_NAME.test(x) &&
+    !TOO_MANY_MARKS.test(x) &&
+    VISIBLE_IN_NAME.test(x.replace(FILLERS, ""))
+  );
+}
+
+/** Folds a name the way a reader compares: NFKC (fullwidth to plain, ligatures apart), no combining marks or joiners, one case. */
+const foldName = (s: string) => s.normalize("NFKD").replace(/[\p{M}‍]/gu, "").normalize("NFKC").toUpperCase().toLowerCase().trim();
+
+/**
+ * Does a friend's name pass for mine? The same as my pet's name, or "You" or "Bạn" (what the Friends sheet calls me), once
+ * folded (case, fullwidth letters, accents and joiners aside). The app shows such a friend's species beside the name
+ * everywhere, so a card can't pose as me, or as the sheet's own words.
+ */
+export function looksLikeMe(friendName: string, myPetName: string): boolean {
+  const theirs = foldName(friendName);
+  if (theirs === "") return false;
+  return [myPetName, "You", "Bạn"].some((mine) => foldName(mine) === theirs);
 }
 
 const isInt = (x: unknown, max: number): x is number => typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= max;
@@ -171,19 +217,20 @@ function isAccessoryList(x: unknown): x is Accessory[] {
 const isSpecies = (x: unknown): x is SpeciesId => typeof x === "string" && (SPECIES_IDS as readonly string[]).includes(x);
 
 /**
- * Checks the fields of a card, strictly: every field present with the right type, no others, known species and
- * accessories only, whole numbers in range, a 28-character record, a real date that is the day `week` is in. Only
- * `today` (a day key) makes a date too far ahead a fault; pass null to read a card already on disk.
+ * Checks the fields of a card, strictly: every field present with the right type, no others, a real public key, known
+ * species and accessories only, whole numbers in range, a 28-character record, a real date that is the day `week` is
+ * in. Only `today` (a day key) makes a date too far ahead a fault; pass null to read a card already on disk. The
+ * signature is not part of this: it covers the payload text, which the backend checks.
  */
 export function checkCard(o: Record<string, unknown>, today: string | null): CardResult {
   if (o.v !== 1) return fail("version");
   const keys = Object.keys(o);
   if (keys.length !== CARD_KEYS.length || !CARD_KEYS.every((k) => Object.hasOwn(o, k))) return fail("shape");
-  if (typeof o.id !== "string" || !ID_RE.test(o.id)) return fail("id");
+  if (!isPublicKey(o.pk)) return fail("key");
   if (!isCardName(o.name)) return fail("name");
   if (!isSpecies(o.species)) return fail("species");
   if (!isAccessoryList(o.accessories)) return fail("accessory");
-  if (!isInt(o.stage, 4) || !isInt(o.streak, MAX_STREAK) || !isInt(o.best, MAX_STREAK) || !isInt(o.weekDone, MAX_WEEK_DONE)) return fail("number");
+  if (!isInt(o.stage, 4) || !isInt(o.weekDone, MAX_WEEK_DONE)) return fail("number");
   if (typeof o.history !== "string" || !HISTORY_RE.test(o.history)) return fail("history");
   if (!isDayKey(o.date)) return fail("date");
   if (typeof o.week !== "string" || o.week !== isoWeekKey(o.date)) return fail("week");
@@ -191,14 +238,11 @@ export function checkCard(o: Record<string, unknown>, today: string | null): Car
   return {
     ok: true,
     card: {
-      id: o.id,
+      pk: o.pk,
       name: o.name,
       species: o.species,
       accessories: [...o.accessories],
       stage: o.stage as StageIndex,
-      streak: o.streak,
-      // A best streak below the current one is a slip, not a fault.
-      best: Math.max(o.best, o.streak),
       week: o.week,
       weekDone: o.weekDone,
       history: o.history,
@@ -208,11 +252,13 @@ export function checkCard(o: Record<string, unknown>, today: string | null): Car
 }
 
 /**
- * Reads a card someone sent. Strict, and it never throws: a size cap (1500 characters, whitespace left out), the
- * `TODOPET1.` prefix, base64url that is valid UTF-8, JSON that is a plain object, and then `checkCard`. Anything
- * wrong gives a kind message and no card.
+ * Reads the structure of a card someone sent. Strict, and it never throws: a size cap (1630 characters, whitespace left
+ * out), the `TODOPET1.` prefix, a payload and a signature as strict base64url, a payload that is valid UTF-8 and JSON
+ * that is a plain object, and then `checkCard`. Anything wrong gives a kind message and no card. It returns the payload
+ * text exactly as signed and the signature; **the signature is not checked here**: the backend does that (`addFriendCard`),
+ * and a card is only ever accepted after it has.
  */
-export function decodeCard(text: string, today: string): CardResult {
+export function parseCard(text: string, today: string): ParsedCard {
   if (typeof text !== "string") return fail("empty");
   // Cheap first: a megabyte of paste is not a card, and shouldn't be searched for whitespace.
   if (text.length > MAX_CARD_CHARS * 4) return fail("tooLong");
@@ -220,16 +266,22 @@ export function decodeCard(text: string, today: string): CardResult {
   if (compact === "") return fail("empty");
   if (compact.length > MAX_CARD_CHARS) return fail("tooLong");
   if (!compact.startsWith(CARD_PREFIX)) return fail("prefix");
-  const json = fromBase64Url(compact.slice(CARD_PREFIX.length));
-  if (json === null) return fail("encoding");
+  const parts = compact.slice(CARD_PREFIX.length).split(".");
+  if (parts.length > 2) return fail("encoding");
+  const payload = parts[0] === "" ? null : utf8FromBase64Url(parts[0]);
+  if (payload === null) return fail("encoding");
+  // A card without its signature is a card with a piece missing.
+  if (parts.length < 2) return fail("shape");
+  if (!isSignatureText(parts[1])) return fail("encoding");
   let parsed: unknown;
   try {
-    parsed = JSON.parse(json);
+    parsed = JSON.parse(payload);
   } catch {
     return fail("json");
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return fail("shape");
-  return checkCard(parsed as Record<string, unknown>, today);
+  const checked = checkCard(parsed as Record<string, unknown>, today);
+  return checked.ok ? { ok: true, card: checked.card, payload, signature: parts[1] } : checked;
 }
 
 // ---------- Weeks ----------
@@ -258,6 +310,9 @@ export function weekDoneOf(week: { key: string; done: number }, today: string): 
 export function cardName(petName: string): string {
   const clean = String(petName ?? "")
     .replace(new RegExp(FORBIDDEN_IN_NAME.source, "gu"), "")
+    .replace(FILLERS, "")
+    // A pile of combining marks keeps its first two.
+    .replace(new RegExp(`(\\p{M}{${MAX_NAME_MARKS}})\\p{M}+`, "gu"), "$1")
     .trim();
   let out = "";
   let count = 0;
@@ -286,20 +341,22 @@ export function cardAccessories(wearing: readonly Accessory[]): Accessory[] {
 
 const whole = (x: number, max: number) => Math.min(max, Math.max(0, Math.trunc(Number.isFinite(x) ? x : 0)));
 
-/** 28 characters of `G K R -`: shorter is padded in front with `-`, longer keeps its last 28, anything else is `-`. */
+/**
+ * 28 characters of `G R -`: shorter is padded in front with `-`, longer keeps its last 28. A kept day (`K`) and anything
+ * else is `-`: a card says the goal was met, the day was a rest, or nothing; it doesn't say how many tasks you did.
+ */
 export function normalizeHistory(h: string): string {
-  const marks = Array.from(String(h ?? ""), (c) => ("GKR-".includes(c) ? c : "-")).join("");
+  const marks = Array.from(String(h ?? ""), (c) => ("GR".includes(c) ? c : "-")).join("");
   return marks.padStart(HISTORY_DAYS, "-").slice(-HISTORY_DAYS);
 }
 
 export interface CardSource {
-  installId: string;
+  /** This install's public key (see `CardsApi.publicKey`). */
+  pk: string;
   petName: string;
   species: SpeciesId;
   wearing: readonly Accessory[];
   stage: StageIndex;
-  streak: number;
-  bestStreak: number;
   /** Tasks finished this week. */
   weekDone: number;
   /** The last 28 days ending today (see `normalizeHistory`). */
@@ -308,38 +365,19 @@ export interface CardSource {
   today: string;
 }
 
-/** The card for the pet as it is `today`: always one that `decodeCard` reads back. */
+/** The card for the pet as it is `today`: always one that `parseCard` reads back. */
 export function buildCard(src: CardSource): PetCard {
-  const streak = whole(src.streak, MAX_STREAK);
   return {
-    id: src.installId,
+    pk: src.pk,
     name: cardName(src.petName),
     species: src.species,
     accessories: cardAccessories(src.wearing),
     stage: src.stage,
-    streak,
-    best: Math.max(streak, whole(src.bestStreak, MAX_STREAK)),
     week: isoWeekKey(src.today),
     weekDone: whole(src.weekDone, MAX_WEEK_DONE),
     history: normalizeHistory(src.history),
     date: src.today,
   };
-}
-
-// ---------- The install id ----------
-
-const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
-const ID_LENGTH = 20;
-
-/** A random id for this install, made once and kept in the `friends` document: 20 characters of a–z and 0–9. */
-export function newInstallId(random: () => number): string {
-  let id = "";
-  for (let i = 0; i < ID_LENGTH; i++) {
-    const r = random();
-    const n = Number.isFinite(r) ? Math.floor(r * ID_ALPHABET.length) : 0;
-    id += ID_ALPHABET[Math.min(ID_ALPHABET.length - 1, Math.max(0, n))];
-  }
-  return id;
 }
 
 // ---------- The friend list ----------
@@ -357,22 +395,23 @@ export type AddOutcome =
   | { ok: false; error: "self" | "older" | "full"; message: string };
 
 /**
- * Adds a friend's card to the list (a new list: the one given is never changed). Your own card is refused. A card
- * from a friend you have replaces theirs in place when it is from the same day or later (the friend's last visit is
- * kept); an older one is refused kindly. A new friend past the 12th is refused.
+ * Adds a friend's card, already checked with the backend, to the list (a new list: the one given is never changed). A friend
+ * is their public key, so a card with a key you have can only be from the same install: it replaces theirs in place when
+ * it is from the same day or later (the friend's last visit is kept), and an older one is refused kindly. Your own card
+ * (`myPk`; null when this PC's key can't be read) is refused. A new friend past the 12th is refused. No message repeats a name.
  */
-export function addFriend(list: readonly Friend[], card: PetCard, myId: string): AddOutcome {
-  if (card.id === myId) {
+export function addFriend(list: readonly Friend[], card: PetCard, myPk: string | null): AddOutcome {
+  if (myPk !== null && card.pk === myPk) {
     return { ok: false, error: "self", message: L("Đây là thẻ của chính bạn! Gửi nó cho một người bạn nhé 💌", "That's your own card! Send it to a friend instead 💌") };
   }
-  const at = list.findIndex((f) => f.id === card.id);
+  const at = list.findIndex((f) => f.pk === card.pk);
   if (at >= 0) {
     const old = list[at];
     if (card.date < old.date) {
       return {
         ok: false,
         error: "older",
-        message: L(`Mình đã có thẻ mới hơn của ${old.name} rồi, nên giữ nguyên nhé.`, `I already have a newer card from ${old.name}, so nothing changed.`),
+        message: L("Mình đã có thẻ mới hơn của bạn ấy rồi, nên giữ nguyên nhé.", "I already have a newer card from this friend, so nothing changed."),
       };
     }
     const friend: Friend = { ...card, accessories: [...card.accessories], lastVisit: old.lastVisit };
@@ -389,7 +428,7 @@ export function addFriend(list: readonly Friend[], card: PetCard, myId: string):
   return { ok: true, friends: [...list, friend], friend, replaced: false };
 }
 
-export const removeFriend = (list: readonly Friend[], id: string): Friend[] => list.filter((f) => f.id !== id);
+export const removeFriend = (list: readonly Friend[], pk: string): Friend[] => list.filter((f) => f.pk !== pk);
 
 // ---------- What is stored (the `friends` document, overlay window only) ----------
 
@@ -400,66 +439,65 @@ export interface VisitLog {
   lastAt: number | null;
 }
 
+/** The friends and the day's visits. (The key that signs my cards is not here: it lives in Credential Manager.) */
 export interface FriendsDoc {
-  /** Random, made once on this PC: how a friend's newer card finds their older one. */
-  installId: string;
   friends: Friend[];
   visits: VisitLog;
 }
 
 const noVisits = (): VisitLog => ({ day: "", count: 0, lastAt: null });
 
-function visitsFromJson(x: unknown): VisitLog {
+/** A stored time: a finite number, never later than `now` (a clock set back, or a hand-edited file, can't lock visits out) and never below 0. */
+const timeNotAfter = (x: unknown, now: number): number | null => (typeof x === "number" && Number.isFinite(x) ? Math.min(Math.max(0, x), now) : null);
+
+function visitsFromJson(x: unknown, now: number): VisitLog {
   if (!x || typeof x !== "object") return noVisits();
   const r = x as Record<string, unknown>;
   return {
     day: isDayKey(r.day) ? r.day : "",
     count: typeof r.count === "number" && Number.isFinite(r.count) ? Math.min(100, Math.max(0, Math.trunc(r.count))) : 0,
-    lastAt: typeof r.lastAt === "number" && Number.isFinite(r.lastAt) ? r.lastAt : null,
+    lastAt: timeNotAfter(r.lastAt, now),
   };
 }
 
 /** A stored friend: its card checked again as strictly as a pasted one (but never for being dated ahead), or null. */
-function friendFromJson(x: unknown): Friend | null {
+function friendFromJson(x: unknown, now: number): Friend | null {
   if (!x || typeof x !== "object" || Array.isArray(x)) return null;
   const r = x as Record<string, unknown>;
   const fields = Object.fromEntries(CARD_KEYS.map((k) => [k, r[k]]));
   const checked = checkCard({ ...fields, v: 1 }, null);
   if (!checked.ok) return null;
-  const visit = r.lastVisit;
-  return { ...checked.card, lastVisit: typeof visit === "number" && Number.isFinite(visit) ? visit : null };
+  return { ...checked.card, lastVisit: timeNotAfter(r.lastVisit, now) };
 }
 
 /**
- * Reads the stored document, tolerating anything: friends that no longer hold up are dropped, the same friend twice
- * keeps the newer card, ourselves is dropped and only the first 12 stay. `fresh` is true when there was no usable id
- * and `makeId` made one, so the caller saves it.
+ * Reads the stored document, tolerating anything: only its first 12 entries are looked at, friends that no longer hold
+ * up are dropped (a card from an older format has no `pk`), the same friend twice keeps the newer card, and ourselves
+ * (`myPk`) is dropped. Times after `now` are brought back to it. Stored cards were verified when they were added, so
+ * their structure is all that is checked again.
  */
-export function docFromJson(raw: unknown, makeId: () => string): { doc: FriendsDoc; fresh: boolean } {
+export function docFromJson(raw: unknown, myPk: string | null, now: number): FriendsDoc {
   const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  const hadId = typeof r.installId === "string" && ID_RE.test(r.installId);
-  const installId = hadId ? (r.installId as string) : makeId();
   const friends: Friend[] = [];
-  for (const x of Array.isArray(r.friends) ? r.friends : []) {
-    const f = friendFromJson(x);
-    if (!f || f.id === installId) continue;
-    const at = friends.findIndex((g) => g.id === f.id);
+  for (const x of (Array.isArray(r.friends) ? r.friends : []).slice(0, MAX_FRIENDS)) {
+    const f = friendFromJson(x, now);
+    if (!f || (myPk !== null && f.pk === myPk)) continue;
+    const at = friends.findIndex((g) => g.pk === f.pk);
     if (at < 0) friends.push(f);
     else if (f.date > friends[at].date) friends[at] = f;
   }
-  return { doc: { installId, friends: friends.slice(0, MAX_FRIENDS), visits: visitsFromJson(r.visits) }, fresh: !hadId };
+  return { friends, visits: visitsFromJson(r.visits, now) };
 }
 
 /** The document as plain JSON for the `friends` storage key. */
 export const docToJson = (doc: FriendsDoc): unknown => ({
-  installId: doc.installId,
   friends: doc.friends.map((f) => ({ ...f, accessories: [...f.accessories] })),
   visits: { ...doc.visits },
 });
 
 // ---------- The record of days ----------
 
-/** How today stands, live: the goal met (`G`), at least one task (`K`), a day off (`R`), or nothing yet (`-`). */
+/** How today stands, live, as the pet remembers a day: the goal met (`G`), at least one task (`K`), a day off (`R`), or nothing yet (`-`). A card publishes `K` as `-`. */
 export function todayMark(completed: number, target: number, workday: boolean): DayMark {
   if (target > 0 && completed >= target) return "G";
   if (completed > 0) return "K";
@@ -468,7 +506,8 @@ export function todayMark(completed: number, target: number, workday: boolean): 
 
 /**
  * The 28 characters for a card made `today`, oldest first: the days the pet settled (`record`, from its life), and
- * for a day it never settled (the PC was off) `R` when it was a day off and `-` otherwise; today is `mark`, live.
+ * for a day it never settled (the PC was off) `R` when it was a day off and `-` otherwise; today is `mark`, live. A kept
+ * day (`K`) is published as `-`: a card says goal, rest or nothing (see `normalizeHistory`).
  */
 export function cardHistory(record: Readonly<Record<string, DayMark>>, today: string, mark: DayMark, isWorkday: (day: string) => boolean): string {
   let out = "";
@@ -477,7 +516,7 @@ export function cardHistory(record: Readonly<Record<string, DayMark>>, today: st
     const known = record[day];
     out += known && DAY_MARKS.includes(known) ? known : isWorkday(day) ? "-" : "R";
   }
-  return out + mark;
+  return normalizeHistory(out + mark);
 }
 
 // ---------- The buddy streak ----------
@@ -524,9 +563,11 @@ export function buddyStreak(a: StreakSide, b: StreakSide): number {
 export const BOSS_HP_PER_MEMBER = 15;
 
 export interface BossMember {
-  /** A friend's install id; "me" for you. */
+  /** A friend's public key; "me" for you. */
   id: string;
   name: string;
+  /** The friend's species (shown beside a name that could pass for mine); null for you. */
+  species: SpeciesId | null;
   /** Tasks finished this week. */
   done: number;
   me: boolean;
@@ -542,7 +583,7 @@ export interface Boss {
   /** What is left, never below 0. */
   hp: number;
   defeated: boolean;
-  /** Friends whose latest card is from an earlier week: not counted until they send a fresh one. */
+  /** Friends whose latest card is not from this week (an earlier week, or a time zone ahead): not counted until they send a fresh one. */
   waiting: number;
 }
 
@@ -553,10 +594,10 @@ export interface Boss {
  */
 export function bossOf(input: { today: string; myDone: number; friends: readonly Friend[] }): Boss {
   const week = isoWeekKey(input.today);
-  const mine: BossMember = { id: "me", name: L("Bạn", "You"), done: whole(input.myDone, Number.MAX_SAFE_INTEGER), me: true };
+  const mine: BossMember = { id: "me", name: L("Bạn", "You"), species: null, done: whole(input.myDone, Number.MAX_SAFE_INTEGER), me: true };
   const theirs = input.friends
     .filter((f) => f.week === week)
-    .map((f): BossMember => ({ id: f.id, name: f.name, done: f.weekDone, me: false }))
+    .map((f): BossMember => ({ id: f.pk, name: f.name, species: f.species, done: f.weekDone, me: false }))
     .sort((a, b) => b.done - a.done);
   const members = [mine, ...theirs];
   const maxHp = members.length * BOSS_HP_PER_MEMBER;
@@ -608,6 +649,8 @@ export interface CalmMoment {
   boardOpen: boolean;
   /** A stunt (a parade, the table flip) is going on. */
   mischief: boolean;
+  /** A call app or a call tab (Zoom, Teams, Meet…) is in front. */
+  inCall: boolean;
 }
 
 /** A calm moment, with `patch` of what is not. */
@@ -625,6 +668,7 @@ export const calmMoment = (patch: Partial<CalmMoment> = {}): CalmMoment => ({
   bubble: false,
   boardOpen: false,
   mischief: false,
+  inCall: false,
   ...patch,
 });
 
@@ -642,21 +686,24 @@ export function pickVisitor(input: { friends: readonly Friend[]; today: string; 
   const { friends, today, now, log, calm } = input;
   if (!isCalm(calm)) return null;
   if (log.day === today && log.count >= MAX_VISITS_PER_DAY) return null;
-  if (log.lastAt !== null && now - log.lastAt < VISIT_GAP_MS) return null;
+  // A last visit in the future (the clock was set back) is long enough ago: it can't lock visits out.
+  if (log.lastAt !== null && log.lastAt <= now && now - log.lastAt < VISIT_GAP_MS) return null;
   const able = friends.filter((f) => canVisit(f, today));
   if (able.length === 0) return null;
-  const longestAgo = Math.min(...able.map((f) => f.lastVisit ?? Number.NEGATIVE_INFINITY));
-  const tied = able.filter((f) => (f.lastVisit ?? Number.NEGATIVE_INFINITY) === longestAgo);
+  // The same for a friend's last visit: never later than now.
+  const since = (f: Friend) => (f.lastVisit === null ? Number.NEGATIVE_INFINITY : Math.min(f.lastVisit, now));
+  const longestAgo = Math.min(...able.map(since));
+  const tied = able.filter((f) => since(f) === longestAgo);
   const r = random();
   return tied[Math.min(tied.length - 1, Math.max(0, Math.floor((Number.isFinite(r) ? r : 0) * tied.length)))];
 }
 
 /** The document after a visit began: today's count and the friend's last visit. */
-export function recordVisit(doc: FriendsDoc, friendId: string, now: number, today: string): FriendsDoc {
+export function recordVisit(doc: FriendsDoc, friendPk: string, now: number, today: string): FriendsDoc {
   const count = doc.visits.day === today ? doc.visits.count + 1 : 1;
   return {
     ...doc,
-    friends: doc.friends.map((f) => (f.id === friendId ? { ...f, lastVisit: now } : f)),
+    friends: doc.friends.map((f) => (f.pk === friendPk ? { ...f, lastVisit: now } : f)),
     visits: { day: today, count, lastAt: now },
   };
 }
@@ -668,19 +715,22 @@ const VISIT_FIRST_SPREAD_MINUTES = 60;
 
 /**
  * How long a session or a day waits before its first visit: 15 minutes plus up to an hour more. It comes from the
- * install and the day (a hash, not a dice roll), so restarting the app doesn't draw again, and the game's own random
- * source is left alone.
+ * install's public key and the day (a hash, not a dice roll), so restarting the app doesn't draw again, and the game's
+ * own random source is left alone.
  */
-export function visitDelayMs(installId: string, day: string): number {
+export function visitDelayMs(pk: string, day: string): number {
   let h = 0x811c9dc5;
-  for (const c of `${installId}|${day}`) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0;
+  for (const c of `${pk}|${day}`) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0;
   return (VISIT_FIRST_MIN_MINUTES + (h % (VISIT_FIRST_SPREAD_MINUTES * 60)) / 60) * 60_000;
 }
 
-/** The little label a visitor carries. */
-export function visitLabel(name: string, streak: number): string {
-  return streak > 0 ? L(`${name} ghé chơi! 🔥 chuỗi bạn ${streak} ngày`, `${name} dropped by! 🔥 buddy streak ${streak}`) : L(`${name} ghé chơi! 👋`, `${name} dropped by! 👋`);
+/** What the visitor's label says after the friend's name: " dropped by! 🔥 buddy streak 4". */
+export function visitTail(streak: number): string {
+  return streak > 0 ? L(` ghé chơi! 🔥 chuỗi bạn ${streak} ngày`, ` dropped by! 🔥 buddy streak ${streak}`) : L(" ghé chơi! 👋", " dropped by! 👋");
 }
+
+/** The little label a visitor carries, as one string (for the tooltip and the screen reader). */
+export const visitLabel = (name: string, streak: number): string => name + visitTail(streak);
 
 /** A visit in progress: whose pet, their buddy streak with you, and when it walked in and will have left. */
 export interface Visit {
@@ -707,10 +757,13 @@ export function bossWinText(together: boolean): string {
 
 // ---------- Sample friends (the demo) ----------
 
+/** The sample friends' public keys: 32 bytes of plain text each, not any real key (they belong to the demo, whose "signatures" aren't cryptography). */
+const sampleKey = (label: string) => encodeBase64Url(utf8Bytes(label.padEnd(32, ".").slice(0, 32)));
+
 /**
  * Two friends for the demo, made from sample data for `today`: Mai (a card from today, a buddy streak of 3 with
- * `demoLife`'s record) and Bin (a card from two days ago, a streak of 2). Real cards in every way: they are added by
- * the same path as a pasted one.
+ * `demoLife`'s record) and Bin (a card from two days ago, a streak of 2). Real cards in every way: the demo signs them
+ * with its stand-in key (see `demoSignedCard`) and they are added by the same path as a pasted one.
  */
 export function sampleCards(today: string): PetCard[] {
   const make = (c: Omit<PetCard, "week" | "history" | "date"> & { ageDays: number; before: string; recent: string }): PetCard => {
@@ -719,7 +772,7 @@ export function sampleCards(today: string): PetCard[] {
     return { ...rest, week: isoWeekKey(date), history: normalizeHistory(before + recent), date };
   };
   return [
-    make({ id: "sample-mai-000001", name: "Mai", species: "shiba", accessories: ["flowercrown", "scarf"], stage: 3, streak: 6, best: 12, weekDone: 9, ageDays: 0, before: "GGKGGGRRGGKGGG", recent: "GKGGRRGGGGGGGG" }),
-    make({ id: "sample-bin-0000002", name: "Bin", species: "capybara", accessories: ["bandana"], stage: 1, streak: 2, best: 5, weekDone: 4, ageDays: 2, before: "GKGGRRGGKGGRGK", recent: "KGGRRGGGK-GKGG" }),
+    make({ pk: sampleKey("TodoPet demo friend: Mai"), name: "Mai", species: "shiba", accessories: ["flowercrown", "scarf"], stage: 3, weekDone: 9, ageDays: 0, before: "GGKGGGRRGGKGGG", recent: "GKGGRRGGGGGGGG" }),
+    make({ pk: sampleKey("TodoPet demo friend: Bin"), name: "Bin", species: "capybara", accessories: ["bandana"], stage: 1, weekDone: 4, ageDays: 2, before: "GKGGRRGGKGGRGK", recent: "KGGRRGGGK-GKGG" }),
   ];
 }

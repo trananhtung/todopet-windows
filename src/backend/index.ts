@@ -15,9 +15,9 @@ export function getBackend(): Promise<Backend> {
     const real = createTauriBackend();
     if (!isDemo()) return real;
     // `TodoPet.exe --demo`: real windows, tray and OS watchers, but sample data that never touches
-    // the user's Todoist, secrets or saved settings.
+    // the user's Todoist, secrets, saved settings or card key (the sample friends' cards are signed by the demo's stand-in).
     const fake = createDemoBackend({ persist: false });
-    return { ...real, todoist: fake.todoist, secrets: fake.secrets, claude: fake.claude, calendar: fake.calendar, storage: fake.storage, diary: fake.diary };
+    return { ...real, todoist: fake.todoist, secrets: fake.secrets, claude: fake.claude, calendar: fake.calendar, storage: fake.storage, diary: fake.diary, cards: fake.cards };
   })();
   return cached;
 }

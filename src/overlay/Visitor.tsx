@@ -1,12 +1,14 @@
 // A friend's pet dropping by (SPEC v0.6 §4): drawn with the same renderer as yours, from the card's species,
 // accessories and stage. It walks in beside your pet, waves, carries a small label and leaves after about 25 s.
-// Ambient, not a bubble. Light on the CPU: its own small frame loop (about 12 frames a second while it moves, 4 while
-// it stands), which exists only while a visit does; nothing at all when it is over.
+// Ambient, not a bubble. Light on the CPU: its own small frame loop, which exists only while a visit does; nothing at
+// all when it is over. The whole body of the loop runs about 12 times a second while it moves and 4 while it stands
+// (the display may call it 60 times), and a style that has not changed is not written again.
 import { useEffect, useRef, type MutableRefObject } from "react";
 import type { Brain } from "../core/brain";
-import { VISIT_WALK_MS, visitLabel, type Visit } from "../core/friends";
+import { VISIT_WALK_MS, visitLabel, visitTail, type Visit } from "../core/friends";
 import { L } from "../core/l10n";
 import { defaultPose, renderPet, speciesInfo, ACT_DURATION } from "../pets";
+import { FriendName, shownName } from "./FriendName";
 import { STEP } from "./motion";
 
 /** The SVG design space: feet at y = 150 of 160, the head about 12% down. */
@@ -18,6 +20,8 @@ const ENTRY = 240;
 /** Frames: while it moves or waves, and while it just stands there breathing. */
 const MOVING_MS = 1000 / 12;
 const STILL_MS = 250;
+/** A frame may come this much early and still count (display frames are 16.7 ms apart, so a 83.3 ms wait would otherwise often take 100). */
+const SLACK_MS = 4;
 
 const ease = (p: number) => 1 - (1 - p) ** 3;
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
@@ -36,6 +40,7 @@ export function Visitor({
   visit,
   anchor,
   hideLabel,
+  petName,
   onOpen,
 }: {
   brain: Brain;
@@ -44,6 +49,8 @@ export function Visitor({
   anchor: MutableRefObject<PetAnchor>;
   /** A bubble is showing over your pet: the label would sit in its way. */
   hideLabel: boolean;
+  /** My pet's name: a friend's name that could pass for it is shown with the friend's species beside it. */
+  petName: string;
   /** Opens the Friends sheet. */
   onOpen: () => void;
 }) {
@@ -57,17 +64,27 @@ export function Visitor({
   useEffect(() => {
     const el = wrap.current;
     const picture = art.current;
-    const tag = label.current;
     if (!el || !picture) return;
     const still = reducedMotion();
     let raf = 0;
-    let lastDraw = -1e9;
+    // The earliest display frame at which the body runs next: this is the loop's throttle.
+    let nextAt = -Infinity;
     let lastSvg = "";
     let lastX: number | null = null;
     let phase = 0;
     let side: 1 | -1 = 1;
+    // The last style each element was given, so that a value that has not changed is not written (a write can force a layout).
+    const written = new WeakMap<HTMLElement, Record<string, string>>();
+    const put = (target: HTMLElement, prop: "opacity" | "width" | "height" | "transform" | "left", value: string) => {
+      const known = written.get(target) ?? {};
+      written.set(target, known);
+      if (known[prop] === value) return;
+      known[prop] = value;
+      target.style[prop] = value;
+    };
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
+      if (now < nextAt) return;
       const v = latest.current;
       const nowMs = brain.clockNow();
       const t = nowMs - v.start;
@@ -75,7 +92,8 @@ export function Visitor({
       const a = anchor.current;
       const stage = el.parentElement;
       if (!stage || left <= 0) {
-        el.style.opacity = "0";
+        put(el, "opacity", "0");
+        nextAt = now + STILL_MS - SLACK_MS;
         return;
       }
       const W = stage.clientWidth;
@@ -106,19 +124,19 @@ export function Visitor({
             ? { kind: "wave" as const, t: wave + 0.2 - untilLeave }
             : null;
       // Fades in and out at the ends.
-      el.style.opacity = String(Math.min(1, t / 500, left / 500));
-      el.style.width = `${size}px`;
-      el.style.height = `${size}px`;
-      el.style.transform = `translate(${x - size / 2}px, ${a.feetY - size * FEET}px)`;
+      put(el, "opacity", String(Math.min(1, t / 500, left / 500)));
+      put(el, "width", `${size}px`);
+      put(el, "height", `${size}px`);
+      put(el, "transform", `translate(${x - size / 2}px, ${a.feetY - size * FEET}px)`);
+      // The label may have come and gone since the last frame (a bubble hides it): read the one that is there now.
+      const tag = label.current;
       if (tag) {
         // The label sits above its head and stays on screen.
         const lw = tag.offsetWidth;
         const lx = Math.min(Math.max(x - lw / 2, 8), W - lw - 8);
-        tag.style.left = `${lx - (x - size / 2)}px`;
+        put(tag, "left", `${lx - (x - size / 2)}px`);
       }
-      const busy = walking || act !== null;
-      if (now - lastDraw < (busy ? MOVING_MS : STILL_MS)) return;
-      lastDraw = now;
+      nextAt = now + (walking || act !== null ? MOVING_MS : STILL_MS) - SLACK_MS;
       const pose = defaultPose({
         mood: "happy",
         t: now / 1000,
@@ -140,7 +158,8 @@ export function Visitor({
     return () => cancelAnimationFrame(raf);
   }, [brain, anchor, visit.id]);
 
-  const text = visitLabel(visit.friend.name, visit.streak);
+  const f = visit.friend;
+  const text = visitLabel(shownName(f.name, f.species, petName), visit.streak);
   return (
     <div className="visitor" ref={wrap}>
       <div className="visitor-art" ref={art} data-hit="" onClick={onOpen} aria-hidden />
@@ -154,7 +173,8 @@ export function Visitor({
           title={text}
           aria-label={`${text}. ${L("Mở danh sách bạn bè", "Open Friends")}`}
         >
-          {text}
+          <FriendName name={f.name} species={f.species} myPetName={petName} />
+          {visitTail(visit.streak)}
         </button>
       )}
     </div>

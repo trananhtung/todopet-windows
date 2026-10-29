@@ -30,6 +30,19 @@ pub fn todoist_id(id: &str) -> CmdResult<&str> {
     }
 }
 
+/// The friends document (12 cards, the day's visits) is about 10 KB; this is its cap on read and on write.
+pub const MAX_FRIENDS_DOC_BYTES: usize = 64 * 1024;
+
+/// The most bytes the document under `key` may hold, read or written: 64 KB for the friends, 4 MB for the rest. A bigger
+/// file is a bug or someone's edit, never a real document.
+pub fn max_doc_bytes(key: &str) -> usize {
+    if key == "friends" {
+        MAX_FRIENDS_DOC_BYTES
+    } else {
+        crate::store::MAX_DOC_BYTES
+    }
+}
+
 /// Storage keys: exactly one of [`STORE_KEYS`]. They become file names.
 pub fn store_key(key: &str) -> CmdResult<&str> {
     if STORE_KEYS.contains(&key) {

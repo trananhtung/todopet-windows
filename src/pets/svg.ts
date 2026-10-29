@@ -95,3 +95,12 @@ export const frac = (v: number): number => v - Math.floor(v);
 export const smooth = (k: number): number => k * k * (3 - 2 * k);
 export const lerp = (a: number, b: number, k: number): number => a + (b - a) * k;
 export const DEG = 180 / Math.PI;
+
+/** The characters an id prefix may use: it is written into `id="…"` and `url(#…)`, where a quote, a bracket or a space would break out. */
+const ID_PREFIX_RE = /^[A-Za-z0-9_-]{1,80}$/;
+
+/** Returns `prefix` when it is safe to write into markup; throws when it is not (a caller bug, never user text: a friend's key is base64url). */
+export function checkIdPrefix(prefix: string): string {
+  if (typeof prefix !== "string" || !ID_PREFIX_RE.test(prefix)) throw new Error("idPrefix may only hold letters, digits, - and _ (1 to 80 characters)");
+  return prefix;
+}

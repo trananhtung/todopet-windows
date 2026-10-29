@@ -1,9 +1,12 @@
 // v0.6 "Friends": pet cards, the friend list, the buddy streak, the weekly boss and visits (pure rules).
 import { describe, expect, it } from "vitest";
+import { demoCardSignature, demoPublicKey } from "../backend/demoCards";
+import { decodeBase64Url, encodeBase64Url, utf8Bytes } from "./b64";
 import {
   CARD_PREFIX,
   MAX_CARD_CHARS,
   MAX_FRIENDS,
+  MAX_NAME_MARKS,
   BOSS_HP_PER_MEMBER,
   MAX_VISITS_PER_DAY,
   VISIT_GAP_MS,
@@ -13,13 +16,19 @@ import {
   buildCard,
   calmMoment,
   canVisit,
+  cardErrorText,
   cardHistory,
-  decodeCard,
+  cardName,
+  cardPayload,
   docFromJson,
   docToJson,
   encodeCard,
+  isCardName,
+  isPublicKey,
   isoWeekKey,
-  newInstallId,
+  looksLikeMe,
+  normalizeHistory,
+  parseCard,
   pickVisitor,
   recordVisit,
   sampleCards,
@@ -27,8 +36,10 @@ import {
   removeFriend,
   todayMark,
   visitLabel,
+  visitTail,
   weekDoneOf,
   bossWinText,
+  type CardError,
   type Friend,
   type PetCard,
 } from "./friends";
@@ -38,18 +49,21 @@ import { setLang } from "./l10n";
 
 const TODAY = "2026-10-29"; // a Thursday, ISO week 44
 
-/** 28 characters, oldest first, ending on the card's date. */
-const HISTORY = "GGKR--GGGKRRGGKKGGGRRGKGGGGK".slice(0, 28);
+/** 28 characters, oldest first, ending on the card's date: goal days, rest days and nothing (a card has no "kept"). */
+const HISTORY = "GG-R--GGG-RRGG--GGGRRG-GGGG-";
+
+/** Public keys for the tests: 32 bytes each, in the real shape (the demo's stand-in makes them). */
+const MAI = demoPublicKey("mai");
+const ME = demoPublicKey("me");
+const keyOf = (n: number | string) => demoPublicKey(`friend-${n}`);
 
 function card(patch: Partial<PetCard> = {}): PetCard {
   return {
-    id: "friend-mai-0001",
+    pk: MAI,
     name: "Mai",
     species: "shiba",
     accessories: ["flowercrown", "scarf"],
     stage: 2,
-    streak: 6,
-    best: 12,
     week: "2026-W44",
     weekDone: 9,
     history: HISTORY,
@@ -58,24 +72,22 @@ function card(patch: Partial<PetCard> = {}): PetCard {
   };
 }
 
-const b64url = (s: string) => {
-  const bytes = new TextEncoder().encode(s);
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-};
+/** The card as the wire has it, signed by the card's own key (the demo's stand-in: the backend checks real ones). */
+const textOf = (c: PetCard) => encodeCard(c, demoCardSignature(c.pk, cardPayload(c)));
+/** A signature-shaped string that signs nothing: structure checks never look at it. */
+const NOSIG = encodeBase64Url(new Uint8Array(64));
+
+const b64url = (s: string) => encodeBase64Url(utf8Bytes(s));
 /** A card text from any JSON, for the malformed ones. */
-const raw = (json: unknown) => CARD_PREFIX + b64url(typeof json === "string" ? json : JSON.stringify(json));
+const raw = (json: unknown) => `${CARD_PREFIX}${b64url(typeof json === "string" ? json : JSON.stringify(json))}.${NOSIG}`;
 /** The fields of a good card as the wire has them, changed by `patch`. */
 const wire = (patch: Record<string, unknown> = {}) => ({
   v: 1,
-  id: "friend-mai-0001",
+  pk: MAI,
   name: "Mai",
   species: "shiba",
   accessories: ["flowercrown", "scarf"],
   stage: 2,
-  streak: 6,
-  best: 12,
   week: "2026-W44",
   weekDone: 9,
   history: HISTORY,
@@ -88,66 +100,92 @@ const without = (key: string) => {
   return w;
 };
 
-describe("pet cards: encoding", () => {
-  it("round-trips a card through its text", () => {
+describe("pet cards: the text", () => {
+  it("is TODOPET1., the payload and its signature, as base64url, and reads back as itself", () => {
     const c = card();
-    const text = encodeCard(c);
-    expect(text.startsWith("TODOPET1.")).toBe(true);
+    const text = textOf(c);
+    const [prefix, payload, signature, ...more] = text.split(".");
+    expect(`${prefix}.`).toBe(CARD_PREFIX);
+    expect(more).toEqual([]);
+    expect(payload).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(signature).toMatch(/^[A-Za-z0-9_-]{86}$/);
     expect(text.length).toBeLessThanOrEqual(MAX_CARD_CHARS);
-    expect(decodeCard(text, TODAY)).toEqual({ ok: true, card: c });
+    expect(parseCard(text, TODAY)).toEqual({ ok: true, card: c, payload: cardPayload(c), signature: demoCardSignature(MAI, cardPayload(c)) });
   });
 
-  it("is URL-safe text: letters, digits, dash and underscore after the prefix, no padding", () => {
-    const text = encodeCard(card({ name: "Bánh Bao 🐼" }));
-    expect(text.slice(CARD_PREFIX.length)).toMatch(/^[A-Za-z0-9_-]+$/);
+  it("signs the exact payload bytes: the payload part decodes to the JSON text that is signed", () => {
+    const c = card({ name: "Bánh Bao 🐼" });
+    const payload = textOf(c).slice(CARD_PREFIX.length).split(".")[0];
+    expect(new TextDecoder().decode(decodeBase64Url(payload)!)).toBe(cardPayload(c));
+  });
+
+  it("carries a public key instead of an id, and nothing but the card's fields (no streak, no best, no task titles, times, app names or user name)", () => {
+    const json = JSON.parse(cardPayload(card())) as Record<string, unknown>;
+    expect(Object.keys(json)).toEqual(["v", "pk", "name", "species", "accessories", "stage", "week", "weekDone", "history", "date"]);
+    expect(json.pk).toBe(MAI);
+    expect(json).not.toHaveProperty("id");
+    expect(json).not.toHaveProperty("streak");
+    expect(json).not.toHaveProperty("best");
+  });
+
+  it("is a public key of 43 characters that is 32 bytes, strictly", () => {
+    expect(isPublicKey(MAI)).toBe(true);
+    for (const bad of ["", MAI.slice(1), `${MAI}A`, `${MAI}=`, MAI.replace(/.$/, "!"), 5, null, undefined, "a".repeat(43) + "\n"]) expect(isPublicKey(bad), String(bad)).toBe(false);
+    // The last character of 32 bytes only carries 4 bits: another spelling of the same key is no key.
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const other = alphabet[alphabet.indexOf(MAI.at(-1)!) ^ 1];
+    expect(isPublicKey(MAI.slice(0, -1) + other)).toBe(false);
   });
 
   it("keeps Vietnamese and emoji names intact", () => {
     for (const name of ["Mèo Mướp", "Đậu Phộng", "Bánh Bao 🐼", "かわいい"]) {
-      const out = decodeCard(encodeCard(card({ name })), TODAY);
-      expect(out).toMatchObject({ ok: true, card: { name } });
+      expect(parseCard(textOf(card({ name })), TODAY)).toMatchObject({ ok: true, card: { name } });
     }
   });
 
   it("keeps an emoji built with the zero-width joiner (the one invisible character a name may hold)", () => {
     const technologist = String.fromCodePoint(0x1f469, 0x200d, 0x1f4bb);
     expect(technologist).toHaveLength(5);
-    expect(decodeCard(encodeCard(card({ name: `Mai ${technologist}` })), TODAY)).toMatchObject({ ok: true, card: { name: `Mai ${technologist}` } });
-    // My own pet's name keeps it too, and the joiner on its own is nothing.
-    expect(buildCard({ ...{ installId: "my-install-id-0001", species: "mochi", wearing: [], stage: 1, streak: 0, bestStreak: 0, weekDone: 0, history: "", today: TODAY }, petName: technologist }).name).toBe(technologist);
-    expect(buildCard({ installId: "my-install-id-0001", species: "mochi", wearing: [], stage: 1, streak: 0, bestStreak: 0, weekDone: 0, history: "", today: TODAY, petName: String.fromCodePoint(0x200d) }).name).toBe("Pet");
+    expect(parseCard(textOf(card({ name: `Mai ${technologist}` })), TODAY)).toMatchObject({ ok: true, card: { name: `Mai ${technologist}` } });
+    const src = { pk: ME, species: "mochi", wearing: [], stage: 1, weekDone: 0, history: "", today: TODAY } as const;
+    expect(buildCard({ ...src, petName: technologist }).name).toBe(technologist);
+    expect(buildCard({ ...src, petName: String.fromCodePoint(0x200d) }).name).toBe("Pet");
   });
 
   it("round-trips the extremes: no accessories, three accessories, every stage", () => {
-    expect(decodeCard(encodeCard(card({ accessories: [] })), TODAY)).toMatchObject({ ok: true });
-    expect(decodeCard(encodeCard(card({ accessories: ["bow", "heartglasses", "scarf"] })), TODAY)).toMatchObject({ ok: true });
-    for (const stage of [0, 1, 2, 3, 4] as const) expect(decodeCard(encodeCard(card({ stage })), TODAY)).toMatchObject({ ok: true, card: { stage } });
+    expect(parseCard(textOf(card({ accessories: [] })), TODAY)).toMatchObject({ ok: true });
+    expect(parseCard(textOf(card({ accessories: ["bow", "heartglasses", "scarf"] })), TODAY)).toMatchObject({ ok: true });
+    for (const stage of [0, 1, 2, 3, 4] as const) expect(parseCard(textOf(card({ stage })), TODAY)).toMatchObject({ ok: true, card: { stage } });
   });
 
-  it("stays far under the size cap even with the longest name", () => {
-    const longest = card({ name: "😀".repeat(20), accessories: ["bow", "heartglasses", "scarf"], streak: 9999, best: 9999, weekDone: 999 });
-    expect(encodeCard(longest).length).toBeLessThan(MAX_CARD_CHARS);
-    expect(decodeCard(encodeCard(longest), TODAY)).toMatchObject({ ok: true });
-  });
-
-  it("carries nothing but the card's fields (no task titles, times, app names or user name)", () => {
-    const json = atob(encodeCard(card()).slice(CARD_PREFIX.length).replace(/-/g, "+").replace(/_/g, "/"));
-    expect(Object.keys(JSON.parse(json) as object).sort()).toEqual(
-      ["accessories", "best", "date", "history", "id", "name", "species", "stage", "streak", "v", "week", "weekDone"].sort(),
-    );
+  it("allows for the longest card and stays under the cap (1500 for the payload and about 130 more for the key and signature)", () => {
+    expect(MAX_CARD_CHARS).toBe(1630);
+    const longest = card({ name: "😀".repeat(20), accessories: ["bow", "heartglasses", "scarf"], weekDone: 999 });
+    const text = textOf(longest);
+    expect(text.length).toBeLessThan(700);
+    expect(text.length).toBeLessThan(MAX_CARD_CHARS);
+    expect(parseCard(text, TODAY)).toMatchObject({ ok: true });
   });
 
   it("forgives whitespace around the text and inside it (a chat app may wrap a long line)", () => {
-    const text = encodeCard(card());
-    expect(decodeCard(`  \n${text}\n `, TODAY)).toMatchObject({ ok: true });
-    expect(decodeCard(`${text.slice(0, 40)}\n${text.slice(40)}`, TODAY)).toMatchObject({ ok: true });
+    const text = textOf(card());
+    expect(parseCard(`  \n${text}\n `, TODAY)).toMatchObject({ ok: true });
+    expect(parseCard(`${text.slice(0, 40)}\n${text.slice(40)}`, TODAY)).toMatchObject({ ok: true });
+    // Whitespace anywhere is left out before anything is measured or read.
+    expect(parseCard(text.split("").join(" \n"), TODAY)).toMatchObject({ ok: true });
+  });
+
+  it("does not look at the signature itself: the backend does (structure only)", () => {
+    const c = card();
+    const forged = `${CARD_PREFIX}${b64url(cardPayload(c))}.${NOSIG}`;
+    expect(parseCard(forged, TODAY)).toMatchObject({ ok: true, card: c, signature: NOSIG });
   });
 });
 
 describe("pet cards: every way a pasted card can be wrong gets a kind error and nothing else", () => {
   const fails = (text: string, error: string, today = TODAY) => {
     setLang("en");
-    const out = decodeCard(text, today);
+    const out = parseCard(text, today);
     expect(out).toMatchObject({ ok: false, error });
     if (!out.ok) {
       expect(out.message.length).toBeGreaterThan(10);
@@ -163,28 +201,48 @@ describe("pet cards: every way a pasted card can be wrong gets a kind error and 
     fails("x".repeat(100_000), "tooLong");
     // Exactly at the cap is read (and then found to be nonsense, which is a different error).
     const atCap = CARD_PREFIX + "A".repeat(MAX_CARD_CHARS - CARD_PREFIX.length);
-    expect((decodeCard(atCap, TODAY) as { error: string }).error).not.toBe("tooLong");
+    expect((parseCard(atCap, TODAY) as { error: string }).error).not.toBe("tooLong");
   });
 
   it("prefix: not a card at all, a wrong version, a wrong case", () => {
     fails("hello there", "prefix");
-    fails("TODOPET2." + b64url(JSON.stringify(wire())), "prefix");
-    fails("todopet1." + b64url(JSON.stringify(wire())), "prefix");
-    fails(b64url(JSON.stringify(wire())), "prefix");
-    fails("Here is my card: " + encodeCard(card()), "prefix");
+    fails("TODOPET2." + b64url(JSON.stringify(wire())) + "." + NOSIG, "prefix");
+    fails("todopet1." + b64url(JSON.stringify(wire())) + "." + NOSIG, "prefix");
+    fails(b64url(JSON.stringify(wire())) + "." + NOSIG, "prefix");
+    fails("Here is my card: " + textOf(card()), "prefix");
   });
 
-  it("bad base64", () => {
+  it("a card without its signature (or with one too many parts) is damaged", () => {
+    const payload = b64url(JSON.stringify(wire()));
+    fails(`${CARD_PREFIX}${payload}`, "shape");
+    fails(`${CARD_PREFIX}${payload}.`, "encoding");
+    fails(`${CARD_PREFIX}${payload}.${NOSIG}.${NOSIG}`, "encoding");
+    fails(`${CARD_PREFIX}.${NOSIG}`, "encoding");
+    fails(`${CARD_PREFIX}..`, "encoding");
+  });
+
+  it("a signature of the wrong size or alphabet, or spelled another way", () => {
+    const payload = b64url(JSON.stringify(wire()));
+    for (const sig of [NOSIG.slice(1), `${NOSIG}A`, NOSIG.slice(0, 85) + "=", NOSIG.slice(0, 85) + "!", NOSIG.slice(0, 85) + "+"]) fails(`${CARD_PREFIX}${payload}.${sig}`, "encoding");
+    // 86 characters hold 64 bytes and 4 spare bits; a spelling with them set is not what a signer writes.
+    fails(`${CARD_PREFIX}${payload}.${NOSIG.slice(0, 85)}B`, "encoding");
+  });
+
+  it("bad base64 in the payload", () => {
     fails(CARD_PREFIX, "encoding");
-    fails(CARD_PREFIX + "!!!!", "encoding");
-    fails(CARD_PREFIX + "ab cd$", "encoding");
+    fails(CARD_PREFIX + "!!!!." + NOSIG, "encoding");
+    fails(CARD_PREFIX + "ab cd$." + NOSIG, "encoding");
     // Padding and the standard alphabet are not what a card is made of.
-    fails(CARD_PREFIX + b64url("{}") + "==", "encoding");
-    fails(CARD_PREFIX + btoa(">>>???").replace(/=+$/, ""), "encoding");
+    fails(CARD_PREFIX + b64url("{}") + "==." + NOSIG, "encoding");
+    fails(CARD_PREFIX + btoa(">>>???").replace(/=+$/, "") + "." + NOSIG, "encoding");
     // One character too many for a whole number of bytes.
-    fails(CARD_PREFIX + "A", "encoding");
+    fails(CARD_PREFIX + "A." + NOSIG, "encoding");
     // Bytes that are not UTF-8.
-    fails(CARD_PREFIX + btoa("\xff\xfe\xfd").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""), "encoding");
+    fails(CARD_PREFIX + encodeBase64Url(Uint8Array.from([0xff, 0xfe, 0xfd])) + "." + NOSIG, "encoding");
+    // The same payload spelled with spare bits set.
+    const good = b64url(JSON.stringify(wire()));
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    if (good.length % 4 !== 0) fails(`${CARD_PREFIX}${good.slice(0, -1)}${alphabet[alphabet.indexOf(good.at(-1)!) ^ 1]}.${NOSIG}`, "encoding");
   });
 
   it("bad JSON, and JSON that is not an object", () => {
@@ -194,11 +252,17 @@ describe("pet cards: every way a pasted card can be wrong gets a kind error and 
     fails(raw("null"), "shape");
     fails(raw("42"), "shape");
     fails(raw('"TODOPET1"'), "shape");
+    // A byte order mark is not JSON.
+    fails(`${CARD_PREFIX}${encodeBase64Url(Uint8Array.from([0xef, 0xbb, 0xbf, ...utf8Bytes(JSON.stringify(wire()))]))}.${NOSIG}`, "json");
   });
 
   it("a missing field, an extra field, a wrong type, a wrong version", () => {
     for (const key of Object.keys(wire())) fails(raw(without(key)), key === "v" ? "version" : "shape");
     fails(raw(wire({ extra: "task title: pay the rent" })), "shape");
+    // The fields the format dropped are extra now.
+    fails(raw(wire({ streak: 6 })), "shape");
+    fails(raw(wire({ best: 12 })), "shape");
+    fails(raw(wire({ id: "friend-mai-0001" })), "shape");
     fails(raw(wire({ v: 2 })), "version");
     fails(raw(wire({ v: "1" })), "version");
     fails(raw(wire({ name: 5 })), "name");
@@ -206,8 +270,8 @@ describe("pet cards: every way a pasted card can be wrong gets a kind error and 
     fails(raw(wire({ history: ["G"] })), "history");
   });
 
-  it("an install id of the wrong shape", () => {
-    for (const id of ["", "short", "has space in it", "x".repeat(33), "bad/id/slash", 7, null]) fails(raw(wire({ id })), "id");
+  it("a public key of the wrong shape", () => {
+    for (const pk of ["", "short", "has space in it", MAI + "A", MAI.slice(1), `${MAI.slice(0, 42)}!`, 7, null, "__proto__", MAI.slice(0, -1) + "B"]) fails(raw(wire({ pk })), "key");
   });
 
   it("an unknown species or accessory", () => {
@@ -234,53 +298,35 @@ describe("pet cards: every way a pasted card can be wrong gets a kind error and 
     fails(raw(wire({ name: "Ma\u0000i" })), "name");
     fails(raw(wire({ name: "Ma\u0007i" })), "name");
     fails(raw(wire({ name: "Ma\u001bi" })), "name");
-    fails(raw(wire({ name: "\u202eiaM" })), "name"); // right-to-left override
-    fails(raw(wire({ name: "Ma\u200bi" })), "name"); // zero-width space
-    fails(raw(wire({ name: "Ma\u2028i" })), "name");
-    fails(raw(wire({ name: "\u200d" })), "name");
+    fails(raw(wire({ name: "‮iaM" })), "name"); // right-to-left override
+    fails(raw(wire({ name: "Ma​i" })), "name"); // zero-width space
+    fails(raw(wire({ name: "Ma i" })), "name");
+    fails(raw(wire({ name: "‍" })), "name");
     // Exactly 20 is fine.
-    expect(decodeCard(raw(wire({ name: "x".repeat(20) })), TODAY)).toMatchObject({ ok: true });
+    expect(parseCard(raw(wire({ name: "x".repeat(20) })), TODAY)).toMatchObject({ ok: true });
   });
 
   it("is plain text: markup in a name is kept as text, never read", () => {
-    const out = decodeCard(raw(wire({ name: "<b>Mai</b>" })), TODAY);
+    const out = parseCard(raw(wire({ name: "<b>Mai</b>" })), TODAY);
     expect(out).toMatchObject({ ok: true, card: { name: "<b>Mai</b>" } });
   });
 
   it("numbers out of range or not whole", () => {
-    for (const patch of [
-      { stage: -1 },
-      { stage: 5 },
-      { stage: 1.5 },
-      { stage: "3" },
-      { streak: -1 },
-      { streak: 10_000 },
-      { streak: 1.2 },
-      { streak: null },
-      { best: -3 },
-      { best: 1e9 },
-      { weekDone: -1 },
-      { weekDone: 1000 },
-      { weekDone: 1e15 },
-      { weekDone: Number.MAX_SAFE_INTEGER },
-    ]) {
+    for (const patch of [{ stage: -1 }, { stage: 5 }, { stage: 1.5 }, { stage: "3" }, { weekDone: -1 }, { weekDone: 1000 }, { weekDone: 1e15 }, { weekDone: Number.MAX_SAFE_INTEGER }, { weekDone: null }]) {
       fails(raw(wire(patch)), "number");
     }
     // NaN and Infinity cannot even be written in JSON; they arrive as null.
-    fails(raw(JSON.stringify(wire()).replace('"streak":6', '"streak":null')), "number");
-    fails(raw(JSON.stringify(wire()).replace('"streak":6', '"streak":1e999')), "number");
+    fails(raw(JSON.stringify(wire()).replace('"weekDone":9', '"weekDone":null')), "number");
+    fails(raw(JSON.stringify(wire()).replace('"weekDone":9', '"weekDone":1e999')), "number");
   });
 
-  it("raises a best streak that is lower than the current one instead of refusing the card", () => {
-    expect(decodeCard(raw(wire({ streak: 8, best: 3 })), TODAY)).toMatchObject({ ok: true, card: { streak: 8, best: 8 } });
-  });
-
-  it("a malformed history", () => {
+  it("a malformed history: 28 characters of G, R and - only (a card has no 'kept')", () => {
     for (const history of [
       "",
       "G".repeat(27),
       "G".repeat(29),
       "G".repeat(27) + "X",
+      "G".repeat(27) + "K",
       "g".repeat(28),
       "G".repeat(27) + " ",
       "G".repeat(27) + "\n",
@@ -289,8 +335,8 @@ describe("pet cards: every way a pasted card can be wrong gets a kind error and 
     ]) {
       fails(raw(wire({ history })), "history");
     }
-    expect(decodeCard(raw(wire({ history: "-".repeat(28) })), TODAY)).toMatchObject({ ok: true });
-    expect(decodeCard(raw(wire({ history: "GKR-".repeat(7) })), TODAY)).toMatchObject({ ok: true });
+    expect(parseCard(raw(wire({ history: "-".repeat(28) })), TODAY)).toMatchObject({ ok: true });
+    expect(parseCard(raw(wire({ history: "GR-".repeat(9) + "G" })), TODAY)).toMatchObject({ ok: true });
   });
 
   it("a week key that is malformed, or not the week of the card's date", () => {
@@ -307,7 +353,7 @@ describe("pet cards: every way a pasted card can be wrong gets a kind error and 
 
   it("a date in the future", () => {
     // A day ahead is a friend whose clock is in another time zone; more than that is not.
-    expect(decodeCard(raw(wire({ date: "2026-10-30" })), TODAY)).toMatchObject({ ok: true });
+    expect(parseCard(raw(wire({ date: "2026-10-30" })), TODAY)).toMatchObject({ ok: true });
     fails(raw(wire({ date: "2026-10-31" })), "future");
     fails(raw(wire({ date: "2027-01-01", week: "2026-W53" })), "future");
     fails(raw(wire({ date: "2099-01-01", week: "2099-W01" })), "future");
@@ -315,37 +361,134 @@ describe("pet cards: every way a pasted card can be wrong gets a kind error and 
 
   it("gives the same kind answer in Vietnamese", () => {
     setLang("vi");
-    const out = decodeCard("hello", TODAY);
+    const out = parseCard("hello", TODAY);
     setLang("en");
     expect(out).toMatchObject({ ok: false, error: "prefix" });
     if (!out.ok) expect(out.message).toMatch(/thẻ/i);
   });
 
   it("never throws, whatever it is given", () => {
-    const junk: unknown[] = [undefined, null, 0, {}, [], "\u0000", "TODOPET1.\u0000", CARD_PREFIX + "%%%", "𝒳".repeat(2000), "TODOPET1." + "_".repeat(1400)];
-    for (const j of junk) expect(() => decodeCard(j as string, TODAY)).not.toThrow();
-    for (const j of junk) expect(decodeCard(j as string, TODAY).ok).toBe(false);
+    const junk: unknown[] = [undefined, null, 0, {}, [], "\u0000", "TODOPET1.\u0000", CARD_PREFIX + "%%%", "𝒳".repeat(2000), "TODOPET1." + "_".repeat(1400), `${CARD_PREFIX}.`, `${CARD_PREFIX}....`];
+    for (const j of junk) expect(() => parseCard(j as string, TODAY)).not.toThrow();
+    for (const j of junk) expect(parseCard(j as string, TODAY).ok).toBe(false);
+  });
+
+  it("says a card doesn't check out kindly, in both languages, without the card's own name", () => {
+    setLang("en");
+    expect(cardErrorText("signature")).toBe("This card doesn't check out; ask your friend to copy it again.");
+    setLang("vi");
+    expect(cardErrorText("signature")).toMatch(/thẻ/i);
+    setLang("en");
+    expect(cardErrorText("unchecked")).toMatch(/try again/i);
+  });
+
+  it("never puts what the card says into an error: no kind of error repeats the card's name", () => {
+    const errors: CardError[] = ["empty", "tooLong", "prefix", "encoding", "json", "shape", "version", "key", "name", "species", "accessory", "number", "history", "week", "date", "future", "signature", "unchecked"];
+    for (const lang of ["en", "vi"] as const) {
+      setLang(lang);
+      for (const e of errors) expect(cardErrorText(e), e).not.toMatch(/Mai|ZZ|<|>/);
+    }
+    setLang("en");
+    const out = parseCard(raw(wire({ name: "ZZ-Not-A-Real-Species", species: "dinosaur" })), TODAY);
+    expect(out.ok ? "" : out.message).not.toContain("ZZ");
+  });
+});
+
+describe("what a name has to be (SECURITY L1)", () => {
+  const fillers: [string, string][] = [
+    ["the Hangul filler", "ㅤ"],
+    ["the choseong filler", "ᅟ"],
+    ["the jungseong filler", "ᅠ"],
+    ["the halfwidth Hangul filler", "ﾠ"],
+    ["the blank braille pattern", "⠀"],
+    ["the combining grapheme joiner", "͏"],
+    ["a no-break space", " "],
+  ];
+
+  it("needs a visible character: a name of fillers or blanks is no name", () => {
+    for (const [what, ch] of fillers) {
+      expect(isCardName(ch), what).toBe(false);
+      expect(isCardName(ch.repeat(20)), `${what} x20`).toBe(false);
+      expect(isCardName(`${ch}${ch}${ch}`), `${what} x3`).toBe(false);
+    }
+    expect(isCardName("ㅤᅟᅠﾠ⠀͏")).toBe(false);
+    expect(isCardName("⠀ㅤ‍ㅤ")).toBe(false);
+    expect(isCardName("́́")).toBe(false);
+    expect(isCardName("️")).toBe(false);
+  });
+
+  it("still takes a name that has a visible character next to a filler", () => {
+    expect(isCardName("aㅤ")).toBe(true);
+    expect(isCardName("⠀a")).toBe(true);
+    expect(isCardName("한글")).toBe(true);
+    expect(isCardName("🐱ㅤ")).toBe(true);
+  });
+
+  it("caps a run of combining marks at 2", () => {
+    expect(MAX_NAME_MARKS).toBe(2);
+    const mark = "́";
+    expect(isCardName(`e${mark}`)).toBe(true);
+    expect(isCardName(`e${mark}${mark}`)).toBe(true);
+    expect(isCardName(`e${mark.repeat(3)}`)).toBe(false);
+    expect(isCardName(`e${mark.repeat(19)}`)).toBe(false);
+    expect(isCardName(`a${mark.repeat(2)}b${mark.repeat(2)}c`)).toBe(true);
+    // Real writing stays: Vietnamese with its tone and shape marks, even decomposed.
+    for (const name of ["Mèo Mướp", "Đậu Phộng", "Bạn", "Ệ"]) expect(isCardName(name.normalize("NFD")), name).toBe(true);
+    // Keycaps and flags are fine.
+    expect(isCardName("1️⃣")).toBe(true);
+  });
+
+  it("refuses these in a pasted card, and my own pet's name is cleaned to something that passes", () => {
+    for (const name of ["ㅤ", "á́́́", "  "]) {
+      expect(parseCard(raw(wire({ name })), TODAY), name).toMatchObject({ ok: false, error: "name" });
+    }
+    const src = { pk: ME, species: "mochi", wearing: [], stage: 1, weekDone: 0, history: "", today: TODAY } as const;
+    expect(cardName("ㅤㅤ")).toBe("Pet");
+    expect(cardName("⠀")).toBe("Pet");
+    expect(cardName("Moㅤchi")).toBe("Mochi");
+    expect(cardName(`Mo${"́".repeat(9)}chi`)).toBe(`Mo${"́".repeat(2)}chi`);
+    for (const petName of ["ㅤ", "́́́", `a${"́".repeat(30)}`, " ", "x".repeat(40)]) {
+      const c = buildCard({ ...src, petName });
+      expect(parseCard(textOf(c), TODAY).ok, petName).toBe(true);
+    }
+  });
+
+  it("compares a friend's name with mine, and with You and Bạn, the way a reader would (NFKC, case)", () => {
+    expect(looksLikeMe("Mochi", "Mochi")).toBe(true);
+    expect(looksLikeMe("mochi", "MOCHI")).toBe(true);
+    expect(looksLikeMe("Ｍｏｃｈｉ", "Mochi")).toBe(true); // fullwidth
+    expect(looksLikeMe("Mochi‍", "Mochi")).toBe(true);
+    expect(looksLikeMe("Móchi", "Mochi")).toBe(true);
+    expect(looksLikeMe("Ꮇochi", "Mochi")).toBe(false); // not folded: other scripts are not guessed
+    expect(looksLikeMe("You", "Mochi")).toBe(true);
+    expect(looksLikeMe("YOU", "Mochi")).toBe(true);
+    expect(looksLikeMe("Ｙｏｕ", "Mochi")).toBe(true);
+    expect(looksLikeMe("Bạn", "Mochi")).toBe(true);
+    expect(looksLikeMe("BẠN", "Mochi")).toBe(true);
+    expect(looksLikeMe("Bạn".normalize("NFD"), "Mochi")).toBe(true);
+    expect(looksLikeMe("Mai", "Mochi")).toBe(false);
+    expect(looksLikeMe("Mai", "")).toBe(false);
+    expect(looksLikeMe("", "")).toBe(false);
+    expect(looksLikeMe("Mochi 2", "Mochi")).toBe(false);
   });
 });
 
 describe("building my own card", () => {
   const base = {
-    installId: "my-install-id-0001",
+    pk: ME,
     petName: "Mochi",
     species: "mochi",
     wearing: ["bow"],
     stage: 3,
-    streak: 4,
-    bestStreak: 9,
     weekDone: 7,
-    history: "GKGK" + "-".repeat(24),
+    history: "GRGR" + "-".repeat(24),
     today: TODAY,
   } as const;
 
-  it("makes a card that reads back as itself", () => {
+  it("makes a card that reads back as itself, with my public key and no streaks", () => {
     const c = buildCard({ ...base, wearing: [...base.wearing] });
-    expect(c).toMatchObject({ id: "my-install-id-0001", name: "Mochi", species: "mochi", accessories: ["bow"], stage: 3, streak: 4, best: 9, week: "2026-W44", weekDone: 7, date: TODAY });
-    expect(decodeCard(encodeCard(c), TODAY)).toEqual({ ok: true, card: c });
+    expect(c).toEqual({ pk: ME, name: "Mochi", species: "mochi", accessories: ["bow"], stage: 3, week: "2026-W44", weekDone: 7, history: "GRGR" + "-".repeat(24), date: TODAY });
+    expect(parseCard(textOf(c), TODAY)).toMatchObject({ ok: true, card: c });
   });
 
   it("makes a name a card can carry: trimmed, cleaned, cut to 20 and never empty", () => {
@@ -357,8 +500,8 @@ describe("building my own card", () => {
     expect(name("")).not.toBe("");
     expect(name("\n\n")).not.toBe("");
     expect(name("Mèo Mướp")).toBe("Mèo Mướp");
-    for (const n of ["", "x".repeat(40), "\u202eabc", "Mo\u200bchi", "😀".repeat(30)]) {
-      expect(decodeCard(encodeCard(buildCard({ ...base, wearing: [], petName: n })), TODAY).ok).toBe(true);
+    for (const n of ["", "x".repeat(40), "‮abc", "Mo​chi", "😀".repeat(30)]) {
+      expect(parseCard(textOf(buildCard({ ...base, wearing: [], petName: n })), TODAY).ok).toBe(true);
     }
   });
 
@@ -368,65 +511,58 @@ describe("building my own card", () => {
   });
 
   it("keeps the numbers inside what a card allows", () => {
-    const c = buildCard({ ...base, wearing: [], streak: 50_000, bestStreak: 20, weekDone: 5000 });
-    expect(c).toMatchObject({ streak: 9999, best: 9999, weekDone: 999 });
-    expect(decodeCard(encodeCard(c), TODAY).ok).toBe(true);
-    expect(buildCard({ ...base, wearing: [], streak: -3, weekDone: -1, bestStreak: -1 })).toMatchObject({ streak: 0, best: 0, weekDone: 0 });
-  });
-});
-
-describe("the install id", () => {
-  it("is 20 characters a card accepts, made from the injected random source", () => {
-    const id = newInstallId(() => 0.5);
-    expect(id).toHaveLength(20);
-    expect(decodeCard(encodeCard(card({ id })), TODAY).ok).toBe(true);
-    let n = 0;
-    const counting = () => ((n++ * 7) % 36) / 36;
-    expect(newInstallId(counting)).toMatch(/^[a-z0-9]{20}$/);
+    expect(buildCard({ ...base, wearing: [], weekDone: 5000 }).weekDone).toBe(999);
+    expect(buildCard({ ...base, wearing: [], weekDone: -1 }).weekDone).toBe(0);
+    expect(buildCard({ ...base, wearing: [], weekDone: Number.NaN }).weekDone).toBe(0);
   });
 
-  it("differs from one install to the next", () => {
-    const ids = new Set(Array.from({ length: 200 }, () => newInstallId(Math.random)));
-    expect(ids.size).toBe(200);
-  });
-
-  it("stays in range even when the source gives 0 or just under 1", () => {
-    expect(newInstallId(() => 0)).toMatch(/^a{20}$/);
-    expect(newInstallId(() => 0.9999999999)).toMatch(/^9{20}$/);
-    expect(newInstallId(() => 1)).toMatch(/^[a-z0-9]{20}$/);
-    expect(newInstallId(() => -3)).toMatch(/^[a-z0-9]{20}$/);
-    expect(newInstallId(() => Number.NaN)).toMatch(/^[a-z0-9]{20}$/);
+  it("publishes 'kept' days as nothing: a card says goal (G), rest (R) or nothing (-)", () => {
+    expect(normalizeHistory("GKR-")).toBe("-".repeat(24) + "G-R-");
+    expect(normalizeHistory("K".repeat(28))).toBe("-".repeat(28));
+    expect(normalizeHistory("GxZ")).toBe("-".repeat(25) + "G--");
+    expect(normalizeHistory("G".repeat(40))).toBe("G".repeat(28));
+    const c = buildCard({ ...base, wearing: [], history: "K".repeat(10) + "G".repeat(18) });
+    expect(c.history).toBe("-".repeat(10) + "G".repeat(18));
+    expect(c.history).not.toContain("K");
   });
 });
 
 describe("the friend list", () => {
-  const ME = "my-install-id-0001";
   const friend = (patch: Partial<Friend> = {}): Friend => ({ ...card(), lastVisit: null, ...patch });
-  const ids = (list: readonly Friend[]) => list.map((f) => f.id);
+  const keys = (list: readonly Friend[]) => list.map((f) => f.pk);
+  const [A, B] = [keyOf("a"), keyOf("b")];
 
   it("adds a new friend at the end, with no visit yet", () => {
-    const out = addFriend([friend({ id: "friend-a-000001" })], card({ id: "friend-b-000002", name: "Bin" }), ME);
+    const out = addFriend([friend({ pk: A })], card({ pk: B, name: "Bin" }), ME);
     expect(out).toMatchObject({ ok: true, replaced: false });
     if (!out.ok) return;
-    expect(ids(out.friends)).toEqual(["friend-a-000001", "friend-b-000002"]);
-    expect(out.friend).toMatchObject({ id: "friend-b-000002", name: "Bin", lastVisit: null });
+    expect(keys(out.friends)).toEqual([A, B]);
+    expect(out.friend).toMatchObject({ pk: B, name: "Bin", lastVisit: null });
   });
 
   it("refuses your own card, and changes nothing", () => {
     setLang("en");
     const list = [friend()];
-    const out = addFriend(list, card({ id: ME }), ME);
+    const out = addFriend(list, card({ pk: ME }), ME);
     expect(out).toMatchObject({ ok: false, error: "self" });
     if (!out.ok) expect(out.message).toMatch(/your own/i);
     expect(list).toHaveLength(1);
+    // Without a key of my own to compare with, nothing is "mine".
+    expect(addFriend(list, card({ pk: ME }), null)).toMatchObject({ ok: true });
   });
 
-  it("lets a newer card from the same friend replace the older one, in place, keeping the last visit", () => {
-    const list = [friend({ id: "friend-a-000001", date: "2026-10-26", week: "2026-W44", weekDone: 2, lastVisit: 12345 }), friend({ id: "friend-b-000002" })];
-    const out = addFriend(list, card({ id: "friend-a-000001", date: TODAY, weekDone: 9, name: "Mai ✨" }), ME);
+  it("is the key that makes a friend, not the name: the same name with another key is another friend", () => {
+    const out = addFriend([friend({ pk: A, name: "Mai" })], card({ pk: B, name: "Mai" }), ME);
+    expect(out).toMatchObject({ ok: true, replaced: false });
+    if (out.ok) expect(out.friends).toHaveLength(2);
+  });
+
+  it("lets a newer card from the same key replace the older one, in place, keeping the last visit", () => {
+    const list = [friend({ pk: A, date: "2026-10-26", week: "2026-W44", weekDone: 2, lastVisit: 12345 }), friend({ pk: B })];
+    const out = addFriend(list, card({ pk: A, date: TODAY, weekDone: 9, name: "Mai ✨" }), ME);
     expect(out).toMatchObject({ ok: true, replaced: true });
     if (!out.ok) return;
-    expect(ids(out.friends)).toEqual(["friend-a-000001", "friend-b-000002"]);
+    expect(keys(out.friends)).toEqual([A, B]);
     expect(out.friends[0]).toMatchObject({ name: "Mai ✨", date: TODAY, weekDone: 9, lastVisit: 12345 });
   });
 
@@ -437,107 +573,135 @@ describe("the friend list", () => {
     if (out.ok) expect(out.friends[0].weekDone).toBe(8);
   });
 
-  it("keeps the newer card when an older one is pasted, and says so kindly", () => {
+  it("keeps the newer card when an older one is pasted, and says so kindly, without repeating a name", () => {
     setLang("en");
     const list = [friend({ date: TODAY })];
     const out = addFriend(list, card({ date: "2026-10-25", week: "2026-W43", name: "Mai" }), ME);
     expect(out).toMatchObject({ ok: false, error: "older" });
-    if (!out.ok) expect(out.message).toContain("Mai");
+    if (!out.ok) {
+      expect(out.message).toMatch(/newer card/);
+      expect(out.message).not.toContain("Mai");
+    }
   });
 
   it("holds 12 friends and no more", () => {
     setLang("en");
-    const twelve = Array.from({ length: MAX_FRIENDS }, (_, i) => friend({ id: `friend-${String(i).padStart(8, "0")}` }));
+    const twelve = Array.from({ length: MAX_FRIENDS }, (_, i) => friend({ pk: keyOf(i) }));
     expect(twelve).toHaveLength(12);
-    const out = addFriend(twelve, card({ id: "friend-extra-0001" }), ME);
+    const out = addFriend(twelve, card({ pk: keyOf("extra") }), ME);
     expect(out).toMatchObject({ ok: false, error: "full" });
     if (!out.ok) expect(out.message).toMatch(/12/);
     // A friend you already have can still send a newer card when the list is full.
-    const again = addFriend(twelve, card({ id: "friend-00000003", weekDone: 40 }), ME);
+    const again = addFriend(twelve, card({ pk: keyOf(3), weekDone: 40 }), ME);
     expect(again).toMatchObject({ ok: true, replaced: true });
     if (again.ok) expect(again.friends).toHaveLength(12);
     // Room again after a removal.
-    expect(addFriend(removeFriend(twelve, "friend-00000003"), card({ id: "friend-extra-0001" }), ME)).toMatchObject({ ok: true });
+    expect(addFriend(removeFriend(twelve, keyOf(3)), card({ pk: keyOf("extra") }), ME)).toMatchObject({ ok: true });
   });
 
   it("never changes the list it was given", () => {
     const list = Object.freeze([Object.freeze(friend())]);
-    expect(() => addFriend(list, card({ id: "friend-b-000002" }), ME)).not.toThrow();
-    expect(() => removeFriend(list, list[0].id)).not.toThrow();
+    expect(() => addFriend(list, card({ pk: B }), ME)).not.toThrow();
+    expect(() => removeFriend(list, list[0].pk)).not.toThrow();
     expect(list).toHaveLength(1);
   });
 
-  it("removes a friend by id, and leaves the others alone", () => {
-    const list = [friend({ id: "friend-a-000001" }), friend({ id: "friend-b-000002" })];
-    expect(ids(removeFriend(list, "friend-a-000001"))).toEqual(["friend-b-000002"]);
-    expect(ids(removeFriend(list, "nobody-here-0001"))).toEqual(ids(list));
+  it("removes a friend by key, and leaves the others alone", () => {
+    const list = [friend({ pk: A }), friend({ pk: B })];
+    expect(keys(removeFriend(list, A))).toEqual([B]);
+    expect(keys(removeFriend(list, keyOf("nobody")))).toEqual(keys(list));
   });
 });
 
 describe("the stored friends document", () => {
   const friend = (patch: Partial<Friend> = {}): Friend => ({ ...card(), lastVisit: null, ...patch });
-  const fixed = () => "freshly-made-id-001";
+  const NOW = new Date(2026, 9, 29, 10, 0).getTime();
+  const read = (raw: unknown, mine: string | null = ME, now = NOW) => docFromJson(raw, mine, now);
 
-  it("makes an id when there is nothing yet, and says it did", () => {
+  it("starts empty when there is nothing, or nothing usable", () => {
     for (const nothing of [null, undefined, "x", 5, [], {}]) {
-      const { doc, fresh } = docFromJson(nothing, fixed);
-      expect(fresh).toBe(true);
-      expect(doc).toEqual({ installId: "freshly-made-id-001", friends: [], visits: { day: "", count: 0, lastAt: null } });
+      expect(read(nothing)).toEqual({ friends: [], visits: { day: "", count: 0, lastAt: null } });
     }
   });
 
-  it("round-trips what it saved, and keeps the id it was given", () => {
-    const doc = { installId: "my-install-id-0001", friends: [friend({ lastVisit: 99 }), friend({ id: "friend-b-000002", name: "Bin" })], visits: { day: TODAY, count: 1, lastAt: 1234 } };
-    const back = docFromJson(JSON.parse(JSON.stringify(docToJson(doc))), fixed);
-    expect(back.fresh).toBe(false);
-    expect(back.doc).toEqual(doc);
+  it("has no install id any more: the key from the backend is the identity", () => {
+    const doc = read({ installId: "my-install-id-0001", friends: [friend()] });
+    expect(doc).not.toHaveProperty("installId");
+    expect(docToJson(doc)).not.toHaveProperty("installId");
   });
 
-  it("makes a new id when the stored one is no good, but keeps the friends", () => {
-    const { doc, fresh } = docFromJson({ installId: "no", friends: [friend()] }, fixed);
-    expect(fresh).toBe(true);
-    expect(doc.installId).toBe("freshly-made-id-001");
-    expect(doc.friends).toHaveLength(1);
+  it("round-trips what it saved", () => {
+    const doc = { friends: [friend({ lastVisit: 99 }), friend({ pk: keyOf("b"), name: "Bin" })], visits: { day: TODAY, count: 1, lastAt: 1234 } };
+    expect(read(JSON.parse(JSON.stringify(docToJson(doc))))).toEqual(doc);
   });
 
-  it("drops stored friends that no longer hold up: damaged, repeated, ourselves, or past the 12", () => {
-    const mine = "my-install-id-0001";
-    const many = Array.from({ length: 15 }, (_, i) => friend({ id: `friend-${String(i).padStart(8, "0")}` }));
+  it("drops stored friends that no longer hold up: damaged, repeated or ourselves", () => {
+    const many = Array.from({ length: 8 }, (_, i) => friend({ pk: keyOf(i) }));
     const stored = {
-      installId: mine,
       friends: [
         ...many,
-        { ...friend({ id: "friend-broken-001" }), species: "dinosaur" },
-        { ...friend({ id: "friend-broken-002" }), history: "nope" },
-        friend({ id: mine }),
+        { ...friend({ pk: keyOf("broken-1") }), species: "dinosaur" },
+        { ...friend({ pk: keyOf("broken-2") }), history: "nope" },
+        // A friend stored by the format before signatures: an id, streaks, and no key.
+        { ...friend(), pk: undefined, id: "friend-mai-0001", streak: 3, best: 5 },
+        friend({ pk: ME }),
         "not an object",
         null,
       ],
     };
-    const { doc } = docFromJson(stored, fixed);
-    expect(doc.friends.map((f) => f.id)).toEqual(many.slice(0, 12).map((f) => f.id));
+    expect(read(stored).friends.map((f) => f.pk)).toEqual(many.map((f) => f.pk));
     // The same friend twice: the newer card stays.
-    const twice = docFromJson({ installId: mine, friends: [friend({ id: "friend-a-000001", date: "2026-10-20", week: "2026-W43" }), friend({ id: "friend-a-000001", date: TODAY })] }, fixed);
-    expect(twice.doc.friends).toHaveLength(1);
-    expect(twice.doc.friends[0].date).toBe(TODAY);
+    const twice = read({ friends: [friend({ pk: keyOf("a"), date: "2026-10-20", week: "2026-W43" }), friend({ pk: keyOf("a"), date: TODAY })] });
+    expect(twice.friends).toHaveLength(1);
+    expect(twice.friends[0].date).toBe(TODAY);
+    // Without a key of my own there is no "ourselves" to drop.
+    expect(read({ friends: [friend({ pk: ME })] }, null).friends).toHaveLength(1);
+  });
+
+  it("looks only at the first 12 entries, however many the file has (a huge file costs nothing)", () => {
+    const many = Array.from({ length: 5000 }, (_, i) => friend({ pk: keyOf(i) }));
+    const t0 = performance.now();
+    const doc = read({ friends: many });
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect(doc.friends.map((f) => f.pk)).toEqual(many.slice(0, MAX_FRIENDS).map((f) => f.pk));
+    // Entries past the 12th are never read, even when the first are bad: the list is whatever the first 12 hold.
+    const mixed = [...Array.from({ length: 12 }, () => "junk"), friend({ pk: keyOf("late") })];
+    expect(read({ friends: mixed }).friends).toEqual([]);
+    // A friend with a toxic getter beyond the 12th is never touched.
+    const trap = Object.defineProperty({}, "pk", {
+      get() {
+        throw new Error("read past the 12th");
+      },
+      enumerable: true,
+    });
+    expect(() => read({ friends: [...Array.from({ length: 12 }, () => null), trap] })).not.toThrow();
   });
 
   it("does not lose a friend whose card is dated ahead of a clock that was set back", () => {
-    const { doc } = docFromJson({ installId: "my-install-id-0001", friends: [friend({ date: "2026-12-30", week: "2026-W53" })] }, fixed);
+    const doc = read({ friends: [friend({ date: "2026-12-30", week: "2026-W53" })] });
     expect(doc.friends).toHaveLength(1);
   });
 
   it("reads a friend without a last visit as never visited, and ignores nonsense there", () => {
     const f = { ...friend() } as Record<string, unknown>;
     delete f.lastVisit;
-    expect(docFromJson({ installId: "my-install-id-0001", friends: [f] }, fixed).doc.friends[0].lastVisit).toBeNull();
-    expect(docFromJson({ installId: "my-install-id-0001", friends: [{ ...f, lastVisit: "yesterday" }] }, fixed).doc.friends[0].lastVisit).toBeNull();
-    expect(docFromJson({ installId: "my-install-id-0001", friends: [{ ...f, lastVisit: Number.POSITIVE_INFINITY }] }, fixed).doc.friends[0].lastVisit).toBeNull();
+    expect(read({ friends: [f] }).friends[0].lastVisit).toBeNull();
+    expect(read({ friends: [{ ...f, lastVisit: "yesterday" }] }).friends[0].lastVisit).toBeNull();
+    expect(read({ friends: [{ ...f, lastVisit: Number.POSITIVE_INFINITY }] }).friends[0].lastVisit).toBeNull();
+  });
+
+  it("never believes a time in the future: a last visit or last visit-time past now is brought back to now", () => {
+    const future = NOW + 90 * 86_400_000;
+    const doc = read({ friends: [friend({ lastVisit: future }), friend({ pk: keyOf("b"), lastVisit: NOW - 5000 })], visits: { day: TODAY, count: 1, lastAt: future } });
+    expect(doc.friends.map((f) => f.lastVisit)).toEqual([NOW, NOW - 5000]);
+    expect(doc.visits.lastAt).toBe(NOW);
+    expect(read({ friends: [], visits: { day: TODAY, count: 1, lastAt: 1e300 } }).visits.lastAt).toBe(NOW);
+    expect(read({ friends: [friend({ lastVisit: -50 })] }).friends[0].lastVisit).toBe(0);
   });
 
   it("reads a damaged visit log as no visits today", () => {
     for (const visits of [null, 5, { day: "someday", count: 9, lastAt: "x" }, { day: TODAY, count: -4, lastAt: null }, { day: TODAY, count: 1e9 }]) {
-      const { doc } = docFromJson({ installId: "my-install-id-0001", friends: [], visits }, fixed);
+      const doc = read({ friends: [], visits });
       expect(doc.visits.count).toBeGreaterThanOrEqual(0);
       expect(doc.visits.count).toBeLessThanOrEqual(100);
       expect(doc.visits.lastAt === null || Number.isFinite(doc.visits.lastAt)).toBe(true);
@@ -595,9 +759,9 @@ describe("the day record on a card", () => {
   const always = () => true;
   it("marks today live, and fills the days the app didn't settle: a workday is '-', a day off is 'R'", () => {
     const weekend = (d: string) => ![0, 6].includes(new Date(`${d}T12:00:00`).getDay());
-    const h = cardHistory({}, TODAY, "K", weekend);
+    const h = cardHistory({}, TODAY, "G", weekend);
     expect(h).toHaveLength(28);
-    expect(h.endsWith("K")).toBe(true);
+    expect(h.endsWith("G")).toBe(true);
     // The 24th and 25th are a Saturday and a Sunday: 5 and 4 days before Thursday the 29th.
     expect(h[27 - 5]).toBe("R");
     expect(h[27 - 4]).toBe("R");
@@ -606,11 +770,19 @@ describe("the day record on a card", () => {
 
   it("uses what was settled over the default, and leaves out days older than 28", () => {
     const h = cardHistory({ "2026-10-28": "G", "2026-10-27": "K", "2026-10-26": "R", "2026-10-01": "G", "2026-09-30": "G", "2026-09-01": "G" }, TODAY, "-", always);
-    expect(h.slice(-4)).toBe("RKG-");
+    // The pet remembers a kept day ('K'); the card says nothing about it ('-').
+    expect(h.slice(-4)).toBe("R-G-");
     expect(h).toHaveLength(28);
     // 28 days ending 29 Oct start on 2 Oct: the 1st is just outside.
     expect(h[0]).toBe("-");
     expect(cardHistory({ "2026-10-02": "G" }, TODAY, "-", always)[0]).toBe("G");
+  });
+
+  it("publishes a kept day, and a kept today, as '-': a card only says goal, rest or nothing", () => {
+    const h = cardHistory({ "2026-10-28": "K", "2026-10-27": "K", "2026-10-26": "G" }, TODAY, "K", always);
+    expect(h.slice(-4)).toBe("G--" + "-");
+    expect(h).not.toMatch(/K/);
+    expect(h).toMatch(/^[GR-]{28}$/);
   });
 
   it("ignores marks it doesn't know", () => {
@@ -641,14 +813,14 @@ describe("the buddy streak", () => {
   });
 
   it("is zero with no goal days in common", () => {
-    expect(buddyStreak(side("KKKK"), side("KKKK"))).toBe(0);
-    expect(buddyStreak(side("GGGG"), side("KKKK"))).toBe(0);
+    expect(buddyStreak(side("RRRR"), side("RRRR"))).toBe(0);
+    expect(buddyStreak(side("GGGG"), side("----"))).toBe(0);
     expect(buddyStreak(side("----"), side("GGGG"))).toBe(0);
   });
 
-  it("does not count a day one of you hit the goal and the other only kept", () => {
-    // Today is still open, so the K does not end it; yesterday (closed) does.
-    expect(buddyStreak(side("GGGG"), side("GGKG"))).toBe(1);
+  it("does not count a day one of you hit the goal and the other did less", () => {
+    // Today is still open, so the '-' does not end it; yesterday (closed) does.
+    expect(buddyStreak(side("GGGG"), side("GG-G"))).toBe(1);
   });
 
   it("skips a day either of you rested, without breaking and without adding", () => {
@@ -660,16 +832,16 @@ describe("the buddy streak", () => {
   });
 
   it("ends at a closed day when either of you missed the goal or did nothing", () => {
-    expect(buddyStreak(side("GGKGG"), side("GGGGG"))).toBe(2);
+    expect(buddyStreak(side("GG-GG"), side("GGGGG"))).toBe(2);
     expect(buddyStreak(side("GG-GG"), side("GGGGG"))).toBe(2);
     expect(buddyStreak(side("GGGGG"), side("GG-GG"))).toBe(2);
     // The break stays a break however far back the good days go.
-    expect(buddyStreak(side("GGGGGGGKGG"), side("GGGGGGGGGG"))).toBe(2);
+    expect(buddyStreak(side("GGGGGGG-GG"), side("GGGGGGGGGG"))).toBe(2);
   });
 
   it("does not let today end it while today is still open, nor count it unless both hit the goal", () => {
-    expect(buddyStreak(side("GGGK"), side("GGG-"))).toBe(3);
-    expect(buddyStreak(side("GGG-"), side("GGGK"))).toBe(3);
+    expect(buddyStreak(side("GGG-"), side("GGG-"))).toBe(3);
+    expect(buddyStreak(side("GGGR"), side("GGG-"))).toBe(3);
     expect(buddyStreak(side("GGGG"), side("GGG-"))).toBe(3);
   });
 
@@ -681,8 +853,8 @@ describe("the buddy streak", () => {
   });
 
   it("lines the days up by date, not by position", () => {
-    // Friend (two days old) G G G on the 25th..27th; me: K on the 25th, G on the 26th and 27th, then more.
-    const mine = side("KGGGG"); // 25 K, 26 G, 27 G, 28 G, 29 G
+    // Friend (two days old) G G G on the 25th..27th; me: nothing on the 25th, G on the 26th and 27th, then more.
+    const mine = side("-GGGG"); // 25 -, 26 G, 27 G, 28 G, 29 G
     const theirs = side("GGG", addDays(TODAY, -2)); // 25 G, 26 G, 27 G
     expect(buddyStreak(mine, theirs)).toBe(2);
   });
@@ -690,14 +862,14 @@ describe("the buddy streak", () => {
   it("treats the older card's own last day as still open, but a closed day of the other card is final", () => {
     // The friend's card was made in the morning of the 27th with nothing done yet ('-'); I had the goal that day.
     expect(buddyStreak(side("GGGGGG"), side("GGG-", addDays(TODAY, -2)))).toBe(3);
-    // I had not (closed, K): that day ends it whatever the friend did later.
-    expect(buddyStreak(side("GGKGG"), side("GGGG", addDays(TODAY, -2)))).toBe(0);
+    // I had not (closed, "-"): that day ends it whatever the friend did later.
+    expect(buddyStreak(side("GG-GG"), side("GGGG", addDays(TODAY, -2)))).toBe(0);
   });
 
   it("is the same from either side", () => {
     const pairs: [string, string, number][] = [
-      ["GGRGKGG", "GGGGKGG", 2],
-      ["GKGG", "GGGG", 2],
+      ["GGRG-GG", "GGGG-GG", 2],
+      ["G-GG", "GGGG", 2],
       ["RRRG", "GGGG", 1],
     ];
     for (const [x, y, shift] of pairs) {
@@ -733,21 +905,21 @@ describe("the weekly boss", () => {
     expect(BOSS_HP_PER_MEMBER).toBe(15);
     expect(boss(0, []).maxHp).toBe(15);
     expect(boss(0, [friend()]).maxHp).toBe(30);
-    expect(boss(0, [friend(), friend({ id: "friend-b-000002" }), friend({ id: "friend-c-000003" })]).maxHp).toBe(60);
+    expect(boss(0, [friend(), friend({ pk: keyOf("b") }), friend({ pk: keyOf("c") })]).maxHp).toBe(60);
   });
 
   it("counts only friends whose latest card is from this ISO week", () => {
-    const lastWeek = friend({ id: "friend-old-00001", date: "2026-10-25", week: "2026-W43", weekDone: 40 });
-    const thisWeek = friend({ id: "friend-new-00001", date: "2026-10-26", week: "2026-W44", weekDone: 5 });
+    const lastWeek = friend({ pk: keyOf("old"), date: "2026-10-25", week: "2026-W43", weekDone: 40 });
+    const thisWeek = friend({ pk: keyOf("new"), date: "2026-10-26", week: "2026-W44", weekDone: 5 });
     const b = boss(2, [lastWeek, thisWeek]);
-    expect(b.members.map((m) => m.id)).toEqual(["me", "friend-new-00001"]);
+    expect(b.members.map((m) => m.id)).toEqual(["me", keyOf("new")]);
     expect(b.maxHp).toBe(30);
     expect(b.damage).toBe(7); // 2 mine + 5, not the 40 from last week's card
     expect(b.waiting).toBe(1);
   });
 
   it("takes your own tasks live and each friend's tasks from their latest card", () => {
-    const b = boss(4, [friend({ weekDone: 9 }), friend({ id: "friend-b-000002", weekDone: 3 })]);
+    const b = boss(4, [friend({ weekDone: 9 }), friend({ pk: keyOf("b"), weekDone: 3 })]);
     expect(b.damage).toBe(16);
     expect(b.hp).toBe(45 - 16);
     expect(b.defeated).toBe(false);
@@ -759,7 +931,7 @@ describe("the weekly boss", () => {
   });
 
   it("lists you first, then the friends who did the most", () => {
-    const b = boss(1, [friend({ id: "friend-a-000001", name: "A", weekDone: 2 }), friend({ id: "friend-b-000002", name: "B", weekDone: 8 })]);
+    const b = boss(1, [friend({ pk: keyOf("a"), name: "A", weekDone: 2 }), friend({ pk: keyOf("b"), name: "B", weekDone: 8 })]);
     expect(b.members.map((m) => m.name === "A" || m.name === "B" ? m.name : "me")).toEqual(["me", "B", "A"]);
   });
 
@@ -837,7 +1009,12 @@ describe("visits", () => {
   it("leaves a gap between two visits", () => {
     expect(pick({ log: { day: TODAY, count: 1, lastAt: NOW - VISIT_GAP_MS + 1 } })).toBeNull();
     expect(pick({ log: { day: TODAY, count: 1, lastAt: NOW - VISIT_GAP_MS } })).not.toBeNull();
-    expect(pick({ log: { day: TODAY, count: 1, lastAt: NOW + 60_000 } })).toBeNull(); // the clock went back
+    // A clock that went back leaves a last visit in the future: that is long enough ago, not a visit that never ends.
+    expect(pick({ log: { day: TODAY, count: 1, lastAt: NOW + 60_000 } })).not.toBeNull();
+    expect(pick({ log: { day: TODAY, count: 1, lastAt: NOW + 30 * 86_400_000 } })).not.toBeNull();
+    expect(pick({ log: { day: TODAY, count: 1, lastAt: 1e300 } })).not.toBeNull();
+    // The day's two visits are still the day's two.
+    expect(pick({ log: { day: TODAY, count: 2, lastAt: NOW + 60_000 } })).toBeNull();
   });
 
   it("needs a calm moment: each thing that is not calm stops it", () => {
@@ -856,39 +1033,49 @@ describe("visits", () => {
       "bubble",
       "boardOpen",
       "mischief",
+      "inCall",
     ] as const;
     for (const what of notCalm) expect(pick({ calm: calmMoment({ [what]: true }) }), what).toBeNull();
     expect(pick({ calm: calmMoment({ typing: true, quiet: true }) })).toBeNull();
   });
 
   it("picks the friend who visited longest ago, a friend who never has first", () => {
-    const a = friend({ id: "friend-a-000001", lastVisit: NOW - 3 * 86_400_000 });
-    const b = friend({ id: "friend-b-000002", lastVisit: NOW - 86_400_000 });
-    const c = friend({ id: "friend-c-000003", lastVisit: null });
-    expect(pick({ friends: [a, b] })?.id).toBe("friend-a-000001");
-    expect(pick({ friends: [b, a] })?.id).toBe("friend-a-000001");
-    expect(pick({ friends: [a, b, c] })?.id).toBe("friend-c-000003");
+    const a = friend({ pk: keyOf("a"), lastVisit: NOW - 3 * 86_400_000 });
+    const b = friend({ pk: keyOf("b"), lastVisit: NOW - 86_400_000 });
+    const c = friend({ pk: keyOf("c"), lastVisit: null });
+    expect(pick({ friends: [a, b] })?.pk).toBe(keyOf("a"));
+    expect(pick({ friends: [b, a] })?.pk).toBe(keyOf("a"));
+    expect(pick({ friends: [a, b, c] })?.pk).toBe(keyOf("c"));
+  });
+
+  it("does not let a last visit in the future (a clock set back) shut a friend out for good", () => {
+    const stuck = friend({ pk: keyOf("a"), lastVisit: NOW + 90 * 86_400_000 });
+    const other = friend({ pk: keyOf("b"), lastVisit: NOW - 86_400_000 });
+    // Treated as just now: the friend who really visited longest ago comes first, and the stuck one is not stuck.
+    expect(pick({ friends: [stuck, other] })?.pk).toBe(keyOf("b"));
+    expect(pick({ friends: [stuck] })?.pk).toBe(keyOf("a"));
+    expect(pick({ friends: [friend({ pk: keyOf("a"), lastVisit: 1e300 }), other] })?.pk).toBe(keyOf("b"));
   });
 
   it("breaks a tie with the injected random source, and only among eligible friends", () => {
-    const a = friend({ id: "friend-a-000001" });
-    const b = friend({ id: "friend-b-000002" });
-    const old = friend({ id: "friend-old-00001", date: addDays(TODAY, -30) });
-    expect(pick({ friends: [a, b, old] }, () => 0)?.id).toBe("friend-a-000001");
-    expect(pick({ friends: [a, b, old] }, () => 0.99)?.id).toBe("friend-b-000002");
+    const a = friend({ pk: keyOf("a") });
+    const b = friend({ pk: keyOf("b") });
+    const old = friend({ pk: keyOf("old"), date: addDays(TODAY, -30) });
+    expect(pick({ friends: [a, b, old] }, () => 0)?.pk).toBe(keyOf("a"));
+    expect(pick({ friends: [a, b, old] }, () => 0.99)?.pk).toBe(keyOf("b"));
     expect(pick({ friends: [old] })).toBeNull();
     expect(pick({ friends: [] })).toBeNull();
   });
 
   it("is a visit that counts for today and remembers who came", () => {
-    const doc = { installId: "my-install-id-0001", friends: [friend({ id: "friend-a-000001" }), friend({ id: "friend-b-000002" })], visits: { day: "", count: 0, lastAt: null } };
-    const one = recordVisit(doc, "friend-b-000002", NOW, TODAY);
+    const doc = { friends: [friend({ pk: keyOf("a") }), friend({ pk: keyOf("b") })], visits: { day: "", count: 0, lastAt: null } };
+    const one = recordVisit(doc, keyOf("b"), NOW, TODAY);
     expect(one.visits).toEqual({ day: TODAY, count: 1, lastAt: NOW });
     expect(one.friends.map((f) => f.lastVisit)).toEqual([null, NOW]);
-    const two = recordVisit(one, "friend-a-000001", NOW + VISIT_GAP_MS, TODAY);
+    const two = recordVisit(one, keyOf("a"), NOW + VISIT_GAP_MS, TODAY);
     expect(two.visits).toEqual({ day: TODAY, count: 2, lastAt: NOW + VISIT_GAP_MS });
     // A new day starts the count again.
-    expect(recordVisit(two, "friend-a-000001", NOW + 86_400_000, addDays(TODAY, 1)).visits.count).toBe(1);
+    expect(recordVisit(two, keyOf("a"), NOW + 86_400_000, addDays(TODAY, 1)).visits.count).toBe(1);
     // The document it was given is not changed.
     expect(doc.visits.count).toBe(0);
   });
@@ -896,7 +1083,7 @@ describe("visits", () => {
   it("starts a day quietly: the first visit waits 15 to 75 minutes, the same for an install on the same day", () => {
     const delays = new Set<number>();
     for (let i = 0; i < 200; i++) {
-      const d = visitDelayMs(`install-${i}-abcdefgh`, addDays(TODAY, i % 7));
+      const d = visitDelayMs(keyOf(i), addDays(TODAY, i % 7));
       expect(d).toBeGreaterThanOrEqual(15 * 60_000);
       expect(d).toBeLessThan(75 * 60_000);
       delays.add(d);
@@ -904,13 +1091,14 @@ describe("visits", () => {
     // Spread out, not one number.
     expect(delays.size).toBeGreaterThan(30);
     // Restarting the app doesn't draw a new one.
-    expect(visitDelayMs("my-install-id-00001", TODAY)).toBe(visitDelayMs("my-install-id-00001", TODAY));
-    expect(visitDelayMs("my-install-id-00001", TODAY)).not.toBe(visitDelayMs("my-install-id-00001", addDays(TODAY, 1)));
+    expect(visitDelayMs(ME, TODAY)).toBe(visitDelayMs(ME, TODAY));
+    expect(visitDelayMs(ME, TODAY)).not.toBe(visitDelayMs(ME, addDays(TODAY, 1)));
   });
 
   it("labels the visit with the friend's name and the buddy streak, in both languages", () => {
     setLang("en");
     expect(visitLabel("Mai", 4)).toBe("Mai dropped by! 🔥 buddy streak 4");
+    expect(visitTail(4)).toBe(" dropped by! 🔥 buddy streak 4");
     expect(visitLabel("Mai", 0)).toBe("Mai dropped by! 👋");
     setLang("vi");
     expect(visitLabel("Mai", 4)).toBe("Mai ghé chơi! 🔥 chuỗi bạn 4 ngày");
@@ -936,8 +1124,11 @@ describe("the demo's sample friends", () => {
     for (const today of ["2026-10-29", "2026-11-02", "2027-01-01", "2028-02-29", "2026-03-01"]) {
       const cards = sampleCards(today);
       expect(cards).toHaveLength(2);
-      expect(new Set(cards.map((c) => c.id)).size).toBe(2);
-      for (const c of cards) expect(decodeCard(encodeCard(c), today)).toEqual({ ok: true, card: c });
+      expect(new Set(cards.map((c) => c.pk)).size).toBe(2);
+      for (const c of cards) {
+        expect(isPublicKey(c.pk)).toBe(true);
+        expect(parseCard(textOf(c), today)).toMatchObject({ ok: true, card: c });
+      }
     }
   });
 
