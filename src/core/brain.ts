@@ -1472,7 +1472,7 @@ export class Brain {
     if (this.state.quietUntil !== null && nowMs < this.state.quietUntil) return;
     if (!calm.atBreakpoint(this.sample.secondsSinceKey, this.secondsSinceAppSwitch())) return;
     this.chestNotice = false;
-    this.say({ text: chests.chestEarnedText(), seconds: 6 }, { silent: true });
+    this.say({ text: chests.chestEarnedText(), seconds: 6, stillValid: () => this.state.life.chests > 0 }, { silent: true });
   }
 
   // ---------- Talking ----------
@@ -1550,6 +1550,8 @@ export class Brain {
     const refused = (kind !== undefined || card !== undefined) && (how === "closed" || (how === "ignored" && b.actions.length > 0));
     // v0.5: closing the trip offer is a "Stay" too.
     if (b.id === this.tripOfferId && how === "closed") this.mutateLife((s) => trips.declineTrip(s, this.now()));
+    // An offer that went stale unseen (a focus session started first) may come again once the day allows it.
+    if (b.id === this.tripOfferId && how === "stale") this.markFired(`trip-${this.dayKey}`, null);
     let backoff = "";
     if (refused) {
       const m = kind && isEveryKind(kind) ? Math.min(life.MAX_BACKOFF, (this.state.life.dayBackoff[kind] ?? 1) * 2) : null;
@@ -3400,7 +3402,7 @@ export class Brain {
         const lost = this.mutateLife((s) => craft.dropStitches(s));
         if (lost > 0) {
           this.diary.add("focus", L(`Ở ${d.label} 30 giây khi đang tập trung → tuột vài mũi đan (−${Math.round(lost * 100)}%)`, `30 s on ${d.label} during focus → dropped a few stitches (−${Math.round(lost * 100)}%)`));
-          this.say({ text: craft.droppedText(), seconds: 8 });
+          this.say({ text: craft.droppedText(), seconds: 8, stillValid: () => this.state.focus?.start === f.start });
         }
       }
     }
@@ -3498,6 +3500,13 @@ export class Brain {
           },
         ],
         seconds: 60,
+        // Waiting behind the board: gone once the pet left, you're done for today or focusing, or it's too late to go.
+        validUntil: workEnd - trips.OFFER_LEAD_MS,
+        stillValid: () => {
+          const l = this.state.life;
+          const t = this.now();
+          return !l.trip && l.tripDay !== dayKey(new Date(t)) && this.state.focus === null && !isDoneForToday(this.plan, t);
+        },
       },
       { why: L("xong hết kế hoạch hôm nay", "today's plan is done") },
     );

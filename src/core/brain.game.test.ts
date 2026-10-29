@@ -140,6 +140,18 @@ describe("Brain and chests", () => {
     brain.stop();
   });
 
+  it("lets the chest note go stale once the chest is opened", async () => {
+    const { s, tick, brain } = await rig({ life: { chests: 0, chestsToday: 0, chestDay: "2026-10-28", workSec: 1790 } });
+    tick();
+    const note = s().bubble!;
+    expect(note.text).toContain("found a chest");
+    expect(brain.bubbleStale(note)).toBe(false);
+    await brain.complete(s().day.today[0]!);
+    expect(s().life.chests).toBe(0);
+    expect(brain.bubbleStale(note)).toBe(true);
+    brain.stop();
+  });
+
   it("keeps a chest earned during focus for the end-of-session bubble", async () => {
     const { s, tick, clock, brain } = await rig({ life: { chests: 0, chestsToday: 0, chestDay: "2026-10-28", workSec: 1790 } });
     const start = clock.t;
@@ -313,6 +325,11 @@ describe("Brain and crafting", () => {
     tick();
     tick();
     expect(s().life.craft).toBeCloseTo(0.31);
+    // The note is about this session: once it's over, a note still waiting (behind the board) is dropped.
+    const note = s().bubble!;
+    expect(note.text).toContain("dropped a few stitches");
+    brain.stopFocus();
+    expect(brain.bubbleStale(note)).toBe(true);
     brain.stop();
   });
 });
@@ -457,6 +474,28 @@ describe("Brain and the trip offer as a check-in", () => {
   // greeting, the resume card, the overbooked warning, the trip offer) have none. The trip offer used to carry a
   // "trip" kind that the budget skipped; now it is a plain check-in, so answering it starts the dismissal run over
   // like answering any other check-in (v0.4's rule), and closing it is still a "Stay", never a refusal.
+  it("drops a waiting offer when a focus session starts first, and offers it again once the session is over", async () => {
+    const { s, until, tick, clock, brain } = await rig({ prefs: { bubbleGap: 0 } });
+    for (const id of ["1", "2", "4"]) await brain.complete(s().day.today.find((t) => t.id === id)!);
+    await brain.refresh();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    const offer = until(isTripOffer);
+    brain.startFocus(null, 25);
+    expect(s().bubble?.id).not.toBe(offer.id);
+    // Unseen, so neither a Stay nor a refusal.
+    expect(s().life.tripDeclined).not.toBe("2026-10-28");
+    expect(s().life.dismissedInRow).toBe(0);
+    clock.t += 25 * MIN;
+    tick();
+    expect(s().focus).toBeNull();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    await brain.refresh(); // let the sync started by the heartbeat land
+    const again = until(isTripOffer);
+    expect(again.id).not.toBe(offer.id);
+    expect(brain.bubbleStale(again)).toBe(false);
+    brain.stop();
+  });
+
   it("is never counted, and closing it is a Stay, not a refusal", async () => {
     const { s, until, brain } = await rig({ prefs: { bubbleGap: 0 } });
     for (const id of ["1", "2", "4"]) await brain.complete(s().day.today.find((t) => t.id === id)!);
