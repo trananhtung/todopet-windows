@@ -8,9 +8,62 @@ export type Mood = (typeof MOODS)[number];
 /** Growth stages, reached with XP from finished tasks. 0 = Baby … 4 = Master. */
 export type StageIndex = 0 | 1 | 2 | 3 | 4;
 
-export const ACCESSORIES = ["bow", "scarf", "sunglasses", "tophat", "crown", "gradcap"] as const;
+/** The first six are milestone rewards; the rest come out of chests (v0.5), the seasonal ones only in their season. */
+export const ACCESSORIES = [
+  "bow",
+  "scarf",
+  "sunglasses",
+  "tophat",
+  "crown",
+  "gradcap",
+  "beanie",
+  "flowercrown",
+  "partyhat",
+  "nonla",
+  "bandana",
+  "heartglasses",
+  "roundglasses",
+  "starglasses",
+  "maicrown",
+  "tetscarf",
+  "bunnyband",
+  "witchhat",
+  "santahat",
+  "bellcollar",
+] as const;
 export type Accessory = (typeof ACCESSORIES)[number];
 export type AccessorySlot = "head" | "face" | "neck";
+
+/** Where each accessory sits; one accessory per slot. */
+export const ACCESSORY_SLOT: Readonly<Record<Accessory, AccessorySlot>> = {
+  bow: "head",
+  scarf: "neck",
+  sunglasses: "face",
+  tophat: "head",
+  crown: "head",
+  gradcap: "head",
+  beanie: "head",
+  flowercrown: "head",
+  partyhat: "head",
+  nonla: "head",
+  bandana: "neck",
+  heartglasses: "face",
+  roundglasses: "face",
+  starglasses: "face",
+  maicrown: "head",
+  tetscarf: "neck",
+  bunnyband: "head",
+  witchhat: "head",
+  santahat: "head",
+  bellcollar: "neck",
+};
+
+export const SEASONS = ["tet", "trungthu", "halloween", "christmas"] as const;
+export type Season = (typeof SEASONS)[number];
+
+/** Home decorations the pet knits during focus sessions (v0.5). */
+export const DECOR_IDS = ["rug", "plant", "lamp", "cushion", "bookshelf", "mug", "poster", "garland", "fishbowl", "radio", "blanket", "lantern"] as const;
+export type DecorId = (typeof DECOR_IDS)[number];
 
 export const CELEBRATIONS = ["jump", "spin", "flip", "dance", "fireworks"] as const;
 export type CelebrationKind = (typeof CELEBRATIONS)[number];

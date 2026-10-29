@@ -1,8 +1,8 @@
 // Feeding, hunger, dirt, growth, combos, accessories and day settlement (PetLife.swift). Pure rules.
 import { addDays, dayKey, isDayKey, parseDate } from "./dates";
 import { L } from "./l10n";
-import type { Accessory, AccessorySlot, CelebrationKind, StageIndex } from "./types";
-import { ACCESSORIES } from "./types";
+import type { Accessory, AccessorySlot, CelebrationKind, Season, StageIndex } from "./types";
+import { ACCESSORIES, ACCESSORY_SLOT } from "./types";
 
 export const STAGE_THRESHOLDS = [0, 100, 300, 700, 1500] as const;
 
@@ -25,13 +25,45 @@ export function stageName(s: StageIndex): string {
 /** XP needed for the next stage, or null at Master. */
 export const nextStageXp = (s: StageIndex): number | null => STAGE_THRESHOLDS[s + 1] ?? null;
 
-export function accessorySlot(a: Accessory): AccessorySlot {
-  return a === "sunglasses" ? "face" : a === "scarf" ? "neck" : "head";
-}
+export const accessorySlot = (a: Accessory): AccessorySlot => ACCESSORY_SLOT[a];
 
-export function accessoryEmoji(a: Accessory): string {
-  return { bow: "🎀", scarf: "🧣", sunglasses: "🕶️", tophat: "🎩", crown: "👑", gradcap: "🎓" }[a];
-}
+/** Earned with milestones; every other accessory comes out of a chest. */
+export const MILESTONE_ACCESSORIES: readonly Accessory[] = ["bow", "scarf", "sunglasses", "tophat", "crown", "gradcap"];
+
+/** Accessories that only drop during their season. */
+export const SEASONAL_ACCESSORIES: Readonly<Partial<Record<Accessory, Season>>> = {
+  maicrown: "tet",
+  tetscarf: "tet",
+  bunnyband: "trungthu",
+  witchhat: "halloween",
+  santahat: "christmas",
+  bellcollar: "christmas",
+};
+
+const EMOJI: Readonly<Record<Accessory, string>> = {
+  bow: "🎀",
+  scarf: "🧣",
+  sunglasses: "🕶️",
+  tophat: "🎩",
+  crown: "👑",
+  gradcap: "🎓",
+  beanie: "🧶",
+  flowercrown: "🌸",
+  partyhat: "🎉",
+  nonla: "👒",
+  bandana: "🧡",
+  heartglasses: "💖",
+  roundglasses: "👓",
+  starglasses: "🌟",
+  maicrown: "🌼",
+  tetscarf: "🧧",
+  bunnyband: "🐰",
+  witchhat: "🧙",
+  santahat: "🎅",
+  bellcollar: "🔔",
+};
+
+export const accessoryEmoji = (a: Accessory): string => EMOJI[a];
 
 export function accessoryName(a: Accessory): string {
   switch (a) {
@@ -47,6 +79,34 @@ export function accessoryName(a: Accessory): string {
       return L("Vương miện", "Crown");
     case "gradcap":
       return L("Mũ tốt nghiệp", "Grad cap");
+    case "beanie":
+      return L("Mũ len", "Beanie");
+    case "flowercrown":
+      return L("Vòng hoa", "Flower crown");
+    case "partyhat":
+      return L("Mũ tiệc", "Party hat");
+    case "nonla":
+      return L("Nón lá", "Nón lá");
+    case "bandana":
+      return L("Khăn bandana", "Bandana");
+    case "heartglasses":
+      return L("Kính trái tim", "Heart glasses");
+    case "roundglasses":
+      return L("Kính tròn", "Round glasses");
+    case "starglasses":
+      return L("Kính ngôi sao", "Star glasses");
+    case "maicrown":
+      return L("Vòng hoa mai", "Apricot blossom crown");
+    case "tetscarf":
+      return L("Khăn đỏ ngày Tết", "Red Tết scarf");
+    case "bunnyband":
+      return L("Bờm thỏ Trung Thu", "Moon rabbit ears");
+    case "witchhat":
+      return L("Mũ phù thuỷ", "Witch hat");
+    case "santahat":
+      return L("Mũ ông già Noel", "Santa hat");
+    case "bellcollar":
+      return L("Vòng chuông", "Bell collar");
   }
 }
 
@@ -64,6 +124,19 @@ export function accessoryRequirement(a: Accessory): string {
       return L("Giữ chuỗi 7 ngày", "Keep a 7-day streak");
     case "gradcap":
       return L("Lớn tới giai đoạn Trưởng thành", "Reach the Grown-up stage");
+    default:
+      switch (SEASONAL_ACCESSORIES[a]) {
+        case "tet":
+          return L("Có trong rương dịp Tết", "In chests around Tết");
+        case "trungthu":
+          return L("Có trong rương dịp Trung Thu", "In chests around Mid-Autumn");
+        case "halloween":
+          return L("Có trong rương dịp Halloween", "In chests around Halloween");
+        case "christmas":
+          return L("Có trong rương dịp Giáng sinh", "In chests around Christmas");
+        default:
+          return L("Có trong rương quà", "Found in chests");
+      }
   }
 }
 
@@ -249,12 +322,16 @@ export function accessoryProgress(a: Accessory, s: LifeState): { have: number; n
         return [s.bestStreak, 7];
       case "gradcap":
         return [s.xp, STAGE_THRESHOLDS[3]];
+      default:
+        // Chest items: you either found it or you didn't.
+        return [s.unlocked.includes(a) ? 1 : 0, 1];
     }
   })();
   return { have: Math.min(Math.max(0, Math.floor(have)), need), need };
 }
 
 export function isEarned(a: Accessory, s: LifeState): boolean {
+  if (!MILESTONE_ACCESSORIES.includes(a)) return false;
   const p = accessoryProgress(a, s);
   return p.have >= p.need;
 }
