@@ -144,3 +144,53 @@ of the last key-down. Secrets (tokens, ICS links) live in Credential Manager; ev
    hotkey, autostart, single instance, fullscreen hide, ICS fetch, Claude split, diary files.
 5. **Full UI:** bubbles with actions, board (all actions), focus, review, mischief, settings, diary.
 6. **Polish + release:** README (EN/VI) with screenshots, icon, release workflow.
+
+## v0.3 "Kind" (Tử tế)
+
+Why: see [research-fun-and-indispensable.md](research-fun-and-indispensable.md) (proposals 1, 2, 3, 12). Punishment
+backfires, broken streaks demotivate, repairable streaks and freezes keep people going, batched notifications beat
+constant ones, and endowed progress raises completion.
+
+### 1. Forgiving streaks (`life.ts`, `prefs.ts`, `brain.ts`)
+- **A streak day is a workday with at least 1 finished task** ("you showed up"). The daily goal and the perfect day
+  stay as higher bars: a **goal day** (done ≥ target) puts a 🍪 snack in the stash (max 2); a **perfect day**
+  (done ≥ target and ≥ planned) earns a sticker and +30 XP, as before.
+- **Days the app never saw** (PC off) are neutral: no streak change, no dirt.
+- **Rest days:** `prefs.restDays` (day keys `YYYY-MM-DD`, deduped, sorted, at most 60, older than yesterday pruned).
+  `isWorkday` is false on them, so the pet behaves like on a weekend. The board has a "Take today off" toggle;
+  Settings → Schedule adds a date range (max 30 days) and lists upcoming rest days with remove buttons.
+- **Busy days:** a workday with fewer than 60 free minutes in work hours (calendar on) is excused when nothing got
+  done: streak paused, no dirt, no snack used.
+- **Missed day** (seen workday, 0 done, not busy): a snack is eaten if there is one (streak kept, no dirt). Otherwise
+  dirt +1 and, if the streak was ≥ 2, a **repair quest** is offered: finish 2 tasks on the next workday (within 14
+  days) and the old streak comes back, then that day counts too. Unfinished quests expire when their day closes.
+- `closeDay` returns what happened (`kept | excused | frozen | broken | none`, snack earned, sticker, page done,
+  repair offered) and the brain explains it kindly in one bubble the next morning (not counted as a reminder).
+- Everyone starts with (or migrates to) 1 snack. Copy: the dragon and crown read "Keep a 7-day streak"; dirt reads
+  "needs a bath (N missed days)"; the board's streak tooltip shows the snack stash and an active repair quest.
+
+### 2. Head-start sticker pages (`life.ts`, board wardrobe)
+- Stickers fill pages of 10. Every new page starts with **2 gift stickers** 🎁. A full page gives +50 XP and a 🍪
+  (if the stash isn't full), then a new page starts with 2 gifts. Stored as `stickerPage` (1-based) and
+  `pageFilled` (0–10); migration: page = 1 + ⌊perfect days ÷ 8⌋, filled = 2 + perfect days mod 8.
+- The wardrobe shows the current page (gifts, stickers, empty slots, "6/10 · 4 more perfect days for a gift") above
+  the 30-day strip, and locked accessories show their progress ("12/25").
+
+### 3. Kind moods (`mood.ts`, `face.ts`, `limbs.ts`, `lines.ts`, `brain.ts`)
+- **Grumpy only for distraction:** the angry mood needs an active distraction in work hours; everything else
+  (overdue, no progress, unplanned day, hunger, dirt) bottoms out at the second-lowest mood, now called **worried**
+  (😟). Its art: open eyes with brows raised in the middle, the wavy mouth and sweat drop, arms down instead of
+  crossed. All species share it.
+- Non-distraction lines in the worried mood offer help instead of scolding.
+- Mischief (grumble, sign parade, blocking the screen) only happens while you are on a distracting app or site.
+- The overdue bubble offers **Move to today**, **Fresh start** (move every non-recurring overdue task to tomorrow)
+  and **Show**.
+
+### 4. Nudge budget (`prefs.ts`, `brain.ts`, board, Settings → Behavior)
+- `prefs.nudgeBudget` (default 8, 0–30): the most unsolicited non-urgent bubbles per day. Never counted: urgent
+  bubbles (timed tasks, meetings), replies to what you did, and the two daily check-ins (morning greeting/plan and
+  the end-of-day review). When the budget is used up the pet stays quiet (one diary line).
+- **Back-off:** each reminder kind has a multiplier (1, 2, 4, 8) on its interval. Closing or ignoring that kind
+  doubles it; tapping any of its buttons resets it. Three dismissed reminders in a row hold non-urgent bubbles for
+  an hour. Multipliers reset each day.
+- The board shows how many reminders are left today; the diary explains every skip.
