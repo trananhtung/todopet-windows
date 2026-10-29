@@ -1,10 +1,10 @@
 // Pure helpers behind the Settings window (no DOM, no React), unit-tested in model.test.ts.
 import type { BusEvent } from "../backend/types";
 import { BackendError } from "../backend/types";
-import { L } from "../core/l10n";
+import { L, plural } from "../core/l10n";
 import type { LifeState } from "../core/life";
 import { addDays, daysBetween } from "../core/dates";
-import { MAX_REST_RANGE, type Prefs } from "../core/prefs";
+import { MAX_REST_DAYS, MAX_REST_RANGE, type Prefs } from "../core/prefs";
 
 export const SECTION_IDS = ["pet", "todoist", "workday", "focus", "distractions", "calendar", "postponed", "behavior", "about"] as const;
 export type SectionId = (typeof SECTION_IDS)[number];
@@ -181,4 +181,20 @@ export function restRangeProblem(from: string, to: string, today: string): strin
   if (a < today) return L("Chỉ thêm được ngày nghỉ từ hôm nay trở đi.", "Days off can start today at the earliest.");
   if (daysBetween(a, b) + 1 > MAX_REST_RANGE) return L(`Mỗi lần thêm tối đa ${MAX_REST_RANGE} ngày.`, `Add up to ${MAX_REST_RANGE} days at a time.`);
   return null;
+}
+
+/** What adding a range of days off did: how many were really added, and a warning when the 60-day cap left some out. */
+export function restAddNotice(added: number, cut: number): { kind: "ok" | "error"; text: string } {
+  const addedText = L(`Đã thêm ${added} ngày nghỉ.`, `Added ${plural(added, "", "day off", "days off").trim()}.`);
+  if (cut > 0) {
+    return {
+      kind: "error",
+      text: `${addedText} ${L(
+        `Tối đa ${MAX_REST_DAYS} ngày nghỉ, nên ${cut} ngày xa nhất không được giữ.`,
+        `You can have ${MAX_REST_DAYS} at most, so the ${plural(cut, "", "furthest day wasn't", "furthest days weren't").trim()} kept.`,
+      )}`,
+    };
+  }
+  if (added === 0) return { kind: "ok", text: L("Những ngày đó đã là ngày nghỉ rồi.", "Those days are already days off.") };
+  return { kind: "ok", text: addedText };
 }

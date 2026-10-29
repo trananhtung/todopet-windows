@@ -12,6 +12,7 @@ import {
   hourLabel,
   listItems,
   parseBounded,
+  restAddNotice,
   restRangeProblem,
   restRuns,
   secretErrorText,
@@ -134,6 +135,18 @@ describe("rest days", () => {
     expect(restRangeProblem("2026-10-28", "2026-10-30", "2026-10-29")).toContain("today");
     expect(restRangeProblem("2026-11-01", "2026-12-15", "2026-10-29")).toContain("30 days");
     expect(restRangeProblem("", "2026-11-02", "2026-10-29")).toBeNull();
+  });
+
+  it("says how many days off were really added, and warns when the cap left some out", () => {
+    setLang("en");
+    expect(restAddNotice(3, 0)).toEqual({ kind: "ok", text: "Added 3 days off." });
+    expect(restAddNotice(1, 0).text).toBe("Added 1 day off.");
+    expect(restAddNotice(0, 0)).toEqual({ kind: "ok", text: "Those days are already days off." });
+    const capped = restAddNotice(3, 2);
+    expect(capped.kind).toBe("error");
+    expect(capped.text).toContain("Added 3 days off");
+    expect(capped.text).toContain("60");
+    expect(capped.text).toContain("2 furthest days");
   });
 });
 

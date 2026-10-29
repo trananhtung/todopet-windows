@@ -265,7 +265,11 @@ function RepairLine({ s }: { s: BrainState }) {
   return (
     <div className="repair-line">
       <Icon name="flame" size={14} />
-      <span className="repair-text">{L(`Xong ${need} việc hôm nay để nối lại chuỗi ${quest.streak} ngày`, `Finish ${need} tasks today to bring back your ${quest.streak}-day streak`)}</span>
+      <span className="repair-text">
+        {quest.restored
+          ? L(`Chuỗi ${quest.streak} ngày đã được nối lại`, `Your ${quest.streak}-day streak is back`)
+          : L(`Xong ${need} việc hôm nay để nối lại chuỗi ${quest.streak} ngày`, `Finish ${need} tasks today to bring back your ${quest.streak}-day streak`)}
+      </span>
       <b className="repair-count" aria-label={L(`đã xong ${have} trên ${need}`, `${have} of ${need} done`)}>
         {have}/{need}
       </b>
@@ -360,7 +364,11 @@ function DayOffToggle({ brain, s }: { brain: Brain; s: BrainState }) {
       className="btn small day-off"
       onClick={() => void brain.takeDayOff(!dayOff)}
       aria-pressed={dayOff}
-      title={dayOff ? L("Hôm nay là ngày nghỉ. Bấm để làm việc lại.", "Today is a day off. Tap to work after all.") : L("Không nhắc việc hôm nay, chuỗi giữ nguyên", "No reminders today, and your streak stays put")}
+      title={
+        dayOff
+          ? L("Hôm nay là ngày nghỉ. Bấm để làm việc lại.", "Today is a day off. Tap to work after all.")
+          : L("Không nhắc việc hôm nay và chuỗi không bị đứt; việc nào lỡ làm xong vẫn được tính", "No reminders today and your streak is safe; anything you do finish still counts")
+      }
     >
       <Icon name="leaf" size={14} />
       {L("Nghỉ hôm nay", "Take today off")}
@@ -1036,10 +1044,12 @@ function NudgeCount({ s }: { s: BrainState }) {
       `Hôm nay còn ${left}/${s.prefs.nudgeBudget} lần nhắc. Việc có giờ, cuộc họp, lời chào buổi sáng và tổng kết cuối ngày không tính.`,
       `${left} of ${s.prefs.nudgeBudget} reminders left today. Timed tasks, meetings, the morning hello and the end-of-day review don't count.`,
     ) + (hold ? L(` Đang tạm im tới ${hold}.`, ` Holding reminders until ${hold}.`) : "");
+  // A plain span can't carry an aria-label: the count is a status, and the detail is read as hidden text.
   return (
-    <span className={`nudges${left === 0 ? " none" : ""}`} title={title} aria-label={title}>
+    <span className={`nudges${left === 0 ? " none" : ""}`} role="status" title={title}>
       <span aria-hidden>{left > 0 && !hold ? "🔔" : "🔕"}</span>
-      {left > 0 ? L(`còn ${left} lượt`, `${left} left today`) : L("hết lượt", "none left")}
+      <span aria-hidden>{left > 0 ? L(`còn ${left} lượt`, `${left} left today`) : L("hết lượt", "none left")}</span>
+      <span className="sr-only">{title}</span>
     </span>
   );
 }

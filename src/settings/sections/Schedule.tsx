@@ -2,12 +2,12 @@
 import { type FormEvent, useState } from "react";
 import { dayKey, parseDate } from "../../core/dates";
 import { L, plural } from "../../core/l10n";
-import { dayRange, MAX_REST_DAYS, MAX_REST_RANGE, tidyRestDays } from "../../core/prefs";
+import { addRestDays, dayRange, MAX_REST_RANGE } from "../../core/prefs";
 import { Icon } from "../../ui/icons";
 import { localeTag } from "../../ui/lang";
 import { useSettings } from "../context";
 import { Group, Notice, NumberRow, Page, StackRow, SwitchRow } from "../controls";
-import { hourLabel, restRangeProblem, restRuns, workHoursProblem } from "../model";
+import { hourLabel, restAddNotice, restRangeProblem, restRuns, workHoursProblem } from "../model";
 
 /** Days off (vacation, sick days, holidays): added as a range, listed as runs you can remove. */
 function RestDays() {
@@ -25,17 +25,10 @@ function RestDays() {
     e.preventDefault();
     const range = dayRange(from, to);
     if (problem || range.length === 0) return;
-    const next = tidyRestDays([...prefs.restDays, ...range]);
-    const left = range.filter((d) => !next.includes(d)).length;
-    update({ restDays: next });
-    setResult(
-      left > 0
-        ? {
-            kind: "error",
-            text: L(`Đã đủ ${MAX_REST_DAYS} ngày nghỉ, nên ${left} ngày chưa được thêm.`, `That's the limit of ${MAX_REST_DAYS} days off, so ${plural(left, "", "day wasn't", "days weren't").trim()} added.`),
-          }
-        : { kind: "ok", text: L(`Đã thêm ${range.length} ngày nghỉ.`, `Added ${plural(range.length, "", "day off", "days off").trim()}.`) },
-    );
+    // The real count: days already off don't count, and the 60-day cap may push the furthest ones out.
+    const { restDays, added, cut } = addRestDays(prefs.restDays, range);
+    update({ restDays });
+    setResult(restAddNotice(added, cut));
   };
 
   return (
@@ -43,8 +36,8 @@ function RestDays() {
       <StackRow
         label={L("Thêm ngày nghỉ", "Add days off")}
         help={L(
-          `Nghỉ phép, ốm hay lễ: thú cưng không nhắc việc, và chuỗi ngày vẫn giữ nguyên. Mỗi lần tối đa ${MAX_REST_RANGE} ngày.`,
-          `Vacation, sick days, holidays: your pet won't nudge you, and your streak stays put. Up to ${MAX_REST_RANGE} days at a time.`,
+          `Nghỉ phép, ốm hay lễ: thú cưng không nhắc việc và chuỗi ngày không bị đứt; việc nào lỡ làm xong vẫn được tính. Mỗi lần tối đa ${MAX_REST_RANGE} ngày.`,
+          `Vacation, sick days, holidays: your pet won't nudge you and your streak is safe, while anything you do finish still counts. Up to ${MAX_REST_RANGE} days at a time.`,
         )}
         after={
           <>

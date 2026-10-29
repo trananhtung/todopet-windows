@@ -14,7 +14,7 @@ export interface Prefs {
   dailyTarget: number;
   workStart: number;
   workEnd: number;
-  /** After this hour the pet gets grumpy if today isn't planned yet. */
+  /** After this hour the pet worries (and offers to help plan every 30 minutes) if today isn't planned yet. */
   planDeadline: number;
   remindEvery: number;
   focusMinutes: number;
@@ -38,7 +38,7 @@ export interface Prefs {
   /** After this many days on your list, a task counts as "keeps getting postponed". */
   stuckDays: number;
   claudeModel: string;
-  /** Escalating mischief when you slack off. */
+  /** Playful mischief (a grumble, a sign parade, a table flip), only while you're on a distracting app or site. */
   antics: boolean;
   /** Say some lines out loud with a Windows voice. */
   voiceOn: boolean;
@@ -54,9 +54,9 @@ export interface Prefs {
   keepLog: boolean;
   /** Hide the pet while a full-screen app is in front. */
   hideInFullscreen: boolean;
-  /** Epoch ms of the first launch; day one never starts with a grumpy pet. */
+  /** Epoch ms of the first launch; day one never starts with a worried pet. */
   firstLaunch: number;
-  /** Days off ("yyyy-MM-dd", sorted): no workday, so no reminders and no streak change. */
+  /** Days off ("yyyy-MM-dd", sorted): no workday, so no reminders; missing one never hurts the streak, and tasks finished still count. */
   restDays: string[];
 }
 
@@ -106,14 +106,25 @@ export const MAX_REST_DAYS = 60;
 /** The longest range Settings adds in one go. */
 export const MAX_REST_RANGE = 30;
 
-/** Valid day keys, deduped and sorted; yesterday is kept (it still gets settled), older days go. At most 60. */
-export function tidyRestDays(raw: unknown, now = Date.now()): string[] {
+/** Valid day keys, deduped and sorted; yesterday is kept (it still gets settled), older days go. At most `max`, the nearest. */
+export function tidyRestDays(raw: unknown, now = Date.now(), max = MAX_REST_DAYS): string[] {
   if (!Array.isArray(raw)) return [];
   const yesterday = addDays(dayKey(new Date(now)), -1);
   return [...new Set(raw.filter(isDayKey))]
     .filter((k) => k >= yesterday)
     .sort()
-    .slice(0, MAX_REST_DAYS);
+    .slice(0, max);
+}
+
+/**
+ * Adds `days` to the rest days: what to store, how many of them are new, and how many days (new or already there)
+ * the 60-day cap left out. The nearest days are kept.
+ */
+export function addRestDays(current: readonly string[], days: readonly string[], now = Date.now()): { restDays: string[]; added: number; cut: number } {
+  const all = tidyRestDays([...current, ...days], now, Infinity);
+  const restDays = all.slice(0, MAX_REST_DAYS);
+  const before = new Set(current);
+  return { restDays, added: restDays.filter((d) => !before.has(d)).length, cut: all.length - restDays.length };
 }
 
 /** Every day from `from` to `to` (either order), at most `max` of them; [] when either does not parse. */

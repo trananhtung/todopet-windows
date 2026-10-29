@@ -166,6 +166,8 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
   }
 
   const find = (id: string) => tasksNow().findIndex((t) => t.id === id);
+  /** Tasks moved off today's list (to a later day or no date). */
+  const elsewhere: RawTask[] = [];
 
   const backend: DemoBackend = {
     kind: "demo",
@@ -174,9 +176,17 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
         await pause();
         return structuredClone(tasksNow());
       },
-      async completed() {
+      async completed(sinceIso, untilIso) {
         await pause();
-        return structuredClone(doneNow());
+        // Like Todoist: only the tasks finished in that time range.
+        const since = Date.parse(sinceIso);
+        const until = Date.parse(untilIso);
+        return structuredClone(
+          doneNow().filter((t) => {
+            const at = Date.parse(t.completed_at ?? "");
+            return !(at < since) && !(at >= until);
+          }),
+        );
       },
       async stats(): Promise<RawStats> {
         return { completed_count: 42 + doneNow().length, goals: { daily_goal: 3, current_daily_streak: { count: 4 }, max_daily_streak: { count: 9 } }, karma: 1234 };
@@ -211,16 +221,28 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
       },
       async reschedule(id, dueString) {
         await pause();
-        const i = find(id);
-        if (i < 0) return;
         const d = new Date(now());
+        const today = localDay(d);
         const list = tasksNow();
-        if (dueString === "tomorrow" || dueString === "no date") {
-          list.splice(i, 1);
+        // A task moved off today's list earlier (tomorrow, a later day, no date) can come back, as after an Undo.
+        let i = find(id);
+        if (i < 0) {
+          const j = elsewhere.findIndex((t) => t.id === id);
+          if (j < 0) return;
+          list.push(...elsewhere.splice(j, 1));
+          i = list.length - 1;
+        }
+        const date = dueString === "tomorrow" ? localDay(new Date(d.getTime() + 86_400_000)) : /^\d{4}-\d{2}-\d{2}$/.test(dueString) ? dueString : null;
+        if (dueString === "no date" || (date !== null && date > today)) {
+          // Off the "today | overdue" filter.
+          const [t] = list.splice(i, 1);
+          elsewhere.push({ ...t, due: date ? { date, string: dueString } : null });
+        } else if (date !== null) {
+          list[i] = { ...list[i], due: { date, string: dueString } };
         } else if (dueString.startsWith("today at ")) {
-          list[i] = { ...list[i], due: { date: `${localDay(d)}T${dueString.split(" ").pop()}:00`, string: dueString } };
+          list[i] = { ...list[i], due: { date: `${today}T${dueString.split(" ").pop()}:00`, string: dueString } };
         } else {
-          list[i] = { ...list[i], due: { date: localDay(d), string: dueString } };
+          list[i] = { ...list[i], due: { date: today, string: dueString } };
         }
       },
       async remove(id) {

@@ -92,24 +92,67 @@ export function nudge(mood: Mood, next: TodoTask, hoursIdle: number): string {
   ]);
 }
 
-/** Offers both ways out: today, or a fresh start that moves them all to tomorrow. */
-export function overdue(mood: Mood, count: number): string {
-  const them = count === 1 ? "it" : "them";
-  if (mood === "annoyed" || mood === "angry") {
+const staysPut = (repeating: number) =>
+  repeating > 0
+    ? L(` (${repeating} việc lặp lại vẫn giữ lịch của nó.)`, ` (${n(repeating, "repeating task")} ${repeating === 1 ? "stays" : "stay"} put.)`)
+    : "";
+
+/**
+ * `movable` overdue tasks can move: to today, or a fresh start that moves them all to tomorrow. `repeating` ones
+ * keep their own schedule; when every overdue task repeats, there's nothing to move and only Show is offered.
+ */
+export function overdue(mood: Mood, movable: number, repeating = 0): string {
+  if (movable === 0) {
     return L(
-      `${count} việc quá hạn đang chờ… 😟 Để mình giúp: dời vào hôm nay, hoặc dời hết sang mai để bắt đầu lại.`,
-      `${n(count, "overdue task")} waiting… 😟 Let me help: move ${them} to today, or clear ${them} to tomorrow for a fresh start.`,
+      `${repeating} việc lặp lại đang quá hạn 🔁 Chúng tự quay lại theo lịch, nên xong lần này khi bạn rảnh là được.`,
+      `${n(repeating, "repeating task")} ${repeating === 1 ? "is" : "are"} overdue 🔁 They come back on their own schedule, so just tick this one off when you can.`,
     );
   }
-  return L(`Có ${count} việc quá hạn 😬 Dời vào hôm nay, hay dời hết sang mai để bắt đầu lại?`, `${n(count, "overdue task")} 😬 Move ${them} to today, or make a fresh start tomorrow?`);
+  const them = movable === 1 ? "it" : "them";
+  if (mood === "annoyed" || mood === "angry") {
+    return (
+      L(
+        `${movable} việc quá hạn đang chờ… 😟 Để mình giúp: dời vào hôm nay, hoặc dời hết sang mai để bắt đầu lại.`,
+        `${n(movable, "overdue task")} waiting… 😟 Let me help: move ${them} to today, or clear ${them} to tomorrow for a fresh start.`,
+      ) + staysPut(repeating)
+    );
+  }
+  return (
+    L(`Có ${movable} việc quá hạn 😬 Dời vào hôm nay, hay dời hết sang mai để bắt đầu lại?`, `${n(movable, "overdue task")} 😬 Move ${them} to today, or make a fresh start tomorrow?`) +
+    staysPut(repeating)
+  );
 }
 
-export const freshStart = (count: number) =>
-  L(`🌱 Bắt đầu lại nhé! Đã dời ${count} việc quá hạn sang mai, hôm nay nhẹ hơn rồi.`, `🌱 Fresh start! Moved ${n(count, "overdue task")} to tomorrow. Today is a clean slate.`);
+/** Every task that could move did; `repeating` overdue ones stayed (so today is a clean slate only without them). */
+export const freshStart = (moved: number, repeating: number) =>
+  repeating === 0
+    ? L(`🌱 Bắt đầu lại nhé! Đã dời ${moved} việc quá hạn sang mai, hôm nay nhẹ hơn rồi.`, `🌱 Fresh start! Moved ${n(moved, "overdue task")} to tomorrow. Today is a clean slate.`)
+    : L(
+        `🌱 Bắt đầu lại nhé! Đã dời ${moved} việc quá hạn sang mai. Việc lặp lại vẫn giữ lịch của nó.`,
+        `🌱 Fresh start! Moved ${n(moved, "overdue task")} to tomorrow. Repeating tasks stay put.`,
+      );
+
+/** Some tasks couldn't move: `moved` of `total` did, `failed` didn't. */
+export function freshStartPartial(moved: number, total: number, failed: number, repeating: number, error: string): string {
+  const what =
+    moved === 0
+      ? L(`Chưa dời được ${total} việc quá hạn 😵`, `Couldn't move the ${n(total, "overdue task")} 😵`)
+      : L(`Đã dời ${moved}/${total} việc quá hạn sang mai; ${failed} việc chưa dời được 😵`, `Moved ${moved} of ${n(total, "overdue task")} to tomorrow; ${failed} couldn't move 😵`);
+  const repeat = repeating > 0 ? L(" Việc lặp lại vẫn giữ lịch của nó.", " Repeating tasks stay put.") : "";
+  return `${what}${error ? ` ${error}` : ""}${repeat}`;
+}
+
+/** Undo of a fresh start: `back` tasks are on their old dates again, `failed` couldn't be. */
+export const freshStartUndone = (back: number, failed: number) =>
+  failed === 0
+    ? L(`↩️ Đã trả ${back} việc về ngày cũ.`, `↩️ Put ${n(back, "task")} back on ${back === 1 ? "its" : "their"} old date.`)
+    : L(`↩️ Đã trả ${back} việc về ngày cũ; ${failed} việc chưa trả được 😵`, `↩️ Put ${n(back, "task")} back; ${failed} couldn't move 😵`);
+
+// While you're on a distracting app or site, the pet may be playful (a pout, a stomp, a sign), never insulting.
 
 export function distraction(mood: Mood, app: string, left: number, next: TodoTask | null): string {
   if (mood === "angry" && next) {
-    return L(`${app} nữa hả?!! Đóng lại đi, ${q(next)} đang chờ 😤`, `${app} AGAIN?! Close it, ${q(next)} is waiting 😤`);
+    return L(`Lại ${app} rồi nè 👀 ${q(next)} đang nhớ bạn đó, quay lại với mình nhé? 😤`, `Psst, ${app} again? 👀 ${q(next)} misses you. Come back to it with me? 😤`);
   }
   return pick([
     [`Ê! Đang ${app} đó hả? 👀 Còn ${left} việc kìa.`, `Hey! On ${app}? 👀 ${n(left, "task")} left.`],
@@ -248,10 +291,9 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const snacksLeft = (left: number) =>
   left > 0 ? L(` Còn ${left} bánh trong túi.`, ` ${left} left in the stash.`) : L(" Hết bánh rồi, ngày nào đạt mục tiêu là có thêm.", " That was the last one; hit your daily goal to earn another.");
 
+/** A snack saved the streak (only eaten when there is one to save). */
 export const dayFrozen = (when: string, streak: number, left: number) =>
-  (streak > 0
-    ? L(`🍪 ${cap(when)} bạn chưa xong việc nào, nên mình ăn một bánh để giữ chuỗi 🔥${streak} cho bạn.`, `🍪 Nothing got done ${when}, so I ate a snack to keep your 🔥${streak} streak safe.`)
-    : L(`🍪 ${cap(when)} bạn chưa xong việc nào, nên mình ăn một bánh cho đỡ buồn — vẫn sạch sẽ nhé.`, `🍪 Nothing got done ${when}, so I had a snack instead of getting grubby.`)) + snacksLeft(left);
+  L(`🍪 ${cap(when)} bạn chưa xong việc nào, nên mình ăn một bánh để giữ chuỗi 🔥${streak} cho bạn.`, `🍪 Nothing got done ${when}, so I ate a snack to keep your 🔥${streak} streak safe.`) + snacksLeft(left);
 
 export const dayExcused = (when: string, streak: number) =>
   L(`📅 ${cap(when)} lịch họp kín mít nên mình không tính ngày đó.`, `📅 Your calendar was packed ${when}, so that day doesn't count.`) +
@@ -271,10 +313,17 @@ export const pageDone = (page: number, snack: boolean) =>
 
 export const streakRepaired = (n: number) => L(`🎉 Chuỗi 🔥${n} đã được nối lại! Hôm nay cũng được tính nữa.`, `🎉 Your 🔥${n} streak is back! Today counts too.`);
 
+/** A repair quest ran out unfinished; `streak` is the new one (1 when the quest's day still had a task done). */
+export const repairExpired = (streak: number) =>
+  streak > 0
+    ? L(`🌱 Nhiệm vụ nối chuỗi đã hết hạn, không sao đâu! Chuỗi mới 🔥${streak} của bạn vẫn đang chạy.`, `🌱 The repair quest ran out. No worries, your new 🔥${streak} streak is going.`)
+    : L("🌱 Nhiệm vụ nối chuỗi đã hết hạn, không sao đâu! Hôm nay mình bắt đầu chuỗi mới nhé.", "🌱 The repair quest ran out. No worries, a new streak starts today.");
+
 export const dayOff = (on: boolean, streak: number) =>
   on
     ? L("🌿 Hôm nay nghỉ nhé! Mình không nhắc gì đâu", "🌿 Day off! No reminders today") +
-      (streak > 0 ? L(`, chuỗi 🔥${streak} vẫn nguyên.`, `, and your 🔥${streak} streak stays put.`) : ".")
+      (streak > 0 ? L(`, chuỗi 🔥${streak} không bị đứt.`, `, and your 🔥${streak} streak is safe.`) : ".") +
+      L(" Lỡ xong việc nào thì vẫn được tính nhé.", " Anything you do finish still counts.")
     : L("💼 Quay lại làm việc rồi! Mình nhắc như thường nhé.", "💼 Back to work! I'll keep you on track as usual.");
 
 export function hungry(satiety: number, next: TodoTask | null): string {
@@ -284,17 +333,18 @@ export function hungry(satiety: number, next: TodoTask | null): string {
 
 export const grumble = (next: TodoTask) =>
   pick([
-    [`Haizzz… 😮‍💨 ${q(next)} vẫn chưa ai đụng tới.`, `Sigh… 😮‍💨 Nobody has touched ${q(next)} yet.`],
-    [`*giậm chân* Mình chờ ${q(next)} lâu lắm rồi đó 😤`, `*stomps* I've been waiting for ${q(next)} forever 😤`],
+    [`Haizzz… 😮‍💨 ${q(next)} vẫn đang chờ bạn đó.`, `Sigh… 😮‍💨 ${q(next)} is still waiting for you.`],
+    [`*giậm chân* Mình giữ ${q(next)} cho bạn lâu lắm rồi nè 😤`, `*taps foot* I've been saving ${q(next)} for you 😤`],
   ]);
 
 export const parade = (next: TodoTask) => L(`Mình sẽ diễu hành tới khi bạn làm ${q(next)} thì thôi! 📢`, `I'm marching until you do ${q(next)}! 📢`);
 
 export function block(app: string, next: TodoTask | null): string {
-  const n = next ? L(` Làm ${q(next)} đi!`, ` Go do ${q(next)}!`) : "";
-  return L(`(╯°□°)╯︵ ┻━┻ ĐỦ RỒI ${app.toUpperCase()}!`, `(╯°□°)╯︵ ┻━┻ ENOUGH ${app.toUpperCase()}!`) + n;
+  const n = next ? L(` Mình cùng làm ${q(next)} nhé?`, ` Shall we do ${q(next)} together?`) : "";
+  return L(`(╯°□°)╯︵ ┻━┻ ${app} lâu quá rồi đó!`, `(╯°□°)╯︵ ┻━┻ That's a lot of ${app}!`) + n;
 }
 
+/** The end-of-day note on time spent on distracting apps and sites: a neutral tally, then an offer. */
 export function distractionSummary(d: Record<string, number>): string {
   const total = Math.trunc(Object.values(d).reduce((a, b) => a + b, 0) / 60);
   const top = Object.entries(d)
@@ -302,16 +352,19 @@ export function distractionSummary(d: Record<string, number>): string {
     .slice(0, 3)
     .map(([k, v]) => `${k} ${Math.trunc(v / 60)}'`)
     .join(", ");
-  return L(`Hôm nay bạn ở mấy chỗ xao nhãng ${total} phút đó 😒 (${top})`, `You spent ${n(total, "minute")} on distractions today 😒 (${top})`);
+  return L(
+    `Hôm nay bạn ghé mấy chỗ xao nhãng tổng cộng ${total} phút (${top}). Mai mình giúp bạn giữ tập trung nhé 🛡️`,
+    `Today's detours: ${n(total, "minute")} (${top}). Want me to help guard your focus tomorrow? 🛡️`,
+  );
 }
 
-// Spoken lines (short, no emoji).
-export const voiceGrumble = () => pick([["Haizzz. Làm việc đi chứ.", "Sigh. Get to work."], ["Mình chán quá à.", "I'm so bored."]]);
-export const voiceAngry = (t: TodoTask) => L(`Ê! Làm ${shortText(taskTitle(t), 30)} ngay!`, `Hey! Do ${shortText(taskTitle(t), 30)} now!`);
-export const voiceBlock = (app: string) => L(`Tắt ${app} đi!`, `Close ${app}!`);
+// Spoken lines (short, no emoji): invitations, never orders.
+export const voiceGrumble = () => pick([["Mình bắt đầu một việc nhỏ nhé?", "Shall we start something small?"], ["Mình ở đây khi bạn sẵn sàng.", "I'm here when you're ready."]]);
+export const voiceAngry = (t: TodoTask) => L(`Mình làm ${shortText(taskTitle(t), 30)} nhé? Mình ở đây với bạn.`, `How about ${shortText(taskTitle(t), 30)}? I'll keep you company.`);
+export const voiceBlock = (app: string) => L(`Để ${app} lát nữa nhé?`, `Shall we leave ${app} for later?`);
 export const voiceHungry = () => L("Mình đói quá.", "I'm so hungry.");
 export const voiceCheer = () => pick([["Tuyệt vời!", "Awesome!"], ["Hoan hô!", "Hooray!"]]);
-export const voiceSummary = (minutes: number) => L(`Hôm nay bạn lướt mạng ${minutes} phút đó.`, `You goofed off for ${minutes} minutes today.`);
+export const voiceSummary = (minutes: number) => L(`Hôm nay có ${minutes} phút xao nhãng. Mai mình làm lại nhé.`, `${minutes} minutes of detours today. Tomorrow is a fresh start.`);
 
 /** Short, evidence-based productivity tips the pet drops occasionally. */
 export const tip = () =>

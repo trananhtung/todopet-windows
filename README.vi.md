@@ -4,7 +4,7 @@
 
 <p align="center">
 Thú cưng trên màn hình Windows 10/11, sống trên thanh tác vụ, đọc việc trong <a href="https://todoist.com">Todoist</a>,
-<b>vui khi bạn làm việc</b> và <b>cáu khi bạn lười</b>. Giờ có tới <b>24 loài</b>.<br>
+<b>cổ vũ khi bạn làm việc</b> và <b>lo lắng (rồi giúp bạn) khi mọi thứ chậm lại</b>. Giờ có tới <b>24 loài</b>.<br>
 <a href="README.md">English</a> · Tiếng Việt · Bản Windows của <a href="https://github.com/trananhtung/todopet">TodoPet cho macOS</a>
 </p>
 
@@ -23,11 +23,13 @@ Mọi tính năng của bản macOS:
 - **Đi dạo trên màn hình**, nhìn theo con trỏ, đứng lại đỏ mặt khi bạn rê chuột vào. Kéo đi đâu cũng được, thả ra là rơi về thanh tác vụ.
 - **Hỏi "hôm nay mình làm gì?"** Nếu hôm nay chưa đủ **3 việc** (tuỳ chỉnh), pet nhắc bạn lên kế hoạch: nhẹ nhàng buổi sáng, gắt hơn khi qua giờ chốt kế hoạch.
 - **Nhắc đúng việc** theo kiểu "ăn con ếch trước", nhắc mỗi 45 phút, báo trước 10 phút với việc có giờ.
-- **Có tâm trạng thật.** Ăn mừng mỗi việc xong (kể cả việc bạn tick trong Todoist), nhăn nhó rồi nổi cáu khi có việc quá hạn, hàng giờ không tiến triển, hay bạn ngồi lướt web. Khi cáu nó còn hành quân về phía con trỏ 😤
+- **Có tâm trạng thật.** Ăn mừng mỗi việc xong (kể cả việc bạn tick trong Todoist). Khi có việc quá hạn hay hàng giờ không tiến triển, pet lo lắng và gợi ý giúp: bắt đầu lại với việc quá hạn, một phiên tập trung, chia nhỏ việc to. Pet chỉ nổi cáu khi bạn đang ở trang web hay ứng dụng gây xao nhãng, lúc đó nó còn hành quân về phía con trỏ 😤
 - **Làm việc với Todoist ngay trên pet:** xem việc hôm nay, đánh dấu xong, thêm việc (Hôm nay / Mai / Không hạn / cú pháp Todoist như `Gọi Anna 3pm p1 #Work`), dời, xoá (có hỏi lại), tập trung, chia nhỏ.
 - **Hẹn giờ tập trung**, **tổng kết cuối ngày**, **gợi ý khung giờ** trong lúc trống, và **chia nhỏ việc cứ bị dời** thành bước 15–30 phút (có thể nhờ Claude).
 - **Bắt quả tang web/ứng dụng gây xao nhãng.** Đọc địa chỉ tab đang mở trên Chrome, Edge, Brave, Vivaldi, Opera, Firefox qua Windows UI Automation (dự phòng bằng tiêu đề cửa sổ) và tên ứng dụng đang dùng.
-- **Một bé pet sống cùng công việc:** độ no, bẩn và ruồi bu sau những ngày lười, XP và 5 giai đoạn lớn lên, màn ăn mừng ngẫu nhiên với bánh vàng hiếm, combo và pháo hoa, phụ kiện mở khoá, sổ sticker, và trò nghịch tăng dần (diễu hành cầm biển, lật bàn giữa màn hình) — không bao giờ khi bạn đang gõ phím, đang họp hay đang tập trung.
+- **Một bé pet sống cùng công việc:** độ no, bẩn và ruồi bu sau những ngày lỡ, XP và 5 giai đoạn lớn lên, màn ăn mừng ngẫu nhiên với bánh vàng hiếm, combo và pháo hoa, phụ kiện mở khoá, và sổ sticker mà trang nào cũng tặng sẵn 2 sticker. Trò nghịch (càu nhàu, diễu hành cầm biển, rồi lật bàn giữa màn hình) chỉ xảy ra khi bạn đang ở trang web hay ứng dụng gây xao nhãng — không bao giờ khi bạn đang họp hay đang tập trung (càu nhàu và diễu hành còn chờ bạn ngừng gõ phím).
+- **Chuỗi ngày dễ thở.** Xong 1 việc là giữ chuỗi; lỡ một ngày thì pet ăn 1 bánh trong túi để giữ, chuỗi đứt vẫn nối lại được vào ngày làm việc tới, còn ngày nghỉ, ngày tắt máy và ngày họp kín lịch không bao giờ bị tính.
+- **Hạn mức nhắc mỗi ngày:** tối đa 8 lời nhắc không gấp mỗi ngày (tuỳ chỉnh), lời nhắc nào bạn hay đóng thì sẽ thưa dần.
 - **Không phá sự tập trung:** chỉ nhắc khi bạn ngừng tay, giữ im lặng khi bạn đang vào guồng, cách nhau ít nhất 15 phút, đứng yên khi bạn gõ, mặc định rất yên tĩnh.
 - **Nhật ký** ghi lại mỗi lời nhắc và lý do, để bạn tinh chỉnh.
 - **Tiếng Anh và tiếng Việt.**
@@ -74,7 +76,7 @@ Thêm API key của Anthropic trong **Cài đặt → Việc bị dời** ([lấ
 
 ## Tâm trạng tính thế nào
 
-Pet giữ điểm vui 0–100, tính lại mỗi 15 giây (y hệt bản macOS). Rê chuột vào dòng tâm trạng trên bảng việc để xem chi tiết. ≥ 75 là vui, ≥ 50 bình thường, ≥ 30 nhăn nhó, thấp hơn là nổi cáu. Ngoài giờ làm, ban đêm, khi họp hay khi bạn rời máy 10 phút, pet dịu lại hoặc ngủ.
+Pet giữ điểm vui 0–100, tính lại mỗi 15 giây (y hệt bản macOS). Rê chuột vào dòng tâm trạng trên bảng việc để xem chi tiết. ≥ 75 là vui, ≥ 50 bình thường, thấp hơn là lo lắng. Pet chỉ nổi cáu (dưới 30) khi bạn đang ở ứng dụng hay trang web gây xao nhãng trong giờ làm. Ngoài giờ làm, ban đêm, khi họp hay khi bạn rời máy 10 phút, pet dịu lại hoặc ngủ.
 
 ## Quyền riêng tư
 

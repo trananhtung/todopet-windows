@@ -4,7 +4,7 @@
 
 <p align="center">
 A desktop pet for Windows 10/11 that lives on top of your taskbar, reads your <a href="https://todoist.com">Todoist</a> tasks,
-and gets <b>happy when you work</b> and <b>grumpy when you don't</b>. Now with <b>24 species</b>.<br>
+<b>cheers you on when you work</b> and <b>worries (and helps) when things slip</b>. Now with <b>24 species</b>.<br>
 English · <a href="README.vi.md">Tiếng Việt</a> · Windows port of <a href="https://github.com/trananhtung/todopet">TodoPet for macOS</a>
 </p>
 
@@ -23,11 +23,13 @@ Everything from the macOS app:
 - **Walks around your screen.** It wanders along the taskbar, looks at your cursor, and stops and blushes when you hover it. Drag it anywhere and it falls back down.
 - **Asks "what are we doing today?"** If today has fewer than **3 tasks** (configurable), it asks you to plan, gently in the morning and more insistently once the planning deadline passes.
 - **Reminds you of the right task** with "eat the frog" ordering, nudges every 45 minutes, and pings you 10 minutes before timed tasks.
-- **Has real moods.** It celebrates every finished task (including ones you tick off in Todoist), and gets annoyed, then grumpy, when tasks are overdue, nothing moves for hours, or you sit on a distracting site. When grumpy it marches toward your cursor 😤
+- **Has real moods.** It celebrates every finished task (including ones you tick off in Todoist). When tasks are overdue or nothing moves for hours it gets worried and offers help: a fresh start for overdue tasks, a focus session, splitting a big task. It only gets grumpy while you're on a distracting site or app, and then it marches toward your cursor 😤
 - **Lets you work with Todoist from the pet.** Click it for today's tasks: complete, add (Today / Tomorrow / No date / full quick-add syntax like `Call Anna 3pm p1 #Work`), move, delete (after a confirmation), focus, split.
 - **Focus timer**, **end-of-day review**, **time-block suggestions** in your free gaps, and **splitting tasks you keep postponing** into 15–30 minute steps (optionally with Claude).
 - **Catches distracting websites and apps.** It reads the active tab's address in Chrome, Edge, Brave, Vivaldi, Opera and Firefox through Windows UI Automation (falling back to the window title), and the name of the app in front.
-- **A pet that lives with your work:** fullness, dirt and flies after lazy days, XP and five growth stages, random celebrations with a rare golden treat, combos and fireworks, accessories to unlock, a sticker book, and escalating mischief (a sign parade, and a table flip in the middle of your screen) that never fires while you're typing, in a meeting or focusing.
+- **A pet that lives with your work:** fullness, dirt and flies after missed days, XP and five growth stages, random celebrations with a rare golden treat, combos and fireworks, accessories to unlock, and a sticker book whose pages start with two gift stickers. Playful mischief (a grumble, a sign parade, then a table flip in the middle of your screen) only happens while you're on a distracting site or app, never in a meeting or while you're focusing (and the grumble and the parade wait for a pause in your typing).
+- **Forgiving streaks.** One finished task keeps your streak; a snack from your stash saves a missed day, a broken streak can be repaired the next workday, and days off, days the PC is off and packed meeting days never count against you.
+- **A daily nudge budget:** at most 8 unsolicited reminders a day (you choose), and the ones you keep closing come less often.
 - **Designed not to break your focus:** it interrupts only at a pause, holds non-urgent bubbles while you're in the zone, spaces bubbles at least 15 minutes apart, keeps still while you type, and is quiet by default.
 - **A diary** of every reminder and why it fired, to tune it to how you work.
 - **English and Vietnamese.**
@@ -80,7 +82,7 @@ Add an Anthropic API key in **Settings → Postponed tasks** ([get one](https://
 
 The pet keeps a 0–100 happiness score, recalculated every 15 seconds (same formula as the macOS app). Hover the mood line on the board to see the breakdown.
 
-| Makes it happier | Makes it grumpier |
+| Makes it happier | Makes it worried |
 |---|---|
 | +8 per task completed today | −7 per overdue task |
 | +30 when today's plan is fully done | −4 per task that's past its time |
@@ -90,7 +92,7 @@ The pet keeps a 0–100 happiness score, recalculated every 15 seconds (same for
 | | −3 per task that keeps getting postponed (up to −9) |
 | | Up to −15 when it's hungry · −5 per level of dirt |
 
-Score ≥ 75 is happy, ≥ 50 chill, ≥ 30 annoyed, and anything lower grumpy. Outside work hours, at night, in meetings, or after 10 minutes away it calms down or falls asleep.
+Score ≥ 75 is happy, ≥ 50 chill, and anything lower worried. It only turns grumpy (below 30) while you're on a distracting app or site in work hours. Outside work hours, at night, in meetings, or after 10 minutes away it calms down or falls asleep.
 
 ## Privacy
 
