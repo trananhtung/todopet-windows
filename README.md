@@ -33,6 +33,8 @@ Everything from the macOS app:
 - **"Where was I?"** After 5+ minutes away, a meeting, or a 2+ minute detour on a distracting site, the pet shows what you were on (the task, the app and the page) with **Reopen ↗**, **Focus** and **Something else**. **📌 Pin my place** on the board keeps your spot with a one-line next step. It isn't counted against the nudge budget.
 - **Meeting bookends.** The "meeting soon" bubble lists up to 2 related tasks; after a meeting of 15+ minutes the pet asks "Anything to capture?" (**＋ Next step** opens the add field with the meeting's name in it) and suggests a 5-minute breather when the next meeting is close.
 - **If-then starts and a 2-minute starter.** A task's **⋯** menu has **Start when…** (after a meeting, when I open an app, after lunch) and **Try 2 minutes**, a tiny "just open it" session that ends with an offer for a full one or a kind "that's enough".
+- **A shutdown ritual.** When the day is almost over (or from the board's day strip after 15:00) **Wrap up** shows today's wins, lets you send each unfinished task to **Tomorrow**, take it off the plan (**No date**) or keep it, pick **tomorrow's frog** and leave yourself a one-line note. **Done for today** puts the pet to sleep and quiet until your next workday starts (meetings and timed tasks still get through). The next morning's greeting names the frog and the note, and the frog goes first that day.
+- **An overbooked warning and a day strip.** The board shows your work day as a compact strip (meetings, timed tasks, now) with "~6h / 7h left". Once a day, after planning, if tasks plus the meetings still ahead run an hour or more past the time left, the pet says so kindly and offers **Pick tasks to move**. Tasks without a Todoist duration count for the default length in Settings (30 minutes). Not counted against the nudge budget.
 - **Designed not to break your focus:** it interrupts only at a pause, holds non-urgent bubbles while you're in the zone, spaces bubbles at least 15 minutes apart, keeps still while you type, and is quiet by default.
 - **A diary** of every reminder and why it fired, to tune it to how you work.
 - **English and Vietnamese.**
@@ -101,10 +103,10 @@ Score ≥ 75 is happy, ≥ 50 chill, and anything lower worried. It only turns g
 
 - No analytics and no servers of its own. Network traffic goes to `api.todoist.com`, your ICS links, and to `api.anthropic.com` only when you press **Ask Claude**.
 - Distraction detection reads the **name of the app in front** and, for browsers, the **address of the active tab** and its page title (window titles of other apps are never read). They stay in memory and are never stored or sent anywhere.
-- The **"Where was I?"** card remembers the task, app, page title and address (http/https only) you were on, plus the next step you pin. It lives **in memory only**: never saved to disk, never written to the diary, and forgotten at midnight. Your **Start when…** plans (a task, and a meeting, an app name or "after lunch") are saved for the day and dropped the day after.
+- The **"Where was I?"** card remembers the task, app, page title and address (http/https only) you were on, plus the next step you pin. It lives **in memory only**: never saved to disk, never written to the diary, and forgotten at midnight. Your **Start when…** plans (a task, and a meeting, an app name or "after lunch") are saved for the day and dropped the day after. So are the frog (a task id) and the one-line note from **Wrap up**, until the day they are for is over.
 - Typing detection uses Windows Raw Input and records **only the time of the last key-down**: it never reads which key, and it is not a keyboard hook.
 - Calendar ICS links are secret addresses, so they're stored in Windows Credential Manager like the tokens, and only public internet addresses are fetched.
-- Settings, the pet's life and today's "start when…" plans are in `%APPDATA%\com.trananhtung.todopet`; the diary stays on this PC in `%LOCALAPPDATA%\com.trananhtung.todopet` (14 days, can be turned off).
+- Settings, the pet's life, today's "start when…" plans and tomorrow's frog and note are in `%APPDATA%\com.trananhtung.todopet`; the diary stays on this PC in `%LOCALAPPDATA%\com.trananhtung.todopet` (14 days, can be turned off).
 - Spoken lines use the voices built into Windows, offline.
 
 ## Development

@@ -34,6 +34,8 @@ export interface BoardRequest {
   fromKeyboard: boolean;
   /** Text for the add field ("Team sync: "), when something else (the after-meeting bubble) opened the board for it. */
   prefill: string | null;
+  /** Opens on the Wrap up sheet (the end-of-day bubble, the board's Wrap up button, the demo). */
+  wrapUp: boolean;
 }
 
 const isHidden = (s: BrainState) => s.hiddenUntil !== null || (s.fullscreen && s.prefs.hideInFullscreen);
@@ -100,9 +102,9 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
   }, [brain]);
 
   const openBoard = useCallback(
-    (focusAdd: boolean, split: TodoTask | null = null, fromKeyboard = false, prefill: string | null = null) => {
+    (focusAdd: boolean, split: TodoTask | null = null, fromKeyboard = false, prefill: string | null = null, wrapUp = false) => {
       setPlacement(computePlacement());
-      setBoard((b) => ({ seq: (b?.seq ?? 0) + 1, focusAdd, split, fromKeyboard, prefill }));
+      setBoard((b) => ({ seq: (b?.seq ?? 0) + 1, focusAdd, split, fromKeyboard, prefill, wrapUp }));
       void backend.system.focusOverlay().catch(() => undefined);
       applyClickThrough(false);
     },
@@ -131,6 +133,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       speak,
       openBoard: (focusAdd, prefill) => openBoard(focusAdd, null, false, prefill ?? null),
       openSplit: (task) => openBoard(false, task),
+      openWrapUp: () => openBoard(false, null, false, null, true),
     };
   }, [brain, openBoard]);
 

@@ -209,7 +209,16 @@ describe("kind lines", () => {
   const ARGS: Record<string, unknown[][]> = {
     greeting: [[at9], [new Date(2026, 9, 28, 12)], [new Date(2026, 9, 28, 15)], [new Date(2026, 9, 28, 20)]],
     hello: [["Mochi"]],
-    morning: [[at9, 1, 3, t, 3], [at9, 3, 3, t, 3], [at9, 3, 0, null, 3]],
+    morning: [
+      [at9, 1, 3, t, 3],
+      [at9, 3, 3, t, 3],
+      [at9, 3, 0, null, 3],
+      [at9, 3, 3, t, 3, { frog: t, note: "Start with the intro" }],
+      [at9, 3, 3, t, 3, { frog: task("2", { content: "Call Anna" }), note: null }],
+      [at9, 1, 3, t, 3, { frog: t, note: "Call mum" }],
+      [at9, 3, 0, null, 3, { frog: null, note: "Call mum" }],
+      [at9, 3, 3, t, 3, { frog: null, note: null }],
+    ],
     plan: moods.map((m) => [m, 1, 3]),
     nudge: moods.map((m) => [m, t, 3]),
     overdue: moods.flatMap((m) => [[m, 2, 0], [m, 1, 2], [m, 0, 2], [m, 0, 1]]),
@@ -220,6 +229,24 @@ describe("kind lines", () => {
     done: [[t, 1, 3, "meow"], [t, 3, 3, "meow"]],
     allDone: [[]],
     review: [[1, 3, 2]],
+    overbooked: [
+      [{ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 }],
+      [{ taskMinutes: 200, meetingMinutes: 0, capacity: 90, overBy: 110 }],
+      [{ taskMinutes: 480, meetingMinutes: 45, capacity: 30, overBy: 495 }],
+    ],
+    loadMeter: [
+      [{ taskMinutes: 240, meetingMinutes: 120, capacity: 420, overBy: 0 }],
+      [{ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 }],
+      [{ taskMinutes: 90, meetingMinutes: 0, capacity: 0, overBy: 90 }],
+      [{ taskMinutes: 0, meetingMinutes: 0, capacity: 0, overBy: 0 }],
+    ],
+    loadDetail: [
+      [{ taskMinutes: 240, meetingMinutes: 120, capacity: 420, overBy: 0 }],
+      [{ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 }],
+      [{ taskMinutes: 90, meetingMinutes: 0, capacity: 0, overBy: 90 }],
+    ],
+    wrappedUp: [[t], [null]],
+    backToWork: [[]],
     welcomeBack: [[t]],
     soon: [[t, 5]],
     dueNow: [[t]],
@@ -347,6 +374,82 @@ describe("kind lines", () => {
     expect(lines.freshStart(1, 1)).toMatch(/repeating tasks stay put/i);
     expect(lines.freshStartPartial(2, 3, 1, 0, "offline")).toContain("Moved 2 of 3 overdue tasks to tomorrow; 1 couldn't move");
     expect(lines.freshStartPartial(0, 2, 2, 0, "offline")).toMatch(/Couldn't move the 2 overdue tasks/);
+  });
+
+  it("says the overbooked day with what is ahead and what is left, in both languages", () => {
+    const heavy = { taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 };
+    setLang("en");
+    expect(lines.overbooked(heavy)).toBe("Today looks overbooked: ~6h of tasks + 3h of meetings in 7h left. Move some?");
+    expect(lines.overbooked({ taskMinutes: 200, meetingMinutes: 0, capacity: 150, overBy: 50 })).toBe("Today looks overbooked: ~3h20 of tasks in 2h30 left. Move some?");
+    // Under an hour is said in minutes, never "0h45".
+    expect(lines.overbooked({ taskMinutes: 120, meetingMinutes: 30, capacity: 45, overBy: 105 })).toBe("Today looks overbooked: ~2h of tasks + 30 min of meetings in 45 min left. Move some?");
+    setLang("vi");
+    expect(lines.overbooked(heavy)).toContain("~6h việc + 3h họp");
+    expect(lines.overbooked(heavy)).toContain("7h");
+    setLang("en");
+  });
+
+  it("shows the load meter as load over time left, and says so kindly when the day is over", () => {
+    setLang("en");
+    expect(lines.loadMeter({ taskMinutes: 240, meetingMinutes: 120, capacity: 420, overBy: 0 })).toBe("~6h / 7h left");
+    expect(lines.loadMeter({ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 })).toBe("~9h / 7h left");
+    expect(lines.loadMeter({ taskMinutes: 90, meetingMinutes: 0, capacity: 0, overBy: 90 })).toBe("Work day is over · ~1h30 still open");
+    expect(lines.loadDetail({ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 })).toMatch(/6h of tasks.*3h of meetings.*7h.*2h over/);
+    setLang("vi");
+    expect(lines.loadMeter({ taskMinutes: 240, meetingMinutes: 120, capacity: 420, overBy: 0 })).toBe("~6h / 7h còn lại");
+    setLang("en");
+  });
+
+  it("wishes you a good evening and names tomorrow's frog when there is one", () => {
+    setLang("en");
+    expect(lines.wrappedUp(t)).toContain("“Write the report”");
+    expect(lines.wrappedUp(t)).toContain("🐸");
+    expect(lines.wrappedUp(null)).not.toContain("🐸");
+    expect(lines.wrappedUp(null)).toMatch(/rest/i);
+    setLang("vi");
+    expect(lines.wrappedUp(t)).toContain("“Write the report”");
+    setLang("en");
+  });
+
+  it("names the frog and the note you left in the morning greeting", () => {
+    setLang("en");
+    const call = task("2", { content: "Call Anna" });
+    // Planned: the frog is the first task, said as your own pick.
+    const planned = lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Start with the intro" });
+    expect(planned).toContain("Good morning");
+    expect(planned).toContain("picked");
+    expect(planned).toContain("“Write the report”");
+    expect(planned).toContain("📝");
+    expect(planned).toContain("“Start with the intro”");
+    // Not planned yet: the planning question comes first, the frog and the note follow.
+    const asking = lines.morning(at9, 1, 3, t, 3, { frog: call, note: null });
+    expect(asking.split("\n")[0]).toContain("1/3");
+    expect(asking).toContain("“Call Anna”");
+    expect(asking).not.toContain("Your note");
+    // A frog that is not the next task is still named, next to the usual line.
+    expect(lines.morning(at9, 3, 3, t, 3, { frog: call, note: null })).toMatch(/Eat the frog first: “Write the report”[\s\S]*“Call Anna”/);
+    // Without a plan, nothing changes.
+    expect(lines.morning(at9, 3, 3, t, 3)).toBe(lines.morning(at9, 3, 3, t, 3, null));
+    expect(lines.morning(at9, 3, 3, t, 3, { frog: null, note: null })).toBe(lines.morning(at9, 3, 3, t, 3));
+    setLang("vi");
+    expect(lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Bắt đầu từ phần mở đầu" })).toContain("“Bắt đầu từ phần mở đầu”");
+    setLang("en");
+  });
+
+  it("invites you to wrap up the day when it is almost over", () => {
+    setLang("en");
+    expect(lines.review(1, 3, 2)).toMatch(/end of day/);
+    expect(lines.review(1, 3, 2)).toMatch(/wrap up/i);
+    setLang("vi");
+    expect(lines.review(1, 3, 2)).toMatch(/tổng kết/i);
+    setLang("en");
+  });
+
+  it("gives the whole choice when asked for it, for the menu's tooltip", () => {
+    setLang("en");
+    const e = { kind: "afterMeeting", eventId: "e", title: "A very long meeting title that goes on and on and on" } as const;
+    expect(lines.triggerChoice(e, [])).toContain("A very long meeting title tha…");
+    expect(lines.triggerChoice(e, [], Infinity)).toContain("A very long meeting title that goes on and on and on");
   });
 });
 

@@ -46,6 +46,8 @@ export interface Prefs {
   protectFlow: boolean;
   /** Keep the pet still while you type. */
   stillWhileTyping: boolean;
+  /** Minutes a task counts for when Todoist has no duration for it (15–120): sizes the day for the overbooked warning. */
+  defaultEstimate: number;
   /** Minimum minutes between two unsolicited bubbles. */
   bubbleGap: number;
   /** The most unsolicited, non-urgent reminders per day (0–30); check-ins, urgent bubbles and replies are free. */
@@ -93,6 +95,7 @@ export function defaultPrefs(now = Date.now()): Prefs {
     voiceOn: false,
     protectFlow: true,
     stillWhileTyping: true,
+    defaultEstimate: 30,
     bubbleGap: 15,
     nudgeBudget: 8,
     keepLog: true,
@@ -178,6 +181,7 @@ export function prefsFromJson(raw: unknown, now = Date.now(), today = now): Pref
     voiceOn: bool("voiceOn"),
     protectFlow: bool("protectFlow"),
     stillWhileTyping: bool("stillWhileTyping"),
+    defaultEstimate: clampInt(r.defaultEstimate, 15, 120, d.defaultEstimate),
     bubbleGap: clampInt(r.bubbleGap, 0, 120, d.bubbleGap),
     nudgeBudget: clampInt(r.nudgeBudget, 0, 30, d.nudgeBudget),
     keepLog: bool("keepLog"),

@@ -18,6 +18,7 @@ import { Diary } from "./diary";
 import { L, langFromLocale, plural, setLang } from "./l10n";
 import * as life from "./life";
 import * as lines from "./lines";
+import { dayLoad, isOverbooked, type DayLoad, type DayLoadInput } from "./load";
 import {
   actionable,
   buildDay,
@@ -55,6 +56,24 @@ import {
   type TaskTrigger,
 } from "./triggers";
 import { EVERY_KINDS, REMINDER_KINDS, type Accessory, type CelebrationKind, type Lang, type Mood, type ReminderKind, type SpeciesId } from "./types";
+import {
+  draftFrog,
+  emptyPlanDoc,
+  isDoneForToday,
+  newDraft,
+  nextWorkday,
+  nextWorkdayStart,
+  planFor,
+  planFromDraft,
+  planFromJson,
+  planToJson,
+  prunePlans,
+  setPlan,
+  wrapMoves,
+  type DayPlan,
+  type PlanDoc,
+  type WrapDraft,
+} from "./wrapup";
 
 const MIN = 60_000;
 const NEVER = -8.64e15;
@@ -194,6 +213,21 @@ export interface BrainState {
   triggers: TaskTrigger[];
   /** You pinned your place and the resume card will show it (the place itself is never stored or exposed). */
   pinned: boolean;
+  /** The frog and the note you left yourself in the Wrap up sheet, for today (kept in storage until the day is over). */
+  todayPlan: DayPlan | null;
+  /** "Done for today": the pet sleeps and holds non-urgent bubbles until then (epoch ms); null when it is not. */
+  doneUntil: number | null;
+}
+
+/** What `wrapUp` did: the pet only goes to sleep when every move you chose went through. */
+export interface WrapResult {
+  ok: boolean;
+  /** Tasks moved to tomorrow. */
+  moved: number;
+  /** Tasks taken off the plan (no date). */
+  offPlan: number;
+  failed: number;
+  error: string | null;
 }
 
 /**
@@ -214,6 +248,8 @@ export interface BrainEffects {
   /** `prefill` is put in the add field ("Team sync: "). */
   openBoard?(focusAdd: boolean, prefill?: string): void;
   openSplit?(task: TodoTask): void;
+  /** Opens the board on the Wrap up sheet. */
+  openWrapUp?(): void;
 }
 
 export interface BrainOptions {
@@ -275,6 +311,9 @@ export class Brain {
   private endedEventIds: string[] = [];
   /** False after a failed read of the plans: never overwrite what's on disk with an empty list. */
   private persistTriggers = true;
+  /** Tomorrow's frog and note, and "done for today" (SPEC v0.4 §3); same rule about a failed read. */
+  private plan: PlanDoc = emptyPlanDoc();
+  private persistPlan = true;
   private distractionSnoozedUntil = NEVER;
   private anticSnoozedUntil = NEVER;
   private engagedSince: Date | null = null;
@@ -376,17 +415,20 @@ export class Brain {
       nudgeHoldUntil: lifeState.nudgeHoldUntil,
       triggers: [],
       pinned: false,
+      todayPlan: null,
+      doneUntil: null,
     };
   }
 
   /** Loads prefs, the pet's life and the postponed-task log, then picks the language. */
   static async create(backend: Backend, opts: BrainOptions = {}): Promise<Brain> {
     const now = (opts.now ?? Date.now)();
-    const [p, l, st, tr, locale] = await Promise.all([
+    const [p, l, st, tr, pl, locale] = await Promise.all([
       loadRetrying<unknown>(backend, "prefs"),
       loadRetrying<unknown>(backend, "life"),
       loadRetrying<SeenLog>(backend, "stuck"),
       loadRetrying<unknown>(backend, "triggers"),
+      loadRetrying<unknown>(backend, "plan"),
       backend.system.systemLocale().catch(() => "en"),
     ]);
     const prefs = prefsFromJson(p.ok ? p.value : null, now, now);
@@ -400,6 +442,10 @@ export class Brain {
     brain.persistLife = l.ok;
     brain.persistTriggers = tr.ok;
     brain.state.triggers = pruneTriggers(triggersFromJson(tr.ok ? tr.value : null), dayKey(new Date(now)));
+    brain.persistPlan = pl.ok;
+    brain.plan = planFromJson(pl.ok ? pl.value : null, now);
+    brain.state.todayPlan = planFor(brain.plan, dayKey(new Date(now)));
+    brain.state.doneUntil = isDoneForToday(brain.plan, now) ? brain.plan.doneUntil : null;
     if (!p.ok || !l.ok) {
       brain.diary.add("system", L("Không đọc được dữ liệu đã lưu — phiên này sẽ không ghi đè lên nó", "Couldn't read saved data — this session won't overwrite it"));
     }
@@ -907,6 +953,9 @@ export class Brain {
     this.setPinned(false);
     const kept = pruneTriggers(this.state.triggers, this.dayKey);
     if (kept.length !== this.state.triggers.length) this.setTriggers(kept);
+    // Yesterday's frog and note have done their day.
+    const plan = prunePlans(this.plan, this.dayKey);
+    if (plan !== this.plan) this.setPlanDoc(plan);
   }
 
   // ---------- Mood ----------
@@ -948,7 +997,9 @@ export class Brain {
     const nowMs = this.now();
     const now = new Date(nowMs);
     const p = this.state.prefs;
-    const day = buildDay(this.active, this.completed, now);
+    const todayPlan = planFor(this.plan, dayKey(now));
+    const day = buildDay(this.active, this.completed, now, todayPlan?.frogId ?? null);
+    const doneForToday = isDoneForToday(this.plan, nowMs);
     const ctx = this.context(nowMs);
     const events = this.state.events;
     const dayStart = atHour(p.workStart, 0, now);
@@ -959,7 +1010,7 @@ export class Brain {
     const busy = p.useCalendar && free !== null && free < 60;
     const suggestions = ctx.inWork ? suggestSlots(actionable(day), events, now, dayEnd) : [];
     const stuck = findStuck(this.seen, openTasks(day), p.stuckDays, now);
-    this.patchState({ day, target, suggestions, stuck, next: nextTask(day) });
+    this.patchState({ day, target, suggestions, stuck, next: nextTask(day), todayPlan, doneUntil: doneForToday ? this.plan.doneUntil : null });
     void this.settleLife(nowMs);
     // Not while a day that ended is still being settled: today's counts don't belong to it.
     if (this.state.hasToken && this.didLoadOnce && this.state.life.dayKey >= dayKey(now)) {
@@ -1011,6 +1062,7 @@ export class Brain {
     i.celebratingNow = nowMs < this.celebrateUntil;
     i.satiety = this.state.life.satiety;
     i.dirt = this.state.life.dirt;
+    i.doneForToday = doneForToday;
     const r = evaluateMood(i);
     if (this.demoMood && nowMs < this.demoMood.until && r.mood !== "celebrating") r.mood = this.demoMood.mood;
     const old = this.state.mood;
@@ -1178,7 +1230,8 @@ export class Brain {
     if (this.dayNote && this.dayNote.day !== today) this.dayNote = null;
     if (this.repairNote && this.repairNote.day !== today) this.repairNote = null;
     const text = [this.dayNote?.text, this.repairNote?.text].filter(Boolean).join("\n");
-    if (!text || this.state.bubble || this.outOfTheWay || this.sample.idleSeconds > 300) return;
+    // "Done for today" keeps even these until the next workday starts.
+    if (!text || this.state.bubble || this.outOfTheWay || this.sample.idleSeconds > 300 || isDoneForToday(this.plan, nowMs)) return;
     if (!this.state.isDemo && nowMs < atHour(this.state.prefs.workStart - 1, 0, now).getTime()) return;
     if (this.state.quietUntil !== null && nowMs < this.state.quietUntil) return;
     this.dayNote = null;
@@ -1610,6 +1663,8 @@ export class Brain {
     const day = s.day;
     const next = s.next;
     const open = openTasks(day);
+    // "Done for today": only the urgent bubbles (meetings above, timed tasks below) get through until work starts.
+    const done = isDoneForToday(this.plan, nowMs);
 
     if (this.awaySince !== null) {
       const minutes = Math.trunc((nowMs - this.awaySince) / MIN);
@@ -1618,7 +1673,7 @@ export class Brain {
       // With a place to come back to, the resume card (a check-in) takes the welcome's place.
       if (this.workContext && shouldOfferResume({ awayMinutes: minutes })) this.pendingResume = { reason: "away", at: nowMs };
       // Not while the pet is out of the way (nobody would see it), nor on a stale list of tasks.
-      else if (minutes > 15 && ctx.inWork && next && !this.outOfTheWay && this.snapshotFresh && this.mayRemind("welcome")) {
+      else if (!done && minutes > 15 && ctx.inWork && next && !this.outOfTheWay && this.snapshotFresh && this.mayRemind("welcome")) {
         this.say(
           { text: lines.welcomeBack(next), actions: [this.focusAction(next), this.laterAction()], seconds: 30 },
           { why: L(`bạn vừa quay lại sau ${minutes} phút`, `you just came back after ${minutes} minutes`), kind: "welcome" },
@@ -1647,6 +1702,8 @@ export class Brain {
         return;
       }
     }
+    // Done for today: nothing below is urgent.
+    if (done) return;
     // Hidden or a full-screen app in front: only the timed reminders above get through.
     if (this.outOfTheWay) return;
     if (this.state.bubble) return;
@@ -1765,7 +1822,11 @@ export class Brain {
     if (ctx.inWork && this.once(`morning-${this.dayKey}`)) {
       const needsPlan = planned(day) < target;
       if (needsPlan) this.markFired("plan", nowMs);
-      let text = lines.morning(now, planned(day), open.length, next, target);
+      // The frog and the note you left yourself the evening before; a frog that is done or gone isn't mentioned.
+      const left = planFor(this.plan, dayKey(now));
+      const frog = left?.frogId ? (open.find((t) => t.id === left.frogId) ?? null) : null;
+      const kept = left && (frog || left.note) ? { frog, note: left.note } : null;
+      let text = lines.morning(now, planned(day), open.length, next, target, kept);
       if (s.events.length > 0) {
         const start = atHour(s.prefs.workStart, 0, now);
         const end = atHour(s.prefs.workEnd, 0, now);
@@ -1776,9 +1837,24 @@ export class Brain {
       if (s.life.streak > 0) text += `\n${lines.streak(s.life.streak)}`;
       this.say(
         { text, actions: needsPlan ? this.planActions() : next ? [this.focusAction(next), this.laterAction()] : [], seconds: 60 },
-        { why: L("lời chào đầu ngày làm việc", "first greeting of the workday") + (needsPlan ? L(`, mới có ${planned(day)}/${target} việc`, `, only ${planned(day)}/${target} planned`) : "") },
+        {
+          why:
+            L("lời chào đầu ngày làm việc", "first greeting of the workday") +
+            (needsPlan ? L(`, mới có ${planned(day)}/${target} việc`, `, only ${planned(day)}/${target} planned`) : "") +
+            (kept ? L(", kèm con ếch và ghi chú bạn để lại", ", with the frog and note you left") : ""),
+        },
       );
       return;
+    }
+
+    // 3b. Overbooked? Once a day, after planning, when what's ahead runs an hour or more over the time left. A daily
+    // check-in: never counted. The last half hour belongs to the end-of-day review, which does the same job.
+    if (ctx.inWork && nowMs < ctx.reviewTime && (planned(day) >= target || ctx.hoursAfterPlanDeadline >= 0) && this.firedAt(`overbooked-${this.dayKey}`) === undefined) {
+      const load = this.currentLoad();
+      if (load.capacity > 0 && isOverbooked(load) && this.once(`overbooked-${this.dayKey}`)) {
+        this.sayOverbooked(load);
+        return;
+      }
     }
 
     // 4. Not planned enough: nag every 30 minutes once the planning deadline passed.
@@ -1878,13 +1954,14 @@ export class Brain {
       return;
     }
 
-    // 9. End-of-day review (shutdown ritual). A daily check-in: never counted.
+    // 9. End-of-day review (shutdown ritual): opens the Wrap up sheet. A daily check-in: never counted.
     if (ctx.inWork && nowMs >= ctx.reviewTime && day.today.length > 0 && this.once(`review-${this.dayKey}`)) {
       this.say(
         {
           text: lines.review(day.completed.length, planned(day), day.today.length),
           actions: [
-            { title: L("Dời sang mai", "Move to tomorrow"), primary: true, run: () => void this.moveTodayToTomorrow() },
+            { title: L("Tổng kết ngày", "Wrap up"), primary: true, run: () => this.effects.openWrapUp?.() },
+            { title: L("Dời sang mai", "Move to tomorrow"), run: () => void this.moveTodayToTomorrow() },
             { title: L("Làm tiếp", "Keep going"), run: () => undefined },
           ],
           seconds: 90,
@@ -2079,6 +2156,105 @@ export class Brain {
   /** **▶ Try 2 minutes**: a 2-minute focus on the task ("just open it"); at the end the pet offers a full session or lets you stop. */
   startTwoMinutes(task: TodoTask | null): void {
     this.startFocus(task, STARTER_MINUTES, true);
+  }
+
+  // ---------- Wrapping up the day and the overbooked check (SPEC v0.4 §3, §4) ----------
+
+  /** Is this a day the pet works on? The demo works every day unless you take it off (as in `context`). */
+  private readonly workdayOn = (d: Date): boolean => (this.state.isDemo ? !isRestDay(this.state.prefs, d) : isWorkday(this.state.prefs, d));
+
+  private setPlanDoc(doc: PlanDoc): void {
+    this.plan = doc;
+    if (!this.persistPlan) return;
+    this.backend.storage.save("plan", planToJson(doc)).catch(() => undefined);
+  }
+
+  /**
+   * The moment the day's load is measured from: now. The demo (which pretends every hour is a work hour) measures from
+   * an hour into the work day when it is not, so the numbers always make sense.
+   */
+  loadClock(): number {
+    const nowMs = this.now();
+    if (!this.state.isDemo) return nowMs;
+    const p = this.state.prefs;
+    const now = new Date(nowMs);
+    const inside = nowMs >= atHour(p.workStart, 0, now).getTime() && nowMs < atHour(p.workEnd, 0, now).getTime();
+    return inside ? nowMs : atHour(p.workStart + 1, 0, now).getTime();
+  }
+
+  /** What the day's load and the board's day strip are worked out from: today's open tasks and meetings against the work hours. */
+  dayInput(nowMs = this.loadClock()): DayLoadInput {
+    const p = this.state.prefs;
+    return { tasks: this.state.day.today, events: this.state.events, now: nowMs, workStart: p.workStart, workEnd: p.workEnd, defaultEstimate: p.defaultEstimate };
+  }
+
+  currentLoad(nowMs = this.loadClock()): DayLoad {
+    return dayLoad(this.dayInput(nowMs));
+  }
+
+  private sayOverbooked(load: DayLoad): void {
+    this.say(
+      {
+        text: lines.overbooked(load),
+        actions: [
+          { title: L("Chọn việc để dời", "Pick tasks to move"), primary: true, run: () => this.effects.openBoard?.(false) },
+          { title: L("Không sao", "It's fine"), run: () => undefined },
+        ],
+        seconds: 60,
+      },
+      { why: L(`ngày có vẻ quá tải: dư ${load.overBy} phút so với thời gian còn lại`, `the day looks overbooked: ${load.overBy} min more than the time left`) },
+    );
+  }
+
+  /** The Wrap up sheet's starting point: nothing moves, and the frog and note you may have chosen already for the next workday. */
+  wrapDraft(): WrapDraft {
+    return newDraft(this.state.day.today, planFor(this.plan, nextWorkday(this.now(), this.workdayOn)));
+  }
+
+  /**
+   * **Done for today** (SPEC v0.4 §3): moves the tasks you chose (to tomorrow, or off the plan), saves tomorrow's frog
+   * and note, and puts the pet to sleep until the next workday starts. If a move fails nothing goes to sleep: the
+   * frog and note are kept (they're yours and local), the failure is reported, and the same call can be repeated.
+   */
+  async wrapUp(draft: WrapDraft): Promise<WrapResult> {
+    const nowMs = this.now();
+    const tasks = this.state.day.today;
+    const { tomorrow, none } = wrapMoves(draft, tasks);
+    const frog = draftFrog(draft, tasks);
+    const plan = planFromDraft(draft, tasks, nextWorkday(nowMs, this.workdayOn));
+    if (tomorrow.length + none.length > 0) this.lastPlanAction = nowMs;
+    const [a, b] = await Promise.all([this.rescheduleAll(tomorrow, "tomorrow"), this.rescheduleAll(none, "no date")]);
+    const failed = a.failed + b.failed;
+    const error = a.error ?? b.error;
+    const result: WrapResult = { ok: failed === 0, moved: a.moved.length, offPlan: b.moved.length, failed, error };
+    if (tomorrow.length + none.length > 0) await this.refresh();
+    const doneUntil = result.ok ? nextWorkdayStart(nowMs, this.state.prefs.workStart, this.workdayOn) : this.plan.doneUntil;
+    this.setPlanDoc({ ...setPlan(this.plan, plan), doneUntil });
+    if (!result.ok) {
+      this.recompute();
+      this.sayMoveFailed(failed, error ?? "");
+      return result;
+    }
+    this.diary.add(
+      "system",
+      L(`Tổng kết ngày: ${result.moved} việc sang mai, ${result.offPlan} việc ra khỏi kế hoạch`, `Wrapped up the day: ${result.moved} moved to tomorrow, ${result.offPlan} off the plan`) +
+        (frog ? L(`; con ếch ngày mai “${shortText(taskTitle(frog), 40)}”`, `; tomorrow's frog “${shortText(taskTitle(frog), 40)}”`) : "") +
+        (plan.note ? L("; kèm ghi chú", "; with a note") : "") +
+        L(`; yên tĩnh tới ${timeString(new Date(doneUntil ?? nowMs))}`, `; quiet until ${timeString(new Date(doneUntil ?? nowMs))}`),
+    );
+    this.set({ antic: null });
+    this.recompute();
+    this.say({ text: lines.wrappedUp(frog), seconds: 10, urgent: true });
+    return result;
+  }
+
+  /** Wakes the pet from "done for today" (you changed your mind and want to keep going). The frog and note stay. */
+  resumeDay(): void {
+    if (!isDoneForToday(this.plan, this.now())) return;
+    this.setPlanDoc({ ...this.plan, doneUntil: null });
+    this.diary.add("system", L("Bạn làm tiếp — pet thức dậy", "You're back at it — the pet woke up"));
+    this.recompute();
+    this.say({ text: lines.backToWork(), seconds: 6, urgent: true });
   }
 
   // ---------- Actions ----------
@@ -2628,6 +2804,23 @@ export class Brain {
     this.recompute();
     this.set({ bubble: null });
     this.tellNotes(nowMs);
+  }
+
+  /** Demo: open the Wrap up sheet, whatever the hour. */
+  demoWrapUp(): void {
+    this.effects.openWrapUp?.();
+  }
+
+  /**
+   * Demo: show the overbooked warning for the day as it stands (the demo panel makes the day heavy first, or light
+   * again with `on` false), without waiting for the once-a-day check.
+   */
+  async demoOverbooked(on = true): Promise<void> {
+    this.clearForDemo();
+    await this.refresh();
+    if (!on) return;
+    const load = this.currentLoad();
+    if (load.capacity > 0 && isOverbooked(load)) this.sayOverbooked(load);
   }
 
   /** Dev hook (demo only): celebrate as if a task was finished. */

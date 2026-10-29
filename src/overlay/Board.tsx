@@ -2,15 +2,17 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Ref } 
 import type { Backend } from "../backend/types";
 import { errorMessage, type Brain, type BrainState, type DueChoice } from "../core/brain";
 import { currentEvent, freeMinutes } from "../core/calendar";
-import { atHour, daysAgo, dayKey, hoursText, parseDate, timeString } from "../core/dates";
+import { addDays, atHour, daysAgo, dayKey, hoursText, parseDate, timeString } from "../core/dates";
 import { getLang, L, plural } from "../core/l10n";
 import * as life from "../core/life";
 import * as lines from "../core/lines";
 import { dueDay, dueTime, isRecurring, planned, taskTitle, uiPriority, type TodoTask } from "../core/models";
+import { dayStrip } from "../core/load";
 import { moodEmoji, moodLabel } from "../core/mood";
 import { isWorkday } from "../core/prefs";
 import type { StartTrigger } from "../core/triggers";
 import { ACCESSORIES, SPECIES_IDS } from "../core/types";
+import { canMove, canWrapUp, chooseFrog, chooseMove, moveAllToTomorrow, MAX_NOTE_LENGTH, setNote, wrapMoves, type WrapDraft, type WrapMove } from "../core/wrapup";
 import { defaultPose, renderPet, speciesInfo } from "../pets";
 import { Icon, type IconName } from "../ui/icons";
 import { localeTag } from "../ui/lang";
@@ -18,7 +20,7 @@ import type { BoardRequest } from "./App";
 import type { BoardPlacement } from "./placement";
 import { Popover } from "./Popover";
 
-type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "wardrobe" };
+type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "wardrobe" } | { kind: "wrapup" };
 
 /** Priority text colors (AA on the board's surfaces) and check-circle colors, P1…P4. */
 const PRIO_INK = ["", "var(--p1-ink)", "var(--p2-ink)", "var(--p3-ink)", "var(--p4-ink)"];
@@ -61,11 +63,12 @@ export function Board(props: {
 }) {
   const { brain, backend, request, placement, onClose } = props;
   const s = useSyncExternalStore(brain.subscribe, brain.getSnapshot);
-  const [view, setView] = useState<View>(request.split ? { kind: "split", task: request.split } : { kind: "main" });
+  const [view, setView] = useState<View>(request.split ? { kind: "split", task: request.split } : request.wrapUp ? { kind: "wrapup" } : { kind: "main" });
   const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (request.split) setView({ kind: "split", task: request.split });
+    else if (request.wrapUp) setView({ kind: "wrapup" });
     else if (request.focusAdd) setView({ kind: "main" });
   }, [request]);
 
@@ -101,8 +104,19 @@ export function Board(props: {
           <SplitSheet brain={brain} s={s} task={view.task} onDone={() => setView({ kind: "main" })} />
         ) : view.kind === "wardrobe" ? (
           <Wardrobe brain={brain} s={s} onBack={() => setView({ kind: "main" })} />
+        ) : view.kind === "wrapup" ? (
+          <WrapUpSheet brain={brain} s={s} onBack={() => setView({ kind: "main" })} onDone={onClose} />
         ) : (
-          <Main brain={brain} backend={backend} s={s} focusAdd={request.focusAdd} prefill={request.prefill} seq={request.seq} onSplit={(task) => setView({ kind: "split", task })} />
+          <Main
+            brain={brain}
+            backend={backend}
+            s={s}
+            focusAdd={request.focusAdd}
+            prefill={request.prefill}
+            seq={request.seq}
+            onSplit={(task) => setView({ kind: "split", task })}
+            onWrapUp={() => setView({ kind: "wrapup" })}
+          />
         )}
       </div>
       <Footer brain={brain} s={s} onClose={onClose} />
@@ -388,6 +402,7 @@ function Main({
   prefill,
   seq,
   onSplit,
+  onWrapUp,
 }: {
   brain: Brain;
   backend: Backend;
@@ -396,12 +411,14 @@ function Main({
   prefill: string | null;
   seq: number;
   onSplit: (t: TodoTask) => void;
+  onWrapUp: () => void;
 }) {
   const day = s.day;
   const stuckIds = new Map(s.stuck.map((x) => [x.task.id, x.days]));
   const done = day.completed.length;
   const dayOff = s.prefs.restDays.includes(dayKey(new Date()));
-  const toPlan = dayOff ? 0 : s.target - planned(day);
+  // Nothing to plan on a day off, nor once the day is wrapped up (what you moved to tomorrow was on purpose).
+  const toPlan = dayOff || s.doneUntil !== null ? 0 : s.target - planned(day);
   // One confirmation line under the add form, for adds and for moves.
   const [note, setNote] = useState<Note | null>(null);
   return (
@@ -409,6 +426,9 @@ function Main({
       {s.focus && <FocusCard brain={brain} s={s} />}
 
       <AddTask brain={brain} focusAdd={focusAdd} prefill={prefill} seq={seq} note={note} setNote={setNote} />
+
+      <DayStripCard brain={brain} s={s} onWrapUp={onWrapUp} />
+      <PlanNote s={s} />
 
       {day.overdue.length > 0 && (
         <section className="section" aria-labelledby="sec-overdue">
@@ -700,9 +720,17 @@ function WhenMenu({
     <div className="menu-body">
       <div className="menu-title">{L("Bắt đầu khi…", "Start when…")}</div>
       {choices.map((c) => (
-        <button key={JSON.stringify(c)} type="button" role="menuitem" aria-current={same(c, plan) ? "true" : undefined} onClick={() => choose(c)}>
+        // A long meeting title ends in an ellipsis (the CSS), and the tooltip has all of it.
+        <button
+          key={JSON.stringify(c)}
+          type="button"
+          role="menuitem"
+          title={lines.triggerChoice(c, s.events, Infinity)}
+          aria-current={same(c, plan) ? "true" : undefined}
+          onClick={() => choose(c)}
+        >
           <Icon name={c.kind === "afterMeeting" ? "calendar" : c.kind === "appOpen" ? "reschedule" : "clock"} size={15} />
-          {lines.triggerChoice(c, s.events)}
+          <span className="menu-label">{lines.triggerChoice(c, s.events, Infinity)}</span>
           {same(c, plan) && <Icon name="check" size={14} className="menu-end" />}
         </button>
       ))}
@@ -820,6 +848,264 @@ function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; 
         </Popover>
       )}
     </>
+  );
+}
+
+const hh = (h: number) => `${String(h).padStart(2, "0")}:00`;
+
+/** "08:00", or "Mon 08:00" when that is not tomorrow. */
+function untilLabel(ms: number): string {
+  const d = new Date(ms);
+  const near = [dayKey(new Date()), addDays(dayKey(new Date()), 1)].includes(dayKey(d));
+  const weekday = near ? "" : `${d.toLocaleDateString(localeTag(getLang()), { weekday: "short" })} `;
+  return `${weekday}${timeString(d)}`;
+}
+
+/**
+ * The work day at a glance (SPEC v0.4 §4): meetings and timed tasks on a strip with a marker for now, and what is
+ * still ahead against the time left ("~6h / 7h left"), calm until the day runs an hour over. After 15:00 it also holds
+ * the **Wrap up** button; once the day is done it says so, with a way back.
+ */
+function DayStripCard({ brain, s, onWrapUp }: { brain: Brain; s: BrainState; onWrapUp: () => void }) {
+  // The marker and the time left move on their own.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const strip = dayStrip(brain.dayInput());
+  const done = s.doneUntil !== null;
+  const wrapUpOpen = canWrapUp(Date.now());
+  if (!strip.hasContent && !wrapUpOpen && !done) return null;
+  const now = new Date(brain.loadClock());
+  const t0 = atHour(strip.startHour, 0, now).getTime();
+  const length = atHour(strip.endHour, 0, now).getTime() - t0;
+  const timeAt = (f: number) => timeString(new Date(t0 + f * length));
+  const meetings = strip.segments.filter((x) => x.kind === "meeting").length;
+  const timed = strip.segments.length - meetings;
+  const detail = lines.loadDetail(strip.load);
+  const summary = L(
+    `Ngày làm việc ${hh(strip.startHour)} đến ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. Bây giờ là ${timeString(now)}.`,
+    `Work day ${hh(strip.startHour)} to ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. It is ${timeString(now)} now.`,
+  );
+  return (
+    <section className={`daystrip level-${done ? "ok" : strip.level}${done ? " is-done" : ""}`} aria-label={L("Ngày làm việc hôm nay", "Today's work day")}>
+      <div className="ds-head">
+        <span className="ds-load" title={done ? undefined : detail}>
+          <Icon name={done ? "moon" : "hourglass"} size={14} />
+          <span className="ds-text">
+            {done ? L(`Xong hôm nay · yên tĩnh tới ${untilLabel(s.doneUntil!)}`, `Done for today · quiet until ${untilLabel(s.doneUntil!)}`) : lines.loadMeter(strip.load)}
+          </span>
+          {!done && <span className="sr-only">{detail}</span>}
+        </span>
+        {!done && strip.hasContent && strip.load.capacity > 0 && (
+          <span className="ds-meter" aria-hidden>
+            <i style={{ width: `${strip.ratio * 100}%` }} />
+          </span>
+        )}
+        <span className="spacer" />
+        {done ? (
+          <button type="button" className="btn small" onClick={() => brain.resumeDay()} title={L("Pet thức dậy và nhắc việc lại như thường", "Wake the pet and get the usual reminders back")}>
+            <Icon name="sun" size={14} />
+            {L("Làm tiếp", "Back to work")}
+          </button>
+        ) : (
+          wrapUpOpen && (
+            <button type="button" className="btn small wrap-btn" onClick={onWrapUp} title={L("Dọn nốt ngày: dời việc, chọn việc đầu tiên cho mai, ghi một dòng", "Close the day: move what's left, pick tomorrow's first task, leave a note")}>
+              <Icon name="moon" size={14} />
+              {L("Tổng kết ngày", "Wrap up")}
+            </button>
+          )
+        )}
+      </div>
+      <div className="ds-track" role="img" aria-label={summary}>
+        {strip.segments.map((seg) => (
+          <i
+            key={`${seg.kind}-${seg.id}`}
+            className={`ds-seg ${seg.kind === "meeting" ? "meeting" : "timed"}`}
+            style={{ left: `${seg.start * 100}%`, width: `${(seg.end - seg.start) * 100}%` }}
+            title={`${seg.kind === "meeting" ? "📅" : "⏰"} ${seg.title} · ${timeAt(seg.start)}–${timeAt(seg.end)}`}
+          />
+        ))}
+        <i className="ds-past" style={{ width: `${strip.now * 100}%` }} />
+        <b className="ds-now" style={{ left: `${strip.now * 100}%` }} title={L(`Bây giờ ${timeString(now)}`, `Now ${timeString(now)}`)} />
+      </div>
+      <div className="ds-axis" aria-hidden>
+        <span>{hh(strip.startHour)}</span>
+        <span>{hh(strip.endHour)}</span>
+      </div>
+    </section>
+  );
+}
+
+/** The note you left yourself last time you wrapped up, all day. */
+function PlanNote({ s }: { s: BrainState }) {
+  const note = s.todayPlan?.note;
+  if (!note) return null;
+  return (
+    <div className="plan-note" title={note}>
+      <span aria-hidden>📝</span>
+      <span className="plan-note-text">
+        <b>{L("Bạn ghi lại: ", "You left yourself: ")}</b>
+        {note}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * **Wrap up** (SPEC v0.4 §3): today's wins, each unfinished task (Tomorrow / No date / Keep), tomorrow's frog, one line
+ * for tomorrow, and **Done for today**. The choices are made here and applied together when you press the button.
+ */
+function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: BrainState; onBack: () => void; onDone: () => void }) {
+  const [draft, setDraft] = useState<WrapDraft>(() => brain.wrapDraft());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const tasks = s.day.today;
+  const wins = s.day.completed;
+  const { tomorrow, none } = wrapMoves(draft, tasks);
+  const choices: [WrapMove, string][] = [
+    ["tomorrow", L("Ngày mai", "Tomorrow")],
+    ["none", L("Không hạn", "No date")],
+    ["keep", L("Giữ", "Keep")],
+  ];
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    const result = await brain.wrapUp(draft);
+    setBusy(false);
+    if (result.ok) onDone();
+    else setError(result.error ?? L("Chưa dời được hết, thử lại nhé.", "Couldn't move everything, try again."));
+  };
+  const plan = [
+    tomorrow.length > 0 && L(`dời ${tomorrow.length} việc sang mai`, `move ${plural(tomorrow.length, "", "task", "tasks").trim()} to tomorrow`),
+    none.length > 0 && L(`bỏ ${none.length} việc khỏi kế hoạch`, `take ${plural(none.length, "", "task", "tasks").trim()} off the plan`),
+  ].filter(Boolean);
+  return (
+    <div className="sheet wrap">
+      <div>
+        <button className="btn ghost small" onClick={onBack}>
+          <Icon name="arrowLeft" size={14} /> {L("Quay lại", "Back")}
+        </button>
+      </div>
+      <h2>
+        <Icon name="moon" size={18} /> {L("Tổng kết ngày", "Wrap up the day")}
+      </h2>
+      <p className="muted wrap-intro">{L("Vài cú chạm là xong, không có đúng sai: chỉ là dọn bàn cho mai.", "A few taps, no right answers: just a tidy desk for tomorrow.")}</p>
+
+      <section aria-labelledby="wrap-wins">
+        <h3 id="wrap-wins">
+          {L("Hôm nay bạn đã làm", "Today's wins")} <span className="count good">{wins.length}</span>
+        </h3>
+        {wins.length === 0 ? (
+          <p className="wrap-empty">{L("Chưa tick việc nào, và vậy cũng không sao: bạn đã có mặt 🌱", "Nothing ticked off yet, and that's okay: you showed up 🌱")}</p>
+        ) : (
+          <ul className="wrap-wins">
+            {wins.slice(0, 4).map((t) => (
+              <li key={t.id} title={taskTitle(t)}>
+                <Icon name="check" size={13} />
+                <span>{taskTitle(t)}</span>
+              </li>
+            ))}
+            {wins.length > 4 && <li className="more">{L(`và ${wins.length - 4} việc nữa`, `and ${wins.length - 4} more`)}</li>}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="wrap-open">
+        <div className="wrap-head">
+          <h3 id="wrap-open">
+            {L("Còn dang dở", "Still open")} <span className="count">{tasks.length}</span>
+          </h3>
+          <span className="spacer" />
+          {tasks.some(canMove) && (
+            <button type="button" className="btn small" onClick={() => setDraft((d) => moveAllToTomorrow(d, tasks))}>
+              {L("Tất cả sang mai", "All to tomorrow")}
+            </button>
+          )}
+        </div>
+        {tasks.length === 0 ? (
+          <p className="wrap-empty">{L("Không còn việc nào dang dở 🎉", "Nothing left open 🎉")}</p>
+        ) : (
+          <ul className="wrap-tasks">
+            {tasks.map((t) => {
+              const title = taskTitle(t);
+              const move = draft.moves[t.id] ?? "keep";
+              const movable = canMove(t);
+              return (
+                <li key={t.id} className={`wrap-row${move === "none" ? " off" : ""}`}>
+                  <div className="wrap-title" title={title}>
+                    {title}
+                  </div>
+                  <div className="wrap-ctl">
+                    <div className="seg" role="group" aria-label={L(`Làm gì với “${short(title, 40)}”`, `What to do with “${short(title, 40)}”`)}>
+                      {choices.map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          aria-pressed={move === value}
+                          disabled={value !== "keep" && !movable}
+                          onClick={() => setDraft((d) => chooseMove(d, tasks, t.id, value))}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {!movable && (
+                      <span className="chip" title={L("Việc lặp lại giữ lịch riêng của nó", "A repeating task keeps its own schedule")}>
+                        🔁
+                      </span>
+                    )}
+                    <label className="frog-pick" title={L("Con ếch của ngày mai: việc làm đầu tiên", "Tomorrow's frog: the first thing to do")}>
+                      <input type="radio" name="wrap-frog" checked={draft.frogId === t.id} disabled={move === "none"} onChange={() => setDraft((d) => chooseFrog(d, tasks, t.id))} />
+                      <span>🐸 {L("Đầu tiên mai", "First tomorrow")}</span>
+                      <span className="sr-only">{`: ${title}`}</span>
+                    </label>
+                  </div>
+                </li>
+              );
+            })}
+            <li className="wrap-row nofrog">
+              <label className="frog-pick">
+                <input type="radio" name="wrap-frog" checked={draft.frogId === null} onChange={() => setDraft((d) => chooseFrog(d, tasks, null))} />
+                <span>{L("Mai mình chọn sau", "I'll decide tomorrow")}</span>
+              </label>
+            </li>
+          </ul>
+        )}
+      </section>
+
+      <div className="wrap-note">
+        <label htmlFor="wrap-note">{L("Mai mình bắt đầu từ đâu?", "Where do I start tomorrow?")}</label>
+        <input
+          id="wrap-note"
+          className="field"
+          autoComplete="off"
+          maxLength={MAX_NOTE_LENGTH}
+          placeholder={L("Một dòng cho chính mình…", "One line for future you…")}
+          value={draft.note}
+          onChange={(e) => setDraft((d) => setNote(d, e.target.value))}
+        />
+      </div>
+
+      <p className="muted wrap-summary" role="status">
+        {plan.length > 0 ? `${plan.join(L(" và ", " and ")).replace(/^./, (c) => c.toLocaleUpperCase())}. ` : ""}
+        {L(
+          `Pet sẽ ngủ và im lặng tới khi ngày làm việc tới bắt đầu (${hh(s.prefs.workStart)}). Cuộc họp và việc có giờ vẫn được nhắc.`,
+          `Your pet will sleep and stay quiet until the next workday starts (${hh(s.prefs.workStart)}). Meetings and timed tasks still get through.`,
+        )}
+      </p>
+      {error && <div className="error">{error}</div>}
+      <div className="wrap-actions">
+        <button className="btn primary" disabled={busy} onClick={() => void submit()}>
+          <Icon name="moon" size={15} />
+          {busy ? "…" : L("Xong hôm nay", "Done for today")}
+        </button>
+        <button className="btn" onClick={onBack} disabled={busy}>
+          {L("Chưa đâu", "Not yet")}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1278,8 +1564,8 @@ function NudgeCount({ s }: { s: BrainState }) {
   const hold = s.nudgeHoldUntil !== null && s.nudgeHoldUntil > Date.now() ? timeString(new Date(s.nudgeHoldUntil)) : null;
   const title =
     L(
-      `Hôm nay còn ${left}/${s.prefs.nudgeBudget} lần nhắc. Việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp và việc bạn tự hẹn giờ không tính.`,
-      `${left} of ${s.prefs.nudgeBudget} reminders left today. Timed tasks, meetings, the morning hello, the end-of-day review, the "where was I?" card, the question after a meeting and plans you set yourself don't count.`,
+      `Hôm nay còn ${left}/${s.prefs.nudgeBudget} lần nhắc. Việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp, cảnh báo quá tải và việc bạn tự hẹn giờ không tính.`,
+      `${left} of ${s.prefs.nudgeBudget} reminders left today. Timed tasks, meetings, the morning hello, the end-of-day review, the "where was I?" card, the question after a meeting, the overbooked check and plans you set yourself don't count.`,
     ) + (hold ? L(` Đang tạm im tới ${hold}.`, ` Holding reminders until ${hold}.`) : "");
   // A plain span can't carry an aria-label: the count is a status, and the detail is read as hidden text.
   return (

@@ -136,6 +136,15 @@ export function WorkdaySection() {
           help={L("Quy tắc 3 việc: ít mà chắc.", "The Rule of 3: few tasks, actually done.")}
           unit={L("việc", "tasks")}
         />
+        <NumberRow
+          k="defaultEstimate"
+          label={L("Thời lượng mặc định của một việc", "Default task length")}
+          help={L(
+            "Dùng khi việc chưa có thời lượng trong Todoist. Thú cưng cộng thời lượng các việc hôm nay với các cuộc họp còn lại, và nhắc nhẹ nếu quá tải từ 1 giờ so với thời gian làm việc còn lại.",
+            "Used for a task that has no duration in Todoist. Your pet adds up today's tasks and the meetings still ahead, and gently says so when that runs an hour or more past the work time left.",
+          )}
+          unit={L("phút", "min")}
+        />
       </Group>
 
       <Group title={L("Giờ giấc", "Hours")}>

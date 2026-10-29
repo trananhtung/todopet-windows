@@ -39,6 +39,8 @@ export interface DemoControls {
   /** Pretend the user has been away (idle) for this many seconds. */
   setIdle(seconds: number): void;
   command(c: AppCommand): void;
+  /** Give today's tasks long Todoist durations (about 11 hours in all), so the overbooked warning has something to say. */
+  setHeavyDay(on: boolean): void;
 }
 
 export interface DemoBackend extends Backend {
@@ -115,6 +117,9 @@ export function demoIcs(now: Date): string {
 
 const pause = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 
+/** Minutes for today's tasks on the demo's "heavy day": more than a work day, even before the meetings. */
+const HEAVY_MINUTES: Readonly<Record<string, number>> = { "1": 240, "2": 180, "4": 240 };
+
 export function createDemoBackend(opts: { now?: () => number; persist?: boolean } = {}): DemoBackend {
   const now = opts.now ?? Date.now;
   const persist = (opts.persist ?? true) && storageAvailable;
@@ -125,6 +130,7 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
   const doneNow = () => (doneList ??= sampleDone(new Date(now())));
   let counter = 100;
   let autostart = false;
+  let heavyDay = false;
   // The demo starts connected; Settings can disconnect and reconnect to try those flows.
   const secrets = { todoist: true, anthropic: true, calendarHosts: ["demo.todopet"] };
   const memoryStore = new Map<string, unknown>();
@@ -174,7 +180,8 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
     todoist: {
       async tasks() {
         await pause();
-        return structuredClone(tasksNow());
+        const list = structuredClone(tasksNow());
+        return heavyDay ? list.map((t) => (HEAVY_MINUTES[t.id] ? { ...t, duration: { amount: HEAVY_MINUTES[t.id], unit: "minute" } } : t)) : list;
       },
       async completed(sinceIso, untilIso) {
         await pause();
@@ -396,6 +403,9 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
       },
       command(c) {
         commands.emit(c);
+      },
+      setHeavyDay(on) {
+        heavyDay = on;
       },
     },
   };

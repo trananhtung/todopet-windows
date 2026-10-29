@@ -18,7 +18,7 @@ original.
 | Surface | **One transparent, always-on-top overlay window** covering the primary monitor's work area | The pet walks with CSS transforms instead of moving a window; bubble, board, sign parade, table flip and fireworks share one surface. Rust polls the cursor (~40 Hz) and the overlay toggles click-through with `set_ignore_cursor_events` only when the cursor enters/leaves an interactive element (`document.elementFromPoint`). |
 | Other windows | Settings and Diary are normal decorated windows | They need focus and scrolling; they talk to the overlay through Tauri events. |
 | Secrets | Windows **Credential Manager** (`keyring` crate) | Tokens never reach JavaScript: Rust reads them and makes the Todoist / Anthropic calls itself. |
-| Storage | Small JSON files (atomic writes) in `%APPDATA%\com.trananhtung.todopet`; diary as daily JSONL files in `%LOCALAPPDATA%` | Prefs, pet life, postponed-task log, today's "start when…" plans (`triggers`, v0.4); the diary keeps 14 days. Browser demo uses `localStorage`. |
+| Storage | Small JSON files (atomic writes) in `%APPDATA%\com.trananhtung.todopet`; diary as daily JSONL files in `%LOCALAPPDATA%` | Prefs, pet life, postponed-task log, today's "start when…" plans (`triggers`, v0.4), tomorrow's frog and note (`plan`, v0.4); the diary keeps 14 days. Browser demo uses `localStorage`. |
 | Calendar | **ICS links** (Google "secret address in iCal format", Outlook "Publish calendar"), stored in Credential Manager, parsed with `ical.js` | Windows has no EventKit equivalent; ICS covers Google, Outlook/Microsoft 365 and iCloud. Rust fetches (public addresses only), JS parses and expands recurrences. |
 | Distraction | Foreground process via Win32, active tab address via **UI Automation** (Chrome, Edge, Brave, Vivaldi, Opera, Firefox), window title as fallback | Same rules as the original (`youtube.com`, `youtube.com/shorts`). Addresses stay in memory. |
 | Typing / idle | `GetLastInputInfo` for idle; Windows **Raw Input** that stores **only the timestamp** of the last key-down | Needed for "interrupt at a pause" and "in the zone" rules. No key codes are read or stored; no keyboard hook. |
@@ -242,6 +242,10 @@ people detach; overcommitting is the main planning failure.
   the next workday.
 - Tomorrow's frog and the note are stored locally (`plan` key) and the next morning's greeting names them; the
   frog goes first in "eat the frog" ordering that day.
+- The sheet only collects choices; **Done for today** applies them together (a repeating task can only stay, since
+  moving it would break its repeat). The frog and note are for the next *workday* (Monday after a Friday) and only
+  count that day. If a move fails the pet stays awake, the sheet says so and the same button tries again. The day
+  strip's **Back to work** wakes the pet again. "Done for today" is stored as the time it ends (`plan.doneUntil`).
 
 ### 4. Overbooked warning and day timeline (`calendar.ts`, `brain.ts`, board)
 - Estimates: the Todoist duration when set, else `prefs.defaultEstimate` (default 30 min, 15–120).
@@ -249,6 +253,8 @@ people detach; overcommitting is the main planning failure.
   minutes. Once a day, after planning, if load exceeds capacity by 60+ minutes: "Today looks overbooked: ~6h of
   tasks + 3h of meetings in 7h left. Move some?" with **Pick tasks to move** and **It's fine** (a check-in).
 - The board shows a compact timeline of the work day: meetings, timed tasks, now, and a load meter.
+- The check is skipped in the last 30 minutes of the work day (the end-of-day review covers it) and when no work
+  time is left. Load counts today's open tasks (not overdue ones) and only the part of a meeting that is still ahead.
 
 ### 5. If-then starts and the 2-minute starter (`brain.ts`, board)
 - A task's menu has **Start when…**: after ⟨a meeting today⟩, when I open ⟨app⟩ (recent non-distracting apps or

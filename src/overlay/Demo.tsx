@@ -51,6 +51,7 @@ const DOCS_URL = "https://docs.google.com/document/d/q4-plan/edit#heading=h.1";
 export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }) {
   const s = useSyncExternalStore(brain.subscribe, brain.getSnapshot);
   const [open, setOpen] = useState(true);
+  const [heavy, setHeavy] = useState(false);
   const fake = isDemoBackend(backend) ? backend.demo : null;
   // Pretend you've been on YouTube for 3 minutes, so the mood drop and the reminder show at once.
   const watchYouTube = () => {
@@ -104,6 +105,23 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             <button className="btn" title={L("Cuộc họp vừa kết thúc, họp tiếp sau 12 phút", "A meeting just ended; the next one is in 12 minutes")} onClick={() => brain.demoMeetingEnds()}>
               📅 {L("Họp xong", "Meeting ends")}
             </button>
+            <button className="btn" title={L("Mở bảng “Tổng kết ngày” (cuối ngày) ở bất kỳ giờ nào", "Open the end-of-day “Wrap up” sheet, at any hour")} onClick={() => brain.demoWrapUp()}>
+              🌙 {L("Tổng kết", "Wrap up")}
+            </button>
+            {fake && (
+              <button
+                className="btn"
+                aria-pressed={heavy}
+                title={heavy ? L("Trả hôm nay về bình thường", "Put today back to normal") : L("Cho các việc hôm nay chạy dài hơn quỹ thời gian: cảnh báo quá tải", "Give today's tasks long durations, more than the time left: the overbooked warning")}
+                onClick={() => {
+                  fake.setHeavyDay(!heavy);
+                  setHeavy(!heavy);
+                  void brain.demoOverbooked(!heavy);
+                }}
+              >
+                ⚖️ {heavy ? L("Ngày thường", "Normal day") : L("Quá tải", "Overbooked")}
+              </button>
+            )}
             <button className="btn" onClick={() => brain.demoAntic("parade")}>
               📢 {L("Diễu hành", "Parade")}
             </button>
@@ -123,7 +141,14 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
               🍅 {s.focus ? L("Dừng", "Stop") : L("Tập trung 1'", "Focus 1'")}
             </button>
             {fake && (
-              <button className="btn" onClick={() => fake.setIdle(s.mood === "sleeping" ? 0 : 700)}>
+              <button
+                className="btn"
+                onClick={() => {
+                  // Asleep because the day is wrapped up: wake it the way the board does.
+                  if (s.doneUntil !== null) brain.resumeDay();
+                  else fake.setIdle(s.mood === "sleeping" ? 0 : 700);
+                }}
+              >
                 😴 {s.mood === "sleeping" ? L("Thức dậy", "Wake up") : L("Rời máy", "Step away")}
               </button>
             )}

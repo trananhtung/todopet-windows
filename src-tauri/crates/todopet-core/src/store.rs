@@ -1,4 +1,5 @@
-//! Small JSON documents (`<dir>/<key>.json`): prefs, pet life, postponed-task log, the day's "start when…" plans.
+//! Small JSON documents (`<dir>/<key>.json`): prefs, pet life, postponed-task log, the day's "start when…" plans,
+//! the wrap-up plan (tomorrow's frog and note).
 //!
 //! Writes go to a temporary file in the same folder and are renamed over the target, so a crash or power
 //! loss leaves either the old or the new document, never a truncated one.

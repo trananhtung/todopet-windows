@@ -17,7 +17,7 @@ Please don't open a public issue for them. You'll get a reply within a week.
 - **Activity data** — the app in front, its window title (browsers only) and the active tab's address stay in
   memory. So does the "Where was I?" place (task, app, page and address, http/https only, plus the next step you
   pin): it is never saved to disk or written to the diary, and it is dropped at midnight. Only today's
-  "start when…" plans (a task id and a meeting, an app name or "after lunch") are saved, in the `triggers` store key. Typing detection records only the time of the last key-down via Windows Raw Input, never which key.
+  "start when…" plans (a task id and a meeting, an app name or "after lunch") are saved, in the `triggers` store key; tomorrow's frog (a task id), the one-line note you wrote in Wrap up and the time "done for today" lasts until are saved in the `plan` store key until the day they are for is over. Typing detection records only the time of the last key-down via Windows Raw Input, never which key.
 - **Links** — "Join" buttons only open known meeting services (Google Meet, Teams, Zoom, Webex, Whereby);
   `open_url` accepts `https`, `http`, and real Teams / Zoom meeting links only.
 - **Windows** — each window may call only the commands it needs (Tauri capabilities per window).

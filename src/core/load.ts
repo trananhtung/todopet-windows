@@ -106,3 +106,40 @@ export function timeline(input: DayLoadInput): Timeline {
   segments.sort((a, b) => a.start - b.start || (a.kind === b.kind ? 0 : a.kind === "meeting" ? -1 : 1));
   return { segments, now: fraction(now.getTime()) };
 }
+
+export type LoadLevel = "ok" | "tight" | "over";
+/** From this share of the time left, a day that still fits reads as tight. */
+const TIGHT_RATIO = 0.85;
+
+/** How the day looks against the time left: "over" from 60 minutes too much, "tight" when it just fits or runs a little over. */
+export function loadLevel(load: DayLoad): LoadLevel {
+  // Nothing left to measure against once the work day is over.
+  if (load.capacity <= 0) return "ok";
+  if (isOverbooked(load)) return "over";
+  if (load.overBy > 0 || (load.taskMinutes + load.meetingMinutes) / load.capacity >= TIGHT_RATIO) return "tight";
+  return "ok";
+}
+
+/** Everything the board's compact day strip draws (SPEC v0.4 §4). */
+export interface DayStrip {
+  startHour: number;
+  endHour: number;
+  /** Meetings and timed tasks as fractions of the work day. */
+  segments: TimelineSegment[];
+  /** Where now falls in the work day, 0..1. */
+  now: number;
+  load: DayLoad;
+  /** Load as a share of the time left, 0..1, for the meter. */
+  ratio: number;
+  level: LoadLevel;
+  /** False for a day with no tasks and no meetings: nothing to draw. */
+  hasContent: boolean;
+}
+
+export function dayStrip(input: DayLoadInput): DayStrip {
+  const { segments, now } = timeline(input);
+  const load = dayLoad(input);
+  const total = load.taskMinutes + load.meetingMinutes;
+  const ratio = load.capacity > 0 ? Math.min(1, total / load.capacity) : total > 0 ? 1 : 0;
+  return { startHour: input.workStart, endHour: input.workEnd, segments, now, load, ratio, level: loadLevel(load), hasContent: segments.length > 0 || total > 0 };
+}

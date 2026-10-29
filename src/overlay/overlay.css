@@ -805,7 +805,9 @@ body.overlay {
   flex-direction: column;
   gap: 8px;
   scrollbar-width: thin;
+  /* Room for the sticky section headers above and the Wrap up button below when something is scrolled into view. */
   scroll-padding-top: 32px;
+  scroll-padding-bottom: 64px;
 }
 
 .focus-card {
@@ -1213,6 +1215,7 @@ body.overlay {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   border: 0;
   background: transparent;
   text-align: left;
@@ -1227,8 +1230,17 @@ body.overlay {
 .popover.menu button:focus-visible {
   background: var(--paper-2);
 }
+/* The popover lives on <body>, outside .board, so its icons need their own "don't shrink" (a long label used to squeeze the first one away). */
 .popover.menu .icon {
+  flex: none;
   color: var(--muted);
+}
+/* A long label (a meeting title) ends in an ellipsis; the button's title holds all of it. */
+.popover.menu .menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .popover.menu .menu-body {
   display: flex;
@@ -1383,6 +1395,156 @@ body.overlay {
   flex: none;
 }
 .cal-row.now time {
+  color: var(--accent-text);
+}
+
+/* The work day at a glance (v0.4): load and time left on top, meetings and timed tasks on a strip below. */
+.daystrip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 10px 6px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.ds-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 26px;
+}
+.ds-head .spacer {
+  flex: 1;
+}
+.ds-load {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.ds-load .icon {
+  flex: none;
+  color: var(--muted);
+}
+.ds-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.daystrip.level-tight .ds-load,
+.daystrip.level-tight .ds-load .icon {
+  color: var(--warn-ink);
+}
+.daystrip.level-over .ds-load,
+.daystrip.level-over .ds-load .icon {
+  color: var(--bad-ink);
+}
+.ds-meter {
+  flex: none;
+  width: 52px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.ds-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--good);
+  transition: width 0.6s var(--ease-out);
+}
+.daystrip.level-tight .ds-meter i {
+  background: var(--warn);
+}
+.daystrip.level-over .ds-meter i {
+  background: var(--bad);
+}
+.ds-head .btn.small {
+  flex: none;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.ds-track {
+  position: relative;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.ds-seg {
+  position: absolute;
+  height: 8px;
+  min-width: 3px;
+  border-radius: 3px;
+}
+.ds-seg.meeting {
+  top: 3px;
+  background: var(--info);
+}
+.ds-seg.timed {
+  bottom: 3px;
+  background: var(--accent);
+}
+/* What is behind us is dimmed; the marker is now. */
+.ds-past {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--paper-2) 62%, transparent);
+  pointer-events: none;
+}
+.ds-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+.ds-axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.daystrip.is-done .ds-track {
+  opacity: 0.6;
+}
+
+/* The note you left yourself, all day. */
+.plan-note {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+.plan-note-text {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.plan-note b {
   color: var(--accent-text);
 }
 
@@ -1600,6 +1762,174 @@ body.overlay {
 }
 .page-note {
   margin-top: -4px;
+  font-size: 12px;
+}
+
+/* Wrap up: the shutdown ritual in the sheet. */
+.sheet.wrap {
+  gap: 8px;
+}
+.sheet h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font: 700 11.5px/1 var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.wrap-intro {
+  margin: -4px 0 0;
+  font-size: 12.5px;
+}
+.wrap-empty {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.wrap-wins {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 6px 10px;
+  list-style: none;
+  border-radius: 12px;
+  background: var(--good-soft);
+  color: var(--ink);
+  font-size: 13px;
+}
+.wrap-wins li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.wrap-wins .icon {
+  flex: none;
+  color: var(--good-ink);
+}
+.wrap-wins li span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wrap-wins li.more {
+  padding-left: 20px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.wrap-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.wrap-head h3 {
+  margin: 0;
+}
+.wrap-head .spacer {
+  flex: 1;
+}
+.wrap-head .btn.small {
+  min-height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+.wrap-tasks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.wrap-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 10px 8px;
+  border-top: 1px solid var(--line);
+}
+.wrap-row:first-child {
+  border-top: 0;
+}
+.wrap-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+.wrap-row.off .wrap-title {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.wrap-ctl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+}
+.wrap-ctl .seg button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.frog-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.frog-pick input {
+  margin: 0;
+  accent-color: var(--accent-strong);
+}
+.frog-pick input:checked + span {
+  color: var(--good-ink);
+  font-weight: 600;
+}
+.frog-pick input:disabled + span {
+  opacity: 0.5;
+}
+.wrap-row.nofrog {
+  background: var(--surface-2);
+}
+.wrap-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+/* The button you came for stays in reach however long the list is. */
+.wrap-actions {
+  position: sticky;
+  bottom: -12px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 -10px -12px;
+  padding: 8px 10px 12px;
+  background: linear-gradient(to bottom, transparent, var(--paper) 8px);
+}
+.wrap-actions .btn.primary {
+  gap: 6px;
+}
+.wrap-summary {
+  margin: 0;
   font-size: 12px;
 }
 

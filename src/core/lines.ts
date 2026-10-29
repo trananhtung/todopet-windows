@@ -2,6 +2,7 @@
 import type { CalEvent, SlotSuggestion } from "./calendar";
 import { hoursText, shortText, timeString } from "./dates";
 import { L, pick } from "./l10n";
+import type { DayLoad } from "./load";
 
 /** English noun with its count: n(1, "task") → "1 task", n(3, "task") → "3 tasks". */
 const n = (count: number, noun: string, nouns = `${noun}s`) => `${count} ${count === 1 ? noun : nouns}`;
@@ -29,21 +30,37 @@ export function hello(name: string): string {
   );
 }
 
-export function morning(now: Date, plannedCount: number, openCount: number, next: TodoTask | null, target: number): string {
+/** What the evening before left for this morning (SPEC v0.4 §3): the frog, if it is still open, and the note. */
+export interface MorningPlan {
+  frog: TodoTask | null;
+  note: string | null;
+}
+
+export function morning(now: Date, plannedCount: number, openCount: number, next: TodoTask | null, target: number, plan: MorningPlan | null = null): string {
   const g = greeting(now);
+  const frog = plan?.frog ?? null;
+  const picked = frog !== null && frog.id === next?.id;
+  let text: string;
   if (plannedCount < target) {
-    return `${g} ${L(
+    text = `${g} ${L(
       `Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc thôi 📝`,
       `What are our ${target} things today? Only ${plannedCount}/${target} planned so far 📝`,
     )}`;
+  } else if (next) {
+    text = `${g} ${
+      picked
+        ? L(`Hôm nay có ${openCount} việc. Con ếch bạn đã chọn từ trước: ${q(next)} 🐸`, `${openCount} tasks today. The frog you picked before you left: ${q(next)} 🐸`)
+        : L(`Hôm nay có ${openCount} việc. Ăn con ếch trước: ${q(next)} 🐸`, `${openCount} tasks today. Eat the frog first: ${q(next)} 🐸`)
+    }`;
+  } else {
+    text = g;
   }
-  if (next) {
-    return `${g} ${L(
-      `Hôm nay có ${openCount} việc. Ăn con ếch trước: ${q(next)} 🐸`,
-      `${openCount} tasks today. Eat the frog first: ${q(next)} 🐸`,
-    )}`;
+  // Said once, on the line of its own, unless the greeting above already put it as the frog to eat first.
+  if (frog && !(picked && plannedCount >= target)) {
+    text += `\n🐸 ${L(`Lúc kết thúc ngày bạn đã chọn ${q(frog)} làm con ếch hôm nay.`, `Before you left you picked ${q(frog)} as today's frog.`)}`;
   }
-  return g;
+  if (plan?.note) text += `\n📝 ${L("Ghi chú của bạn: ", "Your note: ")}“${plan.note}”`;
+  return text;
 }
 
 // Outside distractions a low mood is worry, so the worried (and grumpy) lines offer help, never a telling-off.
@@ -178,9 +195,15 @@ export const allDone = () =>
 
 export const review = (completed: number, plannedCount: number, left: number) =>
   L(
-    `Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc. Còn ${left} việc — dời sang mai?`,
-    `Almost end of day: ${completed}/${plannedCount} done. Move the remaining ${left} to tomorrow?`,
+    `Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc. Còn ${left} việc — tổng kết ngày, hay dời hết sang mai?`,
+    `Almost end of day: ${completed}/${plannedCount} done. Wrap up the day, or move the remaining ${left} to tomorrow?`,
   );
+
+/** "Done for today": a good evening, naming the frog that starts tomorrow when you picked one. */
+export const wrappedUp = (frog: TodoTask | null) =>
+  L("Xong ngày rồi 🌙 Nghỉ ngơi nhé.", "All wrapped up 🌙 Rest well.") + (frog ? L(` Mai mình bắt đầu với ${q(frog)} 🐸`, ` Tomorrow starts with ${q(frog)} 🐸`) : "");
+
+export const backToWork = () => L("Mình dậy rồi 🌤 Cần gì cứ gọi mình nhé.", "I'm up again 🌤 Call me whenever you need me.");
 
 export const welcomeBack = (t: TodoTask) => L(`Bạn về rồi! 👋 Tiếp tục với ${q(t)} nhé?`, `Welcome back! 👋 Continue with ${q(t)}?`);
 export const soon = (t: TodoTask, minutes: number) => L(`⏰ ${minutes} phút nữa: ${q(t)}`, `⏰ In ${minutes} min: ${q(t)}`);
@@ -240,6 +263,36 @@ export function calendarDay(meetings: number, busyMinutes: number, free: number,
   return base + (reduced ? L(` → ${target} việc là vừa sức.`, ` → ${n(target, "task")} ${target === 1 ? "is" : "are"} realistic.`) : ".");
 }
 
+// Overbooked warning and the board's load meter (SPEC v0.4 §4)
+
+/** "45 min", "2h", "2h30": under an hour is said in minutes. */
+const span = (minutes: number) => (minutes < 60 ? L(`${Math.round(minutes)} phút`, `${Math.round(minutes)} min`) : hoursText(minutes));
+
+export const overbooked = (load: DayLoad) =>
+  L(
+    `Hôm nay có vẻ quá tải: ~${span(load.taskMinutes)} việc${load.meetingMinutes > 0 ? ` + ${span(load.meetingMinutes)} họp` : ""} trong khi chỉ còn ${span(load.capacity)}. Dời bớt vài việc nhé?`,
+    `Today looks overbooked: ~${span(load.taskMinutes)} of tasks${load.meetingMinutes > 0 ? ` + ${span(load.meetingMinutes)} of meetings` : ""} in ${span(load.capacity)} left. Move some?`,
+  );
+
+/** The board's meter: what is still ahead over the work time left ("~6h / 7h left"). */
+export function loadMeter(load: DayLoad): string {
+  const total = load.taskMinutes + load.meetingMinutes;
+  if (load.capacity > 0) return L(`~${span(total)} / ${span(load.capacity)} còn lại`, `~${span(total)} / ${span(load.capacity)} left`);
+  if (total > 0) return L(`Hết giờ làm · còn ~${span(total)} việc`, `Work day is over · ~${span(total)} still open`);
+  return L("Hôm nay còn trống", "Nothing on today");
+}
+
+/** The meter's tooltip: the parts of the load, and by how much it runs over. */
+export function loadDetail(load: DayLoad): string {
+  const parts = L(
+    `~${span(load.taskMinutes)} việc${load.meetingMinutes > 0 ? ` và ${span(load.meetingMinutes)} họp` : ""} còn phía trước`,
+    `~${span(load.taskMinutes)} of tasks${load.meetingMinutes > 0 ? ` and ${span(load.meetingMinutes)} of meetings` : ""} still ahead`,
+  );
+  if (load.capacity <= 0) return `${parts}. ${L("Giờ làm hôm nay đã hết.", "The work day is over.")}`;
+  const over = load.overBy > 0 ? L(` — quá ${span(load.overBy)}`, ` — ${span(load.overBy)} over`) : "";
+  return `${parts}, ${L(`trong ${span(load.capacity)} làm việc còn lại`, `in ${span(load.capacity)} of work time left`)}${over}.`;
+}
+
 export const timeBlock = (s: SlotSuggestion) =>
   L(
     `Gắn giờ cho dễ bắt đầu: ${timeString(s.start)}–${timeString(s.end)} làm ${q(s.task)} nhé?`,
@@ -296,15 +349,15 @@ export function triggerChip(trigger: StartTrigger, events: CalEvent[]): string {
 }
 
 /** A choice in a task's "Start when…" menu. */
-export function triggerChoice(trigger: StartTrigger, events: CalEvent[]): string {
+export function triggerChoice(trigger: StartTrigger, events: CalEvent[], max = 30): string {
   switch (trigger.kind) {
     case "afterMeeting": {
       const e = events.find((x) => x.id === trigger.eventId);
-      const title = shortText(trigger.title || e?.title || "", 30);
+      const title = shortText(trigger.title || e?.title || "", max);
       return L(`Sau họp “${title}”${e ? ` (${timeString(e.end)})` : ""}`, `After “${title}”${e ? ` (${timeString(e.end)})` : ""}`);
     }
     case "appOpen":
-      return L(`Khi tôi mở ${shortText(trigger.app, 30)}`, `When I open ${shortText(trigger.app, 30)}`);
+      return L(`Khi tôi mở ${shortText(trigger.app, max)}`, `When I open ${shortText(trigger.app, max)}`);
     case "afterLunch":
       return L(`Sau bữa trưa (${LUNCH_HOUR}:00)`, `After lunch (${LUNCH_HOUR}:00)`);
   }
