@@ -7,6 +7,8 @@ import type { PetPose, SpeciesInfo } from "./types";
 
 export type { PetPose, RenderOptions, SpeciesInfo } from "./types";
 export type { PetRenderOptions } from "./render";
+export { ACT_DURATION, ACT_KEY_T, PET_ACTS, type PetActKind } from "./acts";
+export { renderDecor, type DecorOptions } from "./decor";
 export { STAGE_SCALE, STAGE_SPROUTS };
 
 /** All 14 species, in SPECIES_IDS order. */

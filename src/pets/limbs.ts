@@ -1,4 +1,5 @@
 // Feet and arms, posed per mood like the original, styled per species (nubs, flippers, wings).
+import type { ActFrame } from "./acts";
 import { U, color, type Ctx } from "./kit";
 import { DEG, ell, fs, p, path, r, st } from "./svg";
 
@@ -63,6 +64,14 @@ export function arms(c: Ctx): string {
     for (const side of [-1, 1]) arm(cx + side * bw * 0.52, top + bh * 0.32, side * (2.4 + Math.sin(t * 14) * 0.3), side);
     return out.join("");
   }
+  const act = c.act;
+  if (act && act.arms && act.armK > 0.02) return actArms(c, act, shoulderY);
+  if (c.craft !== null) {
+    // Holding the needles in front of the chest (see craft.ts), paws turned in.
+    const hx = cx + (c.fx - cx) * 0.4, w = Math.min(22, bw * 0.3);
+    for (const side of [-1, 1]) arm(hx + side * (w / 2 + 6), by - bh * 0.3 + 4.5, side * 0.6, side);
+    return out.join("");
+  }
   switch (mood) {
     case "celebrating":
       if (c.pose.celebration === "dance") {
@@ -114,4 +123,50 @@ export function arms(c: Ctx): string {
     }
   }
   return out.join("");
+}
+
+/** Arms for an act, blended from resting arms by `act.armK`. Side −1 is the back, +1 the facing side. */
+function actArms(c: Ctx, a: ActFrame, shoulderY: number): string {
+  const { cx, top, bw, bh, t } = c;
+  const k = Math.min(1, a.armK);
+  let out = "";
+  for (const side of [-1, 1]) {
+    // Rest: hanging a little outward.
+    const x0 = cx + side * bw * 0.5, y0 = shoulderY, a0 = -side * 0.35;
+    let x = x0, y = y0, ang = a0;
+    const front = side > 0;
+    switch (a.arms) {
+      case "wave":
+        if (front) [x, y, ang] = [cx + bw * 0.52, top + bh * 0.3, -2.3 + Math.sin(t * 11) * 0.5];
+        break;
+      case "up":
+        // Raised high and out to the sides ("\o/"), clear of the ears.
+        [x, y, ang] = [cx + side * bw * 0.5, top + bh * 0.13, side * 0.55];
+        break;
+      case "mouth":
+        if (front) [x, y, ang] = [c.fx + 3.6, c.my + 3.2, 0.55];
+        break;
+      case "chin":
+        if (front && (c.def.arms?.style ?? "nub") !== "flipper") [x, y, ang] = [c.fx + bw * 0.2, c.my + 9, -0.45];
+        break;
+      case "scratch": {
+        const sc = Math.sin(t * 2 * Math.PI * 7);
+        if (front) [x, y, ang] = [cx + bw * 0.42, top + bh * 0.12 + sc * 2, -2.6 + sc * 0.2];
+        break;
+      }
+      case "flail":
+        [x, y, ang] = [cx + side * bw * 0.52, top + bh * 0.24 + Math.sin(t * 25 + side) * 2, -side * (2.3 + Math.sin(t * 22 + side * 1.3) * 0.5)];
+        break;
+      case "out": {
+        const flop = a.kind === "shake" ? Math.sin(t * 2 * Math.PI * 4.4 + side) * 0.5 : Math.sin(t * 7.5 + side) * 0.25;
+        [x, y, ang] = [cx + side * bw * 0.54, shoulderY - 3, -side * (1.15 + flop)];
+        break;
+      }
+      case "hang":
+        [x, y, ang] = [cx + side * bw * 0.48, shoulderY + 3, -side * 0.08];
+        break;
+    }
+    out += limb(c, x0 + (x - x0) * k, y0 + (y - y0) * k, a0 + (ang - a0) * k, side);
+  }
+  return out;
 }

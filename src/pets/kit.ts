@@ -1,4 +1,5 @@
 import type { Mood } from "../core/types";
+import type { ActFrame } from "./acts";
 import type { Dyn } from "./motion";
 import type { Base, Colors } from "./palette";
 import type { PetPose, SpeciesInfo } from "./types";
@@ -92,8 +93,14 @@ export interface Ctx {
   mood: Mood;
   celebrating: boolean;
   held: boolean;
-  /** Hovered while content: blush and happy squint. */
+  /** Hovered or petted while content: blush and happy squint. */
   petted: boolean;
+  /** Seconds of petting (0 = none): after 2 s the squint turns into slow cat blinks. */
+  petting: number;
+  /** The act playing now (wave, dizzy, …), or null. Same as `dyn.act`. */
+  act: ActFrame | null;
+  /** Knitting progress 0 … 1, or null when not knitting. */
+  craft: number | null;
   t: number;
   /** Smoothstepped prevMood → mood blend. */
   k: number;

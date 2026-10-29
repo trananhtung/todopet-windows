@@ -1,6 +1,7 @@
 import type { Gait, Mood } from "../core/types";
+import type { ActFrame } from "./acts";
 import type { PetPose } from "./types";
-import { frac } from "./svg";
+import { clamp, frac, smooth } from "./svg";
 
 /** Body dynamics for one frame. Lengths in px of the 160 design space, angles in radians. */
 export interface Dyn {
@@ -27,6 +28,12 @@ export interface Dyn {
   dangle: number;
   /** Eyelids: 0 = open … 1 = shut (random clustered blinks). */
   blink: number;
+  /** Upper lids drooping on top of blinks (drowsy, acts): 0 = open … 1 = shut. */
+  lid: number;
+  /** Drowsy head dip, 0 … 1 (the face sinks and looks down). */
+  dip: number;
+  /** The act playing now, if any (see acts.ts). */
+  act: ActFrame | null;
 }
 
 const WALK_AMP: Record<Mood, number> = {
@@ -56,7 +63,6 @@ export const BREATH_ASLEEP = 0.97; // 0.155 Hz
 const BLINK_CLOSE = 0.08;
 const BLINK_SHUT = 0.06;
 const BLINK_OPEN = 0.15;
-const BLINK_LEN = BLINK_CLOSE + BLINK_SHUT + BLINK_OPEN;
 /** No blink in the first moments (the gallery's stills are taken at t = 1.3). */
 const BLINK_FROM = 1.6;
 /** Second blink of a double, after the first has reopened. */
@@ -94,8 +100,23 @@ let BLINK_PERIOD = 0;
   BLINK_PERIOD = at;
 }
 
-/** Lid closure (0 open … 1 shut) at time t; deterministic. */
-export function blinkAt(t: number): number {
+/** One lid movement `dt` s after a blink began: falls (speeding up), stays shut, reopens (eased). */
+function lidCurve(dt: number, close: number, shut: number, open: number): number {
+  if (dt < 0 || dt >= close + shut + open) return 0;
+  if (dt < close) {
+    const k = dt / close;
+    return k * k; // the lid speeds up as it falls
+  }
+  if (dt < close + shut) return 1;
+  const k = 1 - (dt - close - shut) / open;
+  return k * k * (3 - 2 * k);
+}
+
+/**
+ * Lid closure (0 open … 1 shut) at time t; deterministic. `slow` > 1 stretches every blink for a drowsy pet
+ * (spec rule 7: 300–600 ms) and keeps the eyes shut longer, on the same random schedule.
+ */
+export function blinkAt(t: number, slow = 1): number {
   if (!(t >= BLINK_FROM)) return 0;
   const u = (t - BLINK_FROM) % BLINK_PERIOD;
   // Last blink that started at or before u.
@@ -105,15 +126,12 @@ export function blinkAt(t: number): number {
     if (BLINKS[mid] <= u) lo = mid;
     else hi = mid - 1;
   }
-  const dt = u - BLINKS[lo];
-  if (dt >= BLINK_LEN) return 0;
-  if (dt < BLINK_CLOSE) {
-    const k = dt / BLINK_CLOSE;
-    return k * k; // the lid speeds up as it falls
-  }
-  if (dt < BLINK_CLOSE + BLINK_SHUT) return 1;
-  const k = 1 - (dt - BLINK_CLOSE - BLINK_SHUT) / BLINK_OPEN;
-  return k * k * (3 - 2 * k);
+  if (!(slow > 1)) return lidCurve(u - BLINKS[lo], BLINK_CLOSE, BLINK_SHUT, BLINK_OPEN);
+  const s = Math.min(slow, 3);
+  const close = BLINK_CLOSE * s, shut = BLINK_SHUT * (1 + 4 * (s - 1)), open = BLINK_OPEN * s;
+  // A slowed double blink overlaps its partner: take the more closed of the two.
+  const v = lidCurve(u - BLINKS[lo], close, shut, open);
+  return lo > 0 ? Math.max(v, lidCurve(u - BLINKS[lo - 1], close, shut, open)) : v;
 }
 
 // ── Landing (spec rule 9) ────────────────────────────────────────────────────────────────────────
@@ -147,7 +165,13 @@ function hop(u: number, air: number, period: number, squashDepth: number, stretc
 /** Seconds per hop step at the overlay's hop speed (34 px per step at 48 px/s). */
 const HOP_STEP_S = 0.7;
 
-export function dynamics(p: PetPose, gait: Gait, mood: Mood): Dyn {
+/** Moods in which petting melts the pet (a grumpy, sleeping or partying pet carries on). */
+export const pettable = (mood: Mood): boolean => mood === "normal" || mood === "happy" || mood === "focus" || mood === "annoyed";
+
+const fin = (v: number | undefined): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+/** Body dynamics for one frame; `act` (from `actFrame`) adds its motion on top of the mood's. */
+export function dynamics(p: PetPose, gait: Gait, mood: Mood, act: ActFrame | null = null): Dyn {
   const t = p.t;
   const wp = p.walkPhase;
   let jump = 0, squash = 0, shakeX = 0, breathe = 0, spin = 1, flip = 0, tilt = 0, hover = 0;
@@ -278,6 +302,37 @@ export function dynamics(p: PetPose, gait: Gait, mood: Mood): Dyn {
     if (gait === "float") hover = 7 + (hover - 7) * 0.3;
   }
 
+  let lid = 0, dip = 0, slow = 1;
+  const awake = !p.held && !celebrating && mood !== "sleeping";
+  const dz = awake ? clamp(fin(p.drowsy), 0, 1) : 0;
+  if (dz > 0) {
+    // Nodding off (rules 7 and 15): heavy lids, slow long blinks, and every ~4 s the head sinks slowly
+    // and snaps back up.
+    const u = frac(t / 4.2);
+    const nod = u < 0.55 ? smooth(u / 0.55) : u < 0.65 ? 1 - smooth((u - 0.55) / 0.1) : 0;
+    dip = nod * clamp((dz - 0.25) / 0.5, 0, 1);
+    squash += 0.05 * dip;
+    tilt += 0.05 * dip;
+    lid = 0.32 * dz + 0.45 * dip;
+    slow = 1 + 1.1 * dz;
+  }
+  const pet = awake && pettable(mood) ? fin(p.petting) : 0;
+  if (pet > 0) {
+    // Leaning into the hand (rule 11): toward the cursor's side (lookX, screen space), melting a little.
+    const lean = smooth(clamp(pet / 0.4, 0, 1));
+    tilt += 0.07 * lean * clamp(fin(p.lookX) * 1.5, -1, 1) * (p.facing === -1 ? -1 : 1);
+    squash += 0.03 * lean;
+  }
+  if (act) {
+    jump += act.jump;
+    squash += act.squash;
+    shakeX += act.shakeX;
+    tilt += act.tilt;
+    liftL += act.liftL;
+    liftR += act.liftR;
+    lid = Math.max(lid, act.lid);
+  }
+
   let dangle = 0;
   if (p.held) {
     jump = 0;
@@ -289,8 +344,9 @@ export function dynamics(p: PetPose, gait: Gait, mood: Mood): Dyn {
     flip = 0;
     liftL = liftR = 0;
     dangle = 4.4;
+    lid = dip = 0;
   }
   // Eyes that are open blink; held pets stare in surprise.
-  const blink = p.held || mood === "sleeping" ? 0 : blinkAt(t);
-  return { jump, squash, shakeX, breathe, spin, flip, tilt, hover, liftL, liftR, dangle, blink };
+  const blink = p.held || mood === "sleeping" ? 0 : blinkAt(t, slow);
+  return { jump, squash, shakeX, breathe, spin, flip, tilt, hover, liftL, liftR, dangle, blink, lid, dip, act: p.held ? null : act };
 }

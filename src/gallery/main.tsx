@@ -1,7 +1,7 @@
 import { StrictMode, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ACCESSORIES, CELEBRATIONS, MOODS, SPECIES_IDS, type SpeciesId } from "../core/types";
-import { SPECIES, defaultPose, speciesInfo, type PetPose } from "../pets";
+import { ACCESSORIES, CELEBRATIONS, DECOR_IDS, MOODS, SPECIES_IDS, type Accessory, type SpeciesId } from "../core/types";
+import { ACT_DURATION, ACT_KEY_T, PET_ACTS, SPECIES, defaultPose, renderDecor, speciesInfo, type PetActKind, type PetPose } from "../pets";
 import { appIconSvg } from "../pets/icon";
 import { LivePreview } from "./LivePreview";
 import { PetView } from "./PetView";
@@ -32,6 +32,31 @@ interface Shot {
   pose: Partial<PetPose>;
 }
 
+/** The 14 accessories added in v0.5 (chest and seasonal ones). */
+const NEW_ACCESSORIES = ACCESSORIES.slice(6) as Accessory[];
+
+/** Each act at its characteristic moment. */
+const ACT_SHOTS: Shot[] = PET_ACTS.map((kind) => ({ label: kind, pose: { act: { kind, t: ACT_KEY_T[kind] } } }));
+
+/** Knitting, petting and drowsiness (v0.5 pose fields). */
+const STATE_SHOTS: Shot[] = [
+  { label: "Knitting 10%", pose: { craft: 0.1, mood: "focus" } },
+  { label: "Knitting 70%", pose: { craft: 0.7, mood: "focus" } },
+  { label: "Petted 1 s", pose: { petting: 1, lookX: 0.8 } },
+  { label: "Petted 3 s, cat blink", pose: { petting: 3.3, lookX: 0.8 } },
+  { label: "Drowsy 0.5", pose: { drowsy: 0.5 } },
+  { label: "Drowsy 1, dip", pose: { drowsy: 1, t: 2.15 } },
+];
+
+/** `n` evenly spaced frames through one act (a film strip). */
+function actStrip(kind: PetActKind, n = 8): Shot[] {
+  const d = ACT_DURATION[kind];
+  return Array.from({ length: n }, (_, i) => {
+    const t = Math.round(((i + 0.5) / n) * d * 100) / 100;
+    return { label: `${kind} ${t}s`, pose: { act: { kind, t } } };
+  });
+}
+
 function shotsFor(): { title: string; note?: string; shots: Shot[] }[] {
   const walk: Shot[] = [0, 1, 2, 3, 4, 5].map((i) => ({
     label: `φ ${(i / 3).toFixed(2)}π`,
@@ -55,6 +80,8 @@ function shotsFor(): { title: string; note?: string; shots: Shot[] }[] {
         { label: "Head tilt −12°, petted", pose: { headTilt: -12, hovered: true } },
       ],
     },
+    { title: "Acts", note: "each at its key moment; see ?matrix=acts&act=<kind> for film strips", shots: ACT_SHOTS },
+    { title: "Knitting, petting, drowsy", shots: STATE_SHOTS },
     { title: "Growth", shots: STAGES.map((s, i) => ({ label: s, pose: { stage: i as PetPose["stage"] } })) },
     {
       title: "Care",
@@ -74,6 +101,9 @@ function shotsFor(): { title: string; note?: string; shots: Shot[] }[] {
         { label: "Bow + shades, walking", pose: { wearing: ["bow", "sunglasses"], walking: true, walkPhase: 1 } },
         { label: "Grad cap, happy", pose: { wearing: ["gradcap", "sunglasses"], mood: "happy" } },
         { label: "Top hat, Baby", pose: { wearing: ["tophat"], stage: 0 } },
+        { label: "Nón lá + Tết scarf + round glasses", pose: { wearing: ["nonla", "tetscarf", "roundglasses"] } },
+        { label: "Santa hat + bell collar", pose: { wearing: ["santahat", "bellcollar"], mood: "happy" } },
+        { label: "Witch hat + star glasses, Master", pose: { wearing: ["witchhat", "starglasses"], stage: 4 } },
       ],
     },
     {
@@ -96,7 +126,10 @@ function shotsFor(): { title: string; note?: string; shots: Shot[] }[] {
   ];
 }
 
-/** `?matrix=moods|life|wear|tilt|party` shows every species against one set of poses (for side-by-side review). */
+/**
+ * `?matrix=moods|life|wear|wearnew|tilt|party|acts` shows every species against one set of poses (for side-by-side
+ * review). `&act=<kind>` turns the acts matrix into a film strip of that act; `&cols=a,b` keeps only some columns.
+ */
 const MATRICES: Record<string, Shot[]> = {
   idle: [
     { label: "Chill", pose: {} },
@@ -122,6 +155,14 @@ const MATRICES: Record<string, Shot[]> = {
     ...ACCESSORIES.map((a) => ({ label: a, pose: { wearing: [a] } })),
     { label: "combo", pose: { wearing: ["scarf", "sunglasses", "tophat"] } },
   ],
+  wearnew: [
+    ...NEW_ACCESSORIES.map((a) => ({ label: a, pose: { wearing: [a] } })),
+    { label: "Tết", pose: { wearing: ["maicrown", "tetscarf"], mood: "happy" } },
+    { label: "Noel", pose: { wearing: ["santahat", "bellcollar"] } },
+    { label: "Trung Thu", pose: { wearing: ["bunnyband", "roundglasses"] } },
+    { label: "Master, tilted", pose: { wearing: ["witchhat", "starglasses"], stage: 4, headTilt: 15 } },
+  ],
+  acts: [...ACT_SHOTS, ...STATE_SHOTS],
   tilt: [
     { label: "Upright", pose: {} },
     { label: "Tilt 12°", pose: { headTilt: 12 } },
@@ -139,7 +180,10 @@ const MATRICES: Record<string, Shot[]> = {
 };
 
 function Matrix({ name }: { name: string }) {
-  const shots = MATRICES[name] ?? MATRICES.moods;
+  const act = params.get("act") as PetActKind | null;
+  const cols = params.get("cols")?.split(",");
+  let shots = name === "acts" && act && act in ACT_DURATION ? actStrip(act) : (MATRICES[name] ?? MATRICES.moods);
+  if (cols) shots = shots.filter((s) => cols.includes(s.label));
   const only = params.get("only")?.split(",");
   const rows = only ? SPECIES.filter((s) => only.includes(s.id)) : SPECIES;
   return (
@@ -260,6 +304,21 @@ function App() {
             </div>
           </div>
         ))}
+      </section>
+
+      <section className="g-section" id="decor">
+        <h2>
+          Home decorations <small>12 items the pet knits during focus sessions · 96 px and 40 px</small>
+        </h2>
+        <div className="g-decor">
+          {DECOR_IDS.map((d) => (
+            <figure key={d} className="g-card g-card--decor">
+              <div className="g-decor-big" dangerouslySetInnerHTML={{ __html: renderDecor(d, { size: 96, idPrefix: `d-${d}` }) }} />
+              <div className="g-decor-small" dangerouslySetInnerHTML={{ __html: renderDecor(d, { size: 40, idPrefix: `ds-${d}` }) }} />
+              <figcaption>{d}</figcaption>
+            </figure>
+          ))}
+        </div>
       </section>
 
       <section className="g-section">

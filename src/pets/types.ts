@@ -1,4 +1,5 @@
 import type { Accessory, CelebrationKind, Gait, Lang, Mood, SpeciesId, StageIndex } from "../core/types";
+import type { PetActKind } from "./acts";
 
 /**
  * Everything needed to draw one frame of the pet. Mirrors `PetPose` in the macOS app.
@@ -31,6 +32,22 @@ export interface PetPose {
    * celebration. Ignored while held.
    */
   headTilt?: number;
+
+  // v0.5 interactions (all optional; absent = off).
+  /**
+   * A short act on top of the mood: `t` = seconds since it began. It plays for `ACT_DURATION[kind]` seconds
+   * and is ignored before 0, after its end, while held and while celebrating.
+   */
+  act?: { kind: PetActKind; t: number } | null;
+  /** Knitting progress 0 … 1 (yarn ball, needles and the growing piece), or null / absent when not knitting. */
+  craft?: number | null;
+  /**
+   * Seconds the cursor has been petting the pet (0 = not petted): happy squint, a lean toward the cursor
+   * (the side of `lookX`), blush hatch marks, then slow cat blinks after 2 s.
+   */
+  petting?: number;
+  /** 0 … 1 sleepiness before dozing off: slower, longer blinks, heavy lids and little head dips. */
+  drowsy?: number;
 
   // Long-term life state.
   stage: StageIndex;

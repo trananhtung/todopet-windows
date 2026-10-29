@@ -1,13 +1,15 @@
 // Composes one frame: shared systems (palette, motion, face, limbs, life, accessories, effects)
 // around the parts a species provides.
 import type { Lang, Mood } from "../core/types";
-import { accessories, accessoryTop } from "./accessories";
+import { accessories, accessoryDefs, accessoryPoints, accessoryTop } from "./accessories";
+import { actFrame } from "./acts";
+import { knitting, yarnBall } from "./craft";
 import { petEffects, screenEffects } from "./effects";
 import { face } from "./face";
 import { ART, CENTER_X, GROUND, type Ctx, type MoodTable, type SpeciesDef } from "./kit";
 import { STAGE_SCALE, dirt, sprouts } from "./life";
 import { arms, feet } from "./limbs";
-import { dynamics } from "./motion";
+import { dynamics, pettable } from "./motion";
 import { blendBase, goldenBase, moodBase, toColors, type Base } from "./palette";
 import { about, apply, clamp, ell, mul, matAttr, path, r, rotate, scale, smooth, type Mat } from "./svg";
 import type { PetPose, RenderOptions } from "./types";
@@ -62,7 +64,12 @@ export function layout(def: SpeciesDef, pose: PetPose, idPrefix: string): Layout
   const pals = palettes(def);
   const prev = MOODS.includes(pose.prevMood) ? pose.prevMood : pose.mood;
   const base = celebrating && pose.golden ? pals.gold : blendBase(pals.moods[prev], pals.moods[pose.mood], k);
-  const dyn = dynamics(safe, def.info.gait, mood);
+  const act = actFrame(safe, mood);
+  const dyn = dynamics(safe, def.info.gait, mood, act);
+  const craftV = pose.craft;
+  const craft = typeof craftV === "number" && Number.isFinite(craftV) && !held && !celebrating && mood !== "sleeping" ? clamp(craftV, 0, 1) : null;
+  const petOk = !held && pettable(mood);
+  const petting = petOk ? Math.max(0, num(pose.petting ?? 0, 0)) : 0;
 
   const thin = pose.hungry && !celebrating ? 0.9 : 1;
   // Squash and stretch keep the volume: a landing at 0.82 of the height spreads to 1.22 of the width.
@@ -74,14 +81,24 @@ export function layout(def: SpeciesDef, pose: PetPose, idPrefix: string): Layout
   const top = by - bh;
 
   const f = def.face;
-  const look = clamp(pose.walking && !held ? 0.8 : num(pose.lookX, 0) * facing, -1, 1);
-  const lookY = clamp(num(pose.lookY, 0), -1, 1);
+  let look = clamp(pose.walking && !held ? 0.8 : num(pose.lookX, 0) * facing, -1, 1);
+  let lookY = clamp(num(pose.lookY, 0), -1, 1);
+  if (craft !== null) {
+    // Eyes on the knitting.
+    look = 0.15;
+    lookY = 0.55;
+  }
+  if (act && act.lookK > 0) {
+    look += (act.lookX - look) * act.lookK;
+    lookY += (act.lookY - lookY) * act.lookK;
+  }
+  lookY = clamp(lookY + 0.7 * dyn.dip, -1, 1);
   const fx = cx + look * bw * (f.shift ?? 0.07);
   const ey = top + bh * f.eyeY + lookY * bh * 0.03;
   const my = ey + bh * (f.mouthY ?? 0.17);
   const prevEff: Mood = held ? "normal" : prev;
   // + tilts toward where the pet faces (local space is already mirrored, so the face turn needs no sign).
-  const tiltDeg = held ? 0 : clamp(num(pose.headTilt ?? 0, 0), -20, 20);
+  const tiltDeg = held ? 0 : clamp(num(pose.headTilt ?? 0, 0) + (act ? act.faceTilt : 0), -20, 20);
   const faceDeg = tiltDeg * (1 - TILT_LEAN);
   const feed = pose.food && pose.foodT >= 0 && pose.foodT < 1.8 ? Math.min(1, pose.foodT / 0.5) * (pose.foodT > 1.4 ? (1.8 - pose.foodT) / 0.4 : 1) : 0;
 
@@ -92,7 +109,10 @@ export function layout(def: SpeciesDef, pose: PetPose, idPrefix: string): Layout
     mood,
     celebrating,
     held,
-    petted: pose.hovered && !held && (mood === "normal" || mood === "happy"),
+    petted: (pose.hovered && !held && (mood === "normal" || mood === "happy")) || petting > 0,
+    petting,
+    act,
+    craft,
     t,
     k,
     pal: toColors(base),
@@ -130,7 +150,9 @@ export function layout(def: SpeciesDef, pose: PetPose, idPrefix: string): Layout
 
   // Keep everything inside the view: shift down while airborne, else shrink a little around the feet.
   const an = def.anchors(ctx);
-  const yTop = Math.min(top - def.headroom(ctx), accessoryTop(an, safe.wearing));
+  let yTop = Math.min(top - def.headroom(ctx), accessoryTop(an, safe.wearing));
+  // Arms raised over the head (stretch, yawn, scratch) poke above it.
+  if (act && act.armK > 0 && (act.arms === "up" || act.arms === "scratch")) yTop = Math.min(yTop, top - 7 * (def.arms?.scale ?? 1) * act.armK);
   const xL = cx - bw / 2 - def.reach[0], xR = cx + bw / 2 + def.reach[1];
   const yB = by + 7 + dyn.dangle;
   const mx = (xL + xR) / 2, myy = (yTop + yB) / 2;
@@ -141,6 +163,8 @@ export function layout(def: SpeciesDef, pose: PetPose, idPrefix: string): Layout
     [xL, myy], [xR, myy], [mx, yTop], [mx, yB],
     [mx + (xL - mx) * 0.94, myy + (yTop - myy) * 0.94], [mx + (xR - mx) * 0.94, myy + (yTop - myy) * 0.94],
     [mx + (xL - mx) * 0.94, myy + (yB - myy) * 0.94], [mx + (xR - mx) * 0.94, myy + (yB - myy) * 0.94],
+    // Wide or tilted hats: the corners of each head piece's box.
+    ...accessoryPoints(an, safe.wearing),
   ];
   for (const [x, y] of corners) {
     const [wx, wy] = apply(m0, x, y);
@@ -193,8 +217,12 @@ export function renderSpecies(def: SpeciesDef, pose: PetPose, opts: PetRenderOpt
   g += path(bodyD, `fill="none" stroke="${c.pal.line}" stroke-width="2.4"`);
   if (def.over) g += def.over(c);
   if (c.mood === "focus" && !c.held) g += headband(c, an.band);
-  const faceParts = face(c) + (def.front ? def.front(c) : "");
+  // The nose (and whiskers) twitch while sniffing or tickled before a sneeze.
+  const tw = c.act ? c.act.twitch : 0;
+  const front = def.front ? def.front(c) : "";
+  const faceParts = face(c) + (tw && front ? `<g transform="translate(0 ${r(tw)})">${front}</g>` : front);
   g += c.faceTurn ? `<g${c.faceTurn}>${faceParts}</g>` : faceParts;
+  if (c.craft !== null) g += yarnBall(c) + knitting(c);
   g += arms(c);
   if (def.top) g += def.top(c);
   g += sprouts(c, an);
@@ -211,6 +239,8 @@ export function renderSpecies(def: SpeciesDef, pose: PetPose, opts: PetRenderOpt
     mouthY,
     foodStartY: (6 - outer[5]) / scaleNow,
     minY: (4 - outer[5]) / scaleNow,
+    minX: (4 - outer[4]) / scaleNow,
+    maxX: (156 - outer[4]) / scaleNow,
     lang: opts.lang ?? "en",
   });
 
@@ -226,6 +256,7 @@ export function renderSpecies(def: SpeciesDef, pose: PetPose, opts: PetRenderOpt
     // Soft round blush (spec rule 4): full color in the middle, fading out, no edge.
     `<radialGradient id="${id}-k"><stop offset="0" stop-color="${c.pal.cheek}"/>` +
     `<stop offset="0.5" stop-color="${c.pal.cheek}" stop-opacity="0.72"/><stop offset="1" stop-color="${c.pal.cheek}" stop-opacity="0"/></radialGradient>` +
+    accessoryDefs(c) +
     `</defs>` +
     `<g${matAttr(about(scale(scaleNow, scaleNow), CENTER_X, GROUND))}>${ell(CENTER_X, GROUND, shW / 2, 4.6, `fill="url(#${id}-s)"`)}</g>` +
     `<g${matAttr(outer)} stroke-linecap="round" stroke-linejoin="round">` +

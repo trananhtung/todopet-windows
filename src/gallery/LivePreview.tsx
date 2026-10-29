@@ -10,7 +10,7 @@ import {
   type SpeciesId,
   type StageIndex,
 } from "../core/types";
-import { SPECIES, defaultPose, renderPet } from "../pets";
+import { ACT_DURATION, PET_ACTS, SPECIES, defaultPose, renderPet, type PetActKind } from "../pets";
 
 interface Props {
   species: SpeciesId;
@@ -37,10 +37,22 @@ export function LivePreview({ species, onSpecies, frozen }: Props) {
   const [wearing, setWearing] = useState<Accessory[]>([]);
   const [lang, setLang] = useState<"en" | "vi">("en");
   const [headTilt, setHeadTilt] = useState(0);
+  const [knit, setKnit] = useState(-1);
+  const [drowsy, setDrowsy] = useState(0);
+  const [petting, setPetting] = useState(false);
 
   // Values the animation loop reads without restarting.
-  const live = useRef({ mood, prevMood: mood as Mood, moodAt: -10, foodAt: -10, food: null as string | null });
-  const state = { species, walking, calm, held, hovered, facing, stage, dirt, hungry, golden, celebration, wearing, lang, headTilt };
+  const live = useRef({
+    mood,
+    prevMood: mood as Mood,
+    moodAt: -10,
+    foodAt: -10,
+    food: null as string | null,
+    act: null as PetActKind | null,
+    actAt: -10,
+    petAt: -10,
+  });
+  const state = { species, walking, calm, held, hovered, facing, stage, dirt, hungry, golden, celebration, wearing, lang, headTilt, knit, drowsy, petting };
   const latest = useRef(state);
   latest.current = state;
   // When time is frozen there is no animation loop, so redraw whenever a knob changes.
@@ -50,6 +62,14 @@ export function LivePreview({ species, onSpecies, frozen }: Props) {
     const now = performance.now() / 1000;
     live.current = { ...live.current, prevMood: live.current.mood, mood: m, moodAt: now };
     setMood(m);
+  };
+  const play = (kind: PetActKind): void => {
+    live.current.act = kind;
+    live.current.actAt = performance.now() / 1000;
+  };
+  const togglePetting = (on: boolean): void => {
+    live.current.petAt = performance.now() / 1000;
+    setPetting(on);
   };
   const feed = (): void => {
     live.current.foodAt = performance.now() / 1000;
@@ -92,9 +112,13 @@ export function LivePreview({ species, onSpecies, frozen }: Props) {
             celebration: s.celebration,
             wearing: s.wearing,
             headTilt: s.headTilt,
+            act: L.act && sec - L.actAt < ACT_DURATION[L.act] ? { kind: L.act, t: frozen ? 0.5 : sec - L.actAt } : null,
+            craft: s.knit >= 0 ? s.knit / 100 : null,
+            drowsy: s.drowsy / 100,
+            petting: s.petting ? (frozen ? 3 : sec - L.petAt) : 0,
             food: sec - L.foodAt < 2 ? L.food : null,
             foodT: sec - L.foodAt,
-            lookX: s.walking ? 0 : Math.sin(t * 0.7) * 0.8,
+            lookX: s.walking ? 0 : s.petting ? 0.8 : Math.sin(t * 0.7) * 0.8,
             lookY: s.walking ? 0 : Math.sin(t * 0.43) * 0.5,
           }),
           { idPrefix: "live", size: 280, lang: s.lang },
@@ -164,7 +188,25 @@ export function LivePreview({ species, onSpecies, frozen }: Props) {
           <label>
             <input type="checkbox" checked={lang === "vi"} onChange={(e) => setLang(e.target.checked ? "vi" : "en")} /> Tiếng Việt
           </label>
+          <label>
+            <input type="checkbox" checked={petting} onChange={(e) => togglePetting(e.target.checked)} /> Petting
+          </label>
         </div>
+        <div className="g-chips" role="group" aria-label="Acts">
+          {PET_ACTS.map((k) => (
+            <button key={k} type="button" onClick={() => play(k)}>
+              ▶ {k}
+            </button>
+          ))}
+        </div>
+        <label className="g-range">
+          Knitting <input type="range" min={-1} max={100} value={knit} onChange={(e) => setKnit(Number(e.target.value))} />
+          <output>{knit < 0 ? "off" : `${knit}%`}</output>
+        </label>
+        <label className="g-range">
+          Drowsy <input type="range" min={0} max={100} value={drowsy} onChange={(e) => setDrowsy(Number(e.target.value))} />
+          <output>{drowsy}%</output>
+        </label>
         <label className="g-range">
           Stage <input type="range" min={0} max={4} value={stage} onChange={(e) => setStage(Number(e.target.value) as StageIndex)} />
           <output>{["Baby", "Kid", "Teen", "Grown-up", "Master"][stage]}</output>
