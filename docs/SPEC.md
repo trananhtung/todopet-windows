@@ -134,7 +134,7 @@ picker in Settings shows a live preview; locked species show their requirement.
 
 No analytics, no servers of its own. Network: `api.todoist.com`, your ICS links, and `api.anthropic.com`
 only when you press Ask Claude. Browser titles and tab addresses stay in memory, and so does the v0.4 "Where was I?"
-place (never saved or written to the diary, dropped at the day change); only the day's "start when…" plans are stored. Raw Input stores only the time
+place (never saved or written to the diary, dropped at the day change; private windows and calls never in it); only the day's "start when…" plans are stored. Raw Input stores only the time
 of the last key-down. Secrets (tokens, ICS links) live in Credential Manager; everything else is local. See
 [SECURITY.md](../SECURITY.md).
 
@@ -221,9 +221,15 @@ people detach; overcommitting is the main planning failure.
   (running focus task, else the task you last acted on in the board, else the next task), the foreground app name
   and window title, and the browser address if it is http(s). Distracting apps and sites never become the context.
 - Snapshot moments: you go idle, a meeting starts, or you switch to a distracting app or site.
-- Coming back (after ≥ 5 min away, after a meeting, or leaving a distraction after ≥ 2 min) shows a resume card
-  instead of the generic welcome-back: "You were on: ⟨task⟩ · in ⟨app⟩ — ⟨title⟩" with **Reopen ↗** (only for an
-  http(s) address), **Focus** and **Something else**. It is a check-in, not counted against the nudge budget.
+- Coming back (after ≥ 5 min away, after a meeting, or leaving a distraction for 2 samples in a row after ≥ 2 min)
+  shows a resume card instead of the generic welcome-back: "You were on: ⟨task⟩ · in ⟨app⟩ — ⟨title⟩" ("Next up:
+  ⟨task⟩ · you were in …" when the task is only the next one in line) with **Reopen ↗ ⟨host⟩** (only for an http(s)
+  address), **Focus** and **Something else**. It is a check-in, not counted against the nudge budget, but it waits
+  for a pause and while reminders are held, comes at most every 30 minutes, and stops for the day after two closes.
+- Never a call (Zoom, Teams, Meet…) or the pet itself as the place, and never shown while a call is in front (it waits
+  for its 10 minutes). A browser sample whose address can't be read for a second neither ends a distraction nor
+  becomes the place. A private window keeps only the app's name. Addresses lose secret-looking parameters and `#…`.
+  `prefs.resumeDetails` (Settings → Behavior → Calm, on by default): off, the card has only the task and the app.
 - The board has **📌 Pin my place**: saves the context now with an optional one-line "next step" that the resume
   card shows.
 
@@ -231,17 +237,26 @@ people detach; overcommitting is the main planning failure.
 - The "meeting soon" bubble lists up to 2 related open tasks (sharing a word of 4+ letters with the meeting title,
   case- and diacritic-insensitive, common words ignored).
 - After a meeting of 15+ minutes ends and you are at the PC (within 10 min): "“⟨meeting⟩” is over. Anything to
-  capture?" with **＋ Next step** (opens the board's add field prefilled with "⟨meeting⟩: ") and **Nothing**. If the
-  next meeting starts within 15 minutes, it also suggests a 5-minute breather. Once per meeting, not counted
-  against the budget.
+  capture?" with **＋ Next step** (opens the board's add field prefilled with "⟨meeting⟩: ", never over a draft) and
+  **Nothing**. If the next meeting starts in 3 to 15 minutes, it also suggests a breather of up to 5 minutes, cut to
+  the time there is. Once per meeting, not counted against the budget, held while reminders are held, and it stops for
+  the day after two closes.
+- It (and the "Meeting's done" card) needs a sign you were there (a call app or tab in front, 2+ minutes idle, or
+  another app than before the meeting in front) and waits while a call is still in front: its 10 minutes count from
+  when the call leaves.
 
 ### 3. Shutdown ritual (board "Wrap up" sheet, `brain.ts`)
-- The end-of-day review bubble opens a **Wrap up** sheet (also in the board menu after 15:00), at most a few
-  taps: today's wins; each unfinished task with **Tomorrow** / **No date** / keep; pick **tomorrow's frog**; one
+- The end-of-day review bubble opens a **Wrap up** sheet (also in the board menu from 15:00, or from the review time
+  when that is earlier), at most a few taps: today's wins; each unfinished task (overdue ones too) with **Tomorrow**
+  (the next workday, named when it isn't tomorrow: "Monday") / **No date** / keep; pick **tomorrow's frog**; one
   line "where do I start tomorrow?". **Done for today** puts the pet to sleep and stops non-urgent bubbles until
   the next workday.
 - Tomorrow's frog and the note are stored locally (`plan` key) and the next morning's greeting names them; the
   frog goes first in "eat the frog" ordering that day.
+- The draft lives in the brain for the day (closing the board keeps it); a frog finished elsewhere becomes "I'll
+  decide tomorrow" with a line about it; the frog of a saved plan is kept even once moved to tomorrow. A retry reuses
+  the plan worked out the first time. While "done for today" the pet's hunger and your detours aren't counted, and the
+  kind words about yesterday wait for the first greeting after it. Adding a rest day moves the sleep and the plan.
 - The sheet only collects choices; **Done for today** applies them together (a repeating task can only stay, since
   moving it would break its repeat). The frog and note are for the next *workday* (Monday after a Friday) and only
   count that day. If a move fails the pet stays awake, the sheet says so and the same button tries again. The day
@@ -253,13 +268,17 @@ people detach; overcommitting is the main planning failure.
   minutes. Once a day, after planning, if load exceeds capacity by 60+ minutes: "Today looks overbooked: ~6h of
   tasks + 3h of meetings in 7h left. Move some?" with **Pick tasks to move** and **It's fine** (a check-in).
 - The board shows a compact timeline of the work day: meetings, timed tasks, now, and a load meter.
-- The check is skipped in the last 30 minutes of the work day (the end-of-day review covers it) and when no work
-  time is left. Load counts today's open tasks (not overdue ones) and only the part of a meeting that is still ahead.
+- The check runs from planning until the middle of the work day (after that the review covers it) and when work time
+  is left. Load counts today's open tasks (not overdue ones) and only the part of a meeting that is still ahead; a
+  timed task inside a meeting isn't counted twice. Blocks of the timeline that overlap stack in rows.
 
 ### 5. If-then starts and the 2-minute starter (`brain.ts`, board)
-- A task's menu has **Start when…**: after ⟨a meeting today⟩, when I open ⟨app⟩ (recent non-distracting apps or
-  typed), after lunch (13:00). Stored locally for the day; fires once with "As planned: ⟨task⟩" and **Focus now** /
-  **Later** (the user asked for it, so it is not counted against the budget).
+- A task's menu has **Start when…**: after ⟨a meeting today⟩, when I open ⟨app⟩ (recent non-distracting apps, not the one
+  in front, or **Another app…**, a small dialog for a name of 3+ letters matching whole words or the program's name),
+  after lunch (13:00). An app plan fires when the app comes to the front after the plan was made. Stored locally for
+  the day; fires once with "As planned: ⟨task⟩" and **Focus now** / **Later** (the user asked for it, so it is not
+  counted against the budget and not held; **Later** re-arms it for 30 minutes). A plan whose meeting moved or was
+  cancelled is dropped at the calendar sync. The diary only says what kind of plan it was.
 - **▶ Try 2 minutes** (task menu and the stuck-task bubble) starts a 2-minute focus on the task ("just open it");
   when it ends the pet offers a normal focus session or "that's enough".
 

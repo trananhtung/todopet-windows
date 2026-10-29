@@ -70,8 +70,8 @@ export function Popover({
           close.current(true);
           return;
         }
-        // A confirmation keeps focus inside until it is answered.
-        const items = [...ref.current.querySelectorAll<HTMLElement>("button")];
+        // A dialog keeps focus inside until it is answered: its fields and buttons, not the disabled ones.
+        const items = [...ref.current.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])")];
         const i = items.indexOf(document.activeElement as HTMLElement);
         items[(i + (e.shiftKey ? -1 : 1) + items.length) % items.length]?.focus();
       }

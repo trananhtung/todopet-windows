@@ -11,7 +11,6 @@ import {
   canWrapUp,
   chooseFrog,
   chooseMove,
-  draftFrog,
   emptyPlanDoc,
   isDoneForToday,
   MAX_NOTE_LENGTH,
@@ -21,6 +20,7 @@ import {
   nextWorkdayStart,
   planFor,
   planFromDraft,
+  reconcileDraft,
   planFromJson,
   planToJson,
   prunePlans,
@@ -44,6 +44,15 @@ describe("the Wrap up entry", () => {
     expect(canWrapUp(at(15, 0))).toBe(true);
     expect(canWrapUp(at(23, 30))).toBe(true);
     expect(canWrapUp(at(15, 0).getTime())).toBe(true);
+  });
+
+  it("opens from the review time, half an hour before the work day ends, when that is earlier than 15:00", () => {
+    expect(canWrapUp(at(14, 29), 15)).toBe(false);
+    expect(canWrapUp(at(14, 30), 15)).toBe(true);
+    // A late finish doesn't push it past 15:00.
+    expect(canWrapUp(at(14, 59), 24)).toBe(false);
+    expect(canWrapUp(at(15, 0), 24)).toBe(true);
+    expect(canWrapUp(at(15, 0), 16)).toBe(true);
   });
 });
 
@@ -175,14 +184,35 @@ describe("the Wrap up sheet", () => {
   const tasks = [task("a", { priority: 4 }), task("b", { priority: 3 }), task("r", { priority: 2, due: recurring }), task("c", { priority: 1 })];
 
   it("starts with nothing moved, the top task as the frog and no note", () => {
-    expect(newDraft(tasks)).toEqual({ moves: {}, frogId: "a", note: "" });
-    expect(newDraft([])).toEqual({ moves: {}, frogId: null, note: "" });
+    expect(newDraft(tasks)).toMatchObject({ moves: {}, frogId: "a", note: "", picked: false });
+    expect(newDraft([])).toMatchObject({ moves: {}, frogId: null, note: "" });
   });
 
-  it("starts from the plan already made for tomorrow, if its frog is still on the list", () => {
-    expect(newDraft(tasks, plan("2026-10-29", { frogId: "b", note: "Call first" }))).toEqual({ moves: {}, frogId: "b", note: "Call first" });
-    expect(newDraft(tasks, plan("2026-10-29", { frogId: "gone" })).frogId).toBe("a");
-    expect(newDraft(tasks, plan("2026-10-29", { frogId: null, note: "just a note" }))).toMatchObject({ frogId: null, note: "just a note" });
+  it("starts from the plan already made for tomorrow", () => {
+    expect(newDraft(tasks, plan("2026-10-29", { frogId: "b", note: "Call first" }))).toMatchObject({ moves: {}, frogId: "b", note: "Call first", picked: true });
+    expect(newDraft(tasks, plan("2026-10-29", { frogId: null, note: "just a note" }))).toMatchObject({ frogId: null, note: "just a note", picked: true });
+  });
+
+  it("keeps the frog of that plan even when it isn't on today's list (it moved to tomorrow), unless it is finished", () => {
+    expect(newDraft(tasks, plan("2026-10-29", { frogId: "moved" })).frogId).toBe("moved");
+    // Not even before the first sync, with no tasks to look at: the saved plan is not overwritten.
+    expect(newDraft([], plan("2026-10-29", { frogId: "b", note: "Call first" }))).toMatchObject({ frogId: "b", note: "Call first" });
+    const finished = [task("b", { checked: true })];
+    expect(newDraft(tasks, plan("2026-10-29", { frogId: "b" }), finished)).toMatchObject({ frogId: null, picked: true, frogDone: "Task b" });
+  });
+
+  it("follows a sync: a frog finished elsewhere becomes 'decide tomorrow' with its title, an untouched default follows the list", () => {
+    const d = newDraft(tasks);
+    expect(reconcileDraft(d, tasks, [])).toBe(d);
+    // The default frog is finished elsewhere.
+    const next = reconcileDraft(d, tasks.slice(1), [task("a")]);
+    expect(next).toMatchObject({ frogId: "b", picked: false });
+    // One you chose yourself is not swapped, but a finished one is let go with a word about it.
+    const chosen = chooseFrog(d, tasks, "c");
+    expect(reconcileDraft(chosen, tasks, [])).toBe(chosen);
+    expect(reconcileDraft(chosen, tasks, [task("c")])).toMatchObject({ frogId: null, picked: true, frogDone: "Task c" });
+    // Choosing again clears the word.
+    expect(chooseFrog(reconcileDraft(chosen, tasks, [task("c")]), tasks, "b")).toMatchObject({ frogId: "b", frogDone: null });
   });
 
   it("moves a task to tomorrow or off the plan, or keeps it", () => {
@@ -223,11 +253,17 @@ describe("the Wrap up sheet", () => {
   });
 
   it("moves everything that can move to tomorrow in one tap, leaving the repeating ones", () => {
-    const d = moveAllToTomorrow(chooseMove(newDraft(tasks), tasks, "c", "none"), tasks);
+    const d = moveAllToTomorrow(newDraft(tasks), tasks);
     expect(Object.keys(d.moves).sort()).toEqual(["a", "b", "c"]);
     expect(wrapMoves(d, tasks).tomorrow.map((t) => t.id)).toEqual(["a", "b", "c"]);
-    // It does not put the frog (or anything else) back on the plan once taken off, except that everything is now tomorrow's.
     expect(d.frogId).toBe("a");
+  });
+
+  it("leaves a 'No date' choice alone when everything goes to tomorrow", () => {
+    const d = moveAllToTomorrow(chooseMove(newDraft(tasks), tasks, "c", "none"), tasks);
+    expect(d.moves.c).toBe("none");
+    expect(wrapMoves(d, tasks).none.map((t) => t.id)).toEqual(["c"]);
+    expect(wrapMoves(d, tasks).tomorrow.map((t) => t.id)).toEqual(["a", "b"]);
   });
 
   it("keeps the note to one line of limited length, leaving the spaces alone while you type", () => {
@@ -236,21 +272,19 @@ describe("the Wrap up sheet", () => {
     expect(setNote(newDraft(tasks), "x".repeat(500)).note).toHaveLength(MAX_NOTE_LENGTH);
   });
 
-  it("finds the frog among tasks that are still there", () => {
-    expect(draftFrog(newDraft(tasks), tasks)?.id).toBe("a");
-    expect(draftFrog(newDraft(tasks), tasks.slice(1))).toBeNull();
-    expect(draftFrog({ moves: { a: "none" }, frogId: "a", note: "" }, tasks)).toBeNull();
-  });
-
   it("makes the plan for the day: the frog's id and the tidy note", () => {
+    const known = new Set(tasks.map((t) => t.id));
+    const none = new Set<string>();
     const d = setNote({ ...newDraft(tasks), frogId: "b" }, "  Start  with the intro ");
-    expect(planFromDraft(d, tasks, "2026-10-29")).toEqual({ day: "2026-10-29", frogId: "b", note: "Start with the intro" });
+    expect(planFromDraft(d, known, none, "2026-10-29")).toEqual({ day: "2026-10-29", frogId: "b", note: "Start with the intro" });
     // No frog, no note: nothing to remember.
-    expect(planFromDraft({ moves: {}, frogId: null, note: "  " }, tasks, "2026-10-29")).toEqual({ day: "2026-10-29", frogId: null, note: null });
-    // A frog that is not on the list any more is no frog.
-    expect(planFromDraft({ moves: {}, frogId: "gone", note: "" }, tasks, "2026-10-29").frogId).toBeNull();
-    // A task moved off the plan is no frog.
-    expect(planFromDraft({ moves: { a: "none" }, frogId: "a", note: "" }, tasks, "2026-10-29").frogId).toBeNull();
+    expect(planFromDraft({ moves: {}, frogId: null, note: "  " }, known, none, "2026-10-29")).toEqual({ day: "2026-10-29", frogId: null, note: null });
+    // A frog nobody knows is no frog, but one that moved to tomorrow (known from the plan) still is.
+    expect(planFromDraft({ moves: {}, frogId: "gone", note: "" }, known, none, "2026-10-29").frogId).toBeNull();
+    expect(planFromDraft({ moves: { b: "tomorrow" }, frogId: "moved", note: "" }, new Set([...known, "moved"]), none, "2026-10-29").frogId).toBe("moved");
+    // A task moved off the plan, or finished, is no frog.
+    expect(planFromDraft({ moves: { a: "none" }, frogId: "a", note: "" }, known, none, "2026-10-29").frogId).toBeNull();
+    expect(planFromDraft({ moves: {}, frogId: "a", note: "" }, known, new Set(["a"]), "2026-10-29").frogId).toBeNull();
   });
 });
 

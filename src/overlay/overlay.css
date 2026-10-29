@@ -1267,33 +1267,24 @@ body.overlay {
   background: var(--accent-soft);
   color: var(--accent-text);
 }
-.popover.menu .menu-form {
-  display: flex;
-  gap: 6px;
-  padding: 4px 6px 6px;
-}
-.popover.menu .menu-form .field {
-  flex: 1;
-  min-width: 0;
-  min-height: 30px;
-  font-size: 12.5px;
-}
-.popover.menu .menu-form .btn {
-  flex: none;
-  justify-content: center;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
-}
-.popover.menu .menu-form .btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
 .popover.confirm.pin-form {
   width: 288px;
 }
 .popover.pin-form .field {
   margin: 0 0 10px;
+}
+.popover.app-form label {
+  display: block;
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+.popover.app-form .field {
+  margin-bottom: 6px;
+}
+.popover.app-form .hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
 }
 .popover.confirm {
   width: 264px;

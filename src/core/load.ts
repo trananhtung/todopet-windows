@@ -54,11 +54,26 @@ function workDay(now: Date, workStart: number, workEnd: number): { start: number
   return { start: atHour(workStart, 0, now).getTime(), end: atHour(workEnd, 0, now).getTime() };
 }
 
+/**
+ * The minutes a task adds to the day. A task with a time that falls in a meeting (or partly in one) only adds the part
+ * outside it: those minutes are already counted as the meeting's.
+ */
+function ownMinutes(task: TodoTask, input: DayLoadInput): number {
+  const estimate = taskEstimate(task, input.defaultEstimate);
+  const time = dueTime(task);
+  if (!time) return estimate;
+  const start = time.getTime();
+  // Only a meeting still ahead has its minutes counted, so only that part is not the task's.
+  const from = Math.max(start, new Date(input.now).getTime());
+  const covered = busy(input.events, new Date(from), new Date(Math.max(from, start + estimate * MIN))).reduce((sum, i) => sum + (i.end - i.start), 0);
+  return Math.max(0, estimate - covered / MIN);
+}
+
 export function dayLoad(input: DayLoadInput): DayLoad {
   const now = new Date(input.now);
   const day = workDay(now, input.workStart, input.workEnd);
   const from = Math.max(now.getTime(), day.start);
-  const taskMinutes = Math.round(workTasks(input.tasks).reduce((sum, t) => sum + taskEstimate(t, input.defaultEstimate), 0));
+  const taskMinutes = Math.round(workTasks(input.tasks).reduce((sum, t) => sum + ownMinutes(t, input), 0));
   if (from >= day.end) return { taskMinutes, meetingMinutes: 0, capacity: 0, overBy: taskMinutes };
   const busyMs = busy(input.events, new Date(from), new Date(day.end)).reduce((sum, i) => sum + (i.end - i.start), 0);
   const meetingMinutes = Math.round(busyMs / MIN);
@@ -76,6 +91,8 @@ export interface TimelineSegment {
   /** Fractions of the work day, 0 ≤ start < end ≤ 1. */
   start: number;
   end: number;
+  /** 0 for the first row; a block that overlaps one above it goes in the next row down. */
+  lane: number;
 }
 
 export interface Timeline {
@@ -96,7 +113,7 @@ export function timeline(input: DayLoadInput): Timeline {
   const add = (kind: TimelineSegment["kind"], id: string, title: string, start: number, end: number) => {
     const s = fraction(start);
     const e = fraction(end);
-    if (s < e) segments.push({ kind, id, title, start: s, end: e });
+    if (s < e) segments.push({ kind, id, title, start: s, end: e, lane: 0 });
   };
   for (const e of input.events) add("meeting", e.id, e.title, e.start.getTime(), e.end.getTime());
   for (const t of workTasks(input.tasks)) {
@@ -104,6 +121,14 @@ export function timeline(input: DayLoadInput): Timeline {
     if (time) add("task", t.id, taskTitle(t), time.getTime(), time.getTime() + taskEstimate(t, input.defaultEstimate) * MIN);
   }
   segments.sort((a, b) => a.start - b.start || (a.kind === b.kind ? 0 : a.kind === "meeting" ? -1 : 1));
+  // Each block takes the first row that is free where it starts.
+  const rowEnds: number[] = [];
+  for (const seg of segments) {
+    let lane = rowEnds.findIndex((end) => end <= seg.start);
+    if (lane < 0) lane = rowEnds.length;
+    rowEnds[lane] = seg.end;
+    seg.lane = lane;
+  }
   return { segments, now: fraction(now.getTime()) };
 }
 
@@ -128,6 +153,8 @@ export interface DayStrip {
   segments: TimelineSegment[];
   /** Where now falls in the work day, 0..1. */
   now: number;
+  /** How many rows the blocks need (1 when nothing overlaps). */
+  lanes: number;
   load: DayLoad;
   /** Load as a share of the time left, 0..1, for the meter. */
   ratio: number;
@@ -141,5 +168,6 @@ export function dayStrip(input: DayLoadInput): DayStrip {
   const load = dayLoad(input);
   const total = load.taskMinutes + load.meetingMinutes;
   const ratio = load.capacity > 0 ? Math.min(1, total / load.capacity) : total > 0 ? 1 : 0;
-  return { startHour: input.workStart, endHour: input.workEnd, segments, now, load, ratio, level: loadLevel(load), hasContent: segments.length > 0 || total > 0 };
+  const lanes = Math.max(1, ...segments.map((x) => x.lane + 1));
+  return { startHour: input.workStart, endHour: input.workEnd, segments, now, lanes, load, ratio, level: loadLevel(load), hasContent: segments.length > 0 || total > 0 };
 }

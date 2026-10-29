@@ -8,7 +8,7 @@ use crate::{diary, CmdError, CmdResult};
 pub const MAX_SECRET_LEN: usize = 512;
 /// Diary lines are one JSON entry each; anything bigger is a bug on the JS side.
 pub const MAX_DIARY_LINE_BYTES: usize = 8 * 1024;
-/// URL schemes `open_url` hands to the OS.
+/// URL schemes `open_url` hands to the OS (http and https links may not carry a user name).
 pub const OPEN_URL_SCHEMES: [&str; 4] = ["http", "https", "msteams", "zoommtg"];
 /// The only storage documents the app uses: preferences, the pet's life, the postponed-task log, the day's
 /// "start when…" plans, and the wrap-up plan (tomorrow's frog and note).
@@ -35,6 +35,32 @@ pub fn store_key(key: &str) -> CmdResult<&str> {
         Ok(key)
     } else {
         Err(CmdError::invalid("Invalid storage key"))
+    }
+}
+
+/// Which storage documents each window may read or write, by the window's label (enforced in Rust, whatever the
+/// page asks for). The overlay runs the brain and uses them all; Settings reads prefs and the pet's life and
+/// writes prefs; the Diary reads prefs (language, whether it is on); the gallery uses none. Unknown windows get
+/// nothing.
+pub fn store_key_allowed(label: &str, key: &str, write: bool) -> bool {
+    if !STORE_KEYS.contains(&key) {
+        return false;
+    }
+    match label {
+        "overlay" => true,
+        "settings" => key == "prefs" || (!write && key == "life"),
+        "diary" => !write && key == "prefs",
+        _ => false,
+    }
+}
+
+/// A storage key that is valid and that the window with this label may read (`write` false) or write.
+pub fn window_store_key<'a>(label: &str, key: &'a str, write: bool) -> CmdResult<&'a str> {
+    let key = store_key(key)?;
+    if store_key_allowed(label, key, write) {
+        Ok(key)
+    } else {
+        Err(CmdError::invalid("This window can't use that storage key"))
     }
 }
 
@@ -116,7 +142,7 @@ pub fn open_url(raw: &str) -> CmdResult<String> {
     }
     let rest = &url[scheme.len() + 1..];
     let ok = match scheme.as_str() {
-        "http" | "https" => host_of(rest).is_some(),
+        "http" | "https" => host_of(rest).is_some() && !has_userinfo(rest),
         "msteams" => is_teams_meeting(rest),
         "zoommtg" => is_zoom_join(rest),
         _ => false,
@@ -126,6 +152,14 @@ pub fn open_url(raw: &str) -> CmdResult<String> {
     } else {
         Err(CmdError::invalid("Invalid link"))
     }
+}
+
+/// Does the address of `//authority/path…` start with a user name (`user:pass@host`, `google.com@evil.example`)?
+/// What a reader sees first is then not the host the link goes to.
+fn has_userinfo(after_scheme: &str) -> bool {
+    let Some(rest) = after_scheme.strip_prefix("//") else { return false };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    rest[..end].contains('@')
 }
 
 /// `msteams:` + `/l/meetup-join/<meeting>`: the link Teams puts in meeting invitations.
@@ -221,6 +255,52 @@ mod tests {
     }
 
     #[test]
+    fn each_window_gets_only_its_own_storage_keys() {
+        // The overlay runs the brain: everything.
+        for key in STORE_KEYS {
+            assert!(store_key_allowed("overlay", key, false), "overlay reads {key}");
+            assert!(store_key_allowed("overlay", key, true), "overlay writes {key}");
+        }
+        // Settings reads prefs and the pet's life, and writes prefs.
+        assert!(store_key_allowed("settings", "prefs", false));
+        assert!(store_key_allowed("settings", "prefs", true));
+        assert!(store_key_allowed("settings", "life", false));
+        assert!(!store_key_allowed("settings", "life", true));
+        for key in ["stuck", "triggers", "plan"] {
+            assert!(!store_key_allowed("settings", key, false), "settings reads {key}");
+            assert!(!store_key_allowed("settings", key, true), "settings writes {key}");
+        }
+        // The diary reads prefs (language, whether it is on) and writes nothing.
+        assert!(store_key_allowed("diary", "prefs", false));
+        assert!(!store_key_allowed("diary", "prefs", true));
+        for key in ["life", "stuck", "triggers", "plan"] {
+            assert!(!store_key_allowed("diary", key, false), "diary reads {key}");
+            assert!(!store_key_allowed("diary", key, true), "diary writes {key}");
+        }
+        // The gallery uses none; unknown windows and keys get nothing.
+        for key in STORE_KEYS {
+            assert!(!store_key_allowed("gallery", key, false));
+            assert!(!store_key_allowed("gallery", key, true));
+        }
+        for label in ["", "Overlay", "overlay ", "main", "evil", "settings2", "overlay-2"] {
+            assert!(!store_key_allowed(label, "prefs", false), "{label:?}");
+        }
+        for key in ["", "secrets", "../prefs", "Prefs", "prefs.json"] {
+            assert!(!store_key_allowed("overlay", key, false), "{key:?}");
+            assert!(!store_key_allowed("overlay", key, true), "{key:?}");
+        }
+    }
+
+    #[test]
+    fn window_store_key_checks_the_key_and_the_window() {
+        assert_eq!(window_store_key("overlay", "triggers", true).unwrap(), "triggers");
+        assert_eq!(window_store_key("settings", "life", false).unwrap(), "life");
+        assert_eq!(window_store_key("settings", "life", true).unwrap_err().kind, ErrorKind::Invalid);
+        assert_eq!(window_store_key("gallery", "prefs", false).unwrap_err().kind, ErrorKind::Invalid);
+        assert_eq!(window_store_key("overlay", "../prefs", false).unwrap_err().kind, ErrorKind::Invalid);
+    }
+
+    #[test]
     fn diary_days_and_lines() {
         assert!(diary_day("2026-10-28").is_ok());
         assert!(diary_day("2024-02-29").is_ok());
@@ -309,8 +389,23 @@ mod tests {
             "zoommtg://user@zoom.us/join?confno=1",
             "zoommtg:zoom.us/join?confno=1",
             "zoommtg://zoom.us/join?confno=1#frag",
+            // A user name in front of the host: the host a reader sees is not where the link goes.
+            "https://user:pass@example.com/a",
+            "https://google.com@evil.example/",
+            "http://user@example.com",
+            "https://@example.com/",
+            "HTTPS://a:b@Example.com",
         ] {
             assert!(open_url(bad).is_err(), "{bad}");
+        }
+        // An @ later in the address is just text.
+        for good in [
+            "https://example.com/@user",
+            "https://example.com/a?mail=a@b.com",
+            "https://example.com/#@x",
+            "https://example.com:8080/a@b",
+        ] {
+            assert!(open_url(good).is_ok(), "{good}");
         }
     }
 

@@ -234,7 +234,8 @@ describe("Brain v0.4: wrapping up the day", () => {
     const draft = draftFor(r, (d, tasks) => chooseMove(chooseMove(d, tasks, "2", "tomorrow"), tasks, "4", "none"));
     const result = await r.brain.wrapUp(draft);
     expect(result).toMatchObject({ ok: true, moved: 1, offPlan: 1, failed: 0, error: null });
-    expect(reschedule.mock.calls.map((c) => [c[0], c[1]]).sort()).toEqual([["2", "tomorrow"], ["4", "no date"]]);
+    // "Tomorrow" is the next workday's date.
+    expect(reschedule.mock.calls.map((c) => [c[0], c[1]]).sort()).toEqual([["2", "2026-10-29"], ["4", "no date"]]);
     expect(todayTasks(r).map((t) => t.id)).toEqual(["1"]);
   });
 
@@ -805,17 +806,17 @@ describe("Brain v0.4: the overbooked check", () => {
   });
 
   it("uses the default estimate for tasks without a length", async () => {
-    // 14:00: 4 hours left; three tasks with no length.
-    const small = await started({ start: at(28, 13, 58), setup: combine(meetings(), untimed), prefs: { defaultEstimate: 30 } });
+    // 14:00: 4 hours left (a 12:00-18:00 day, so the middle is 15:00); three tasks with no length.
+    const small = await started({ start: at(28, 13, 58), setup: combine(meetings(), untimed), prefs: { defaultEstimate: 30, workStart: 12 } });
     expect(overbooked(small.checkAt(14))).toBe(false);
     small.stop();
-    const big = await started({ start: at(28, 13, 58), setup: combine(meetings(), untimed), prefs: { defaultEstimate: 120 } });
+    const big = await started({ start: at(28, 13, 58), setup: combine(meetings(), untimed), prefs: { defaultEstimate: 120, workStart: 12 } });
     const b = big.checkAt(14);
     expect(b?.text).toBe("Today looks overbooked: ~6h of tasks in 4h left. Move some?");
   });
 
   it("prefers the Todoist length over the default", async () => {
-    const r = await started({ start: at(28, 13, 58), setup: lengths(15, 15, 15), prefs: { defaultEstimate: 120 } });
+    const r = await started({ start: at(28, 13, 58), setup: lengths(15, 15, 15), prefs: { defaultEstimate: 120, workStart: 12 } });
     expect(overbooked(r.checkAt(14))).toBe(false);
   });
 
@@ -902,5 +903,276 @@ describe("Brain v0.4: what the brain stores", () => {
     r.bubblesIn(30);
     r.brain.tick();
     expect(saved).not.toContain("plan");
+  });
+});
+
+// ---------- v0.4 part B, after review ----------
+
+describe("Brain v0.4 review: the frog survives a retry and a second wrap-up", () => {
+  const afternoon = (extra: RigOptions = {}) => started({ start: at(28, 16), setup: combine(meetings(), untimed), ...extra });
+  const failing = (r: Rig, id: string) => {
+    const real = r.backend.todoist.reschedule.bind(r.backend.todoist);
+    r.backend.todoist.reschedule = async (taskId, due) => {
+      if (taskId === id) throw new BackendError({ kind: "network", message: "offline" });
+      return real(taskId, due);
+    };
+    return real;
+  };
+
+  it("keeps a frog that was moved to tomorrow when the same sheet is sent again", async () => {
+    const r = await afternoon();
+    const real = failing(r, "4");
+    const draft = draftFor(r, (d, tasks) => chooseFrog(chooseMove(chooseMove(d, tasks, "2", "tomorrow"), tasks, "4", "tomorrow"), tasks, "2"));
+    expect(await r.brain.wrapUp(draft)).toMatchObject({ ok: false, moved: 1, failed: 1 });
+    expect((await planOnDisk(r))?.plans).toEqual([{ day: "2026-10-29", frogId: "2", note: null }]);
+    r.backend.todoist.reschedule = real;
+    expect(await r.brain.wrapUp(draft)).toMatchObject({ ok: true, moved: 1 });
+    expect((await planOnDisk(r))?.plans).toEqual([{ day: "2026-10-29", frogId: "2", note: null }]);
+    // The goodnight names it, though it is no longer on today's list.
+    expect(r.brain.getSnapshot().bubble?.text).toContain("“Call client ABC”");
+  });
+
+  it("keeps it when the sheet is opened again after 'Back to work'", async () => {
+    const r = await afternoon();
+    await r.brain.wrapUp(draftFor(r, (d, tasks) => chooseFrog(chooseMove(d, tasks, "2", "tomorrow"), tasks, "2")));
+    r.brain.resumeDay();
+    const again = r.brain.wrapDraft();
+    expect(again).toMatchObject({ frogId: "2", picked: true });
+    expect(await r.brain.wrapUp(again)).toMatchObject({ ok: true });
+    expect((await planOnDisk(r))?.plans[0].frogId).toBe("2");
+  });
+
+  it("lets go of a frog that was finished meanwhile, and says so in the draft", async () => {
+    const r = await afternoon();
+    const draft = draftFor(r, (d, tasks) => chooseFrog(d, tasks, "2"));
+    r.brain.editWrapDraft(() => draft);
+    // Finished in the Todoist app: no longer open, and on the list of what was done today.
+    await r.backend.todoist.close("2");
+    await r.brain.refresh();
+    expect(r.brain.getSnapshot().wrapDraft).toMatchObject({ frogId: null, frogDone: "Call client ABC" });
+    expect(await r.brain.wrapUp(r.brain.wrapDraft())).toMatchObject({ ok: true });
+    expect((await planOnDisk(r))?.plans ?? []).toEqual([]);
+  });
+
+  it("starts the sheet from the saved plan even before the first sync, and doesn't wipe it", async () => {
+    const r = await started({
+      start: at(28, 16),
+      setup: combine(meetings(), untimed, (b) => {
+        b.todoist.tasks = async () => {
+          throw new BackendError({ kind: "network", message: "offline" });
+        };
+      }),
+      plan: { plans: [{ day: "2026-10-29", frogId: "2", note: "Start with the call" }], doneUntil: null },
+    });
+    expect(r.brain.getSnapshot().day.today).toEqual([]);
+    expect(r.brain.wrapDraft()).toMatchObject({ frogId: "2", note: "Start with the call" });
+    await r.brain.wrapUp(r.brain.wrapDraft());
+    expect((await planOnDisk(r))?.plans).toEqual([{ day: "2026-10-29", frogId: "2", note: "Start with the call" }]);
+  });
+});
+
+describe("Brain v0.4 review: tomorrow means the next workday", () => {
+  const friday = (extra: RigOptions = {}) => started({ start: at(30, 16), demo: false, setup: combine(meetings(), untimed), ...extra });
+
+  it("moves to the next workday's date, not to 'tomorrow'", async () => {
+    const r = await started({ start: at(28, 16), setup: combine(meetings(), untimed) });
+    const reschedule = vi.spyOn(r.backend.todoist, "reschedule");
+    await r.brain.wrapUp(draftFor(r, (d, tasks) => chooseMove(chooseMove(d, tasks, "2", "tomorrow"), tasks, "4", "none")));
+    expect(reschedule.mock.calls.map((c) => [c[0], c[1]]).sort()).toEqual([["2", "2026-10-29"], ["4", "no date"]]);
+    expect(r.brain.wrapDay()).toEqual({ day: "2026-10-29", isTomorrow: true });
+  });
+
+  it("means Monday on a Friday, and skips a rest day", async () => {
+    const r = await friday();
+    const reschedule = vi.spyOn(r.backend.todoist, "reschedule");
+    expect(r.brain.wrapDay()).toEqual({ day: "2026-11-02", isTomorrow: false });
+    await r.brain.wrapUp(draftFor(r, (d, tasks) => chooseMove(d, tasks, "2", "tomorrow")));
+    expect(reschedule.mock.calls.map((c) => [c[0], c[1]])).toEqual([["2", "2026-11-02"]]);
+    const mid = await started({ start: at(28, 16), demo: false, prefs: { restDays: ["2026-10-29"] }, setup: combine(meetings(), untimed) });
+    expect(mid.brain.wrapDay()).toEqual({ day: "2026-10-30", isTomorrow: false });
+  });
+
+  it("moves the review bubble's 'Move to tomorrow' to the next workday too", async () => {
+    const r = await friday({ start: at(30, 17, 25) });
+    const reschedule = vi.spyOn(r.backend.todoist, "reschedule");
+    await r.brain.moveTodayToTomorrow();
+    expect(reschedule.mock.calls.length).toBeGreaterThan(0);
+    for (const [, due] of reschedule.mock.calls) expect(due).toBe("2026-11-02");
+  });
+
+  it("brings the tasks and the frog on Monday morning after a Friday wrap-up", async () => {
+    const r = await friday();
+    await r.brain.wrapUp(draftFor(r, (d, tasks) => setNote(chooseFrog(chooseMove(d, tasks, "2", "tomorrow"), tasks, "2"), "Open with the call")));
+    r.brain.dismissBubble(r.brain.getSnapshot().bubble?.id ?? -1, "closed");
+    r.clock.t = new Date(2026, 10, 2, 8, 30).getTime();
+    r.brain.onSample(r.sample());
+    // Todoist lists the task for Monday now (the demo's list only brings it back when asked).
+    await r.backend.todoist.reschedule("2", "2026-11-02");
+    r.brain.tick();
+    await vi.waitFor(() => expect(r.brain.getSnapshot()).toMatchObject({ loading: false, life: { dayKey: "2026-11-02" } }));
+    expect(todayTasks(r).map((t) => t.id)).toContain("2");
+    r.brain.tick();
+    const b = r.brain.getSnapshot().bubble;
+    expect(b?.text).toContain("Good morning");
+    expect(b?.text).toContain("“Call client ABC”");
+    expect(b?.text).toContain("Open with the call");
+  });
+});
+
+describe("Brain v0.4 review: the sheet and the day", () => {
+  it("lists overdue tasks too: they can move, and one can be the frog", async () => {
+    const r = await started({ start: at(28, 16), setup: combine(meetings(), untimed) });
+    const draft = r.brain.wrapDraft();
+    expect(r.brain.getSnapshot().day.overdue.map((t) => t.id)).toEqual(["3"]);
+    const reschedule = vi.spyOn(r.backend.todoist, "reschedule");
+    const tasks = r.brain.wrapTasks();
+    expect(tasks.map((t) => t.id)).toContain("3");
+    const chosen = chooseFrog(chooseMove(draft, tasks, "3", "tomorrow"), tasks, "3");
+    expect(await r.brain.wrapUp(chosen)).toMatchObject({ ok: true, moved: 1 });
+    expect(reschedule.mock.calls.map((c) => [c[0], c[1]])).toEqual([["3", "2026-10-29"]]);
+    expect((await planOnDisk(r))?.plans[0].frogId).toBe("3");
+  });
+
+  it("works on a day with only overdue tasks", async () => {
+    const r = await started({ start: at(28, 16), setup: combine(meetings(), untimed, only("3")) });
+    expect(todayTasks(r)).toEqual([]);
+    expect(r.brain.wrapDraft().frogId).toBe("3");
+    expect(await r.brain.wrapUp(r.brain.wrapDraft())).toMatchObject({ ok: true });
+    expect((await planOnDisk(r))?.plans[0]).toMatchObject({ frogId: "3" });
+    expect(r.brain.getSnapshot().doneUntil).toBe(at(29, 8));
+  });
+
+  it("keeps the draft in the brain: still there after closing the board, gone once it is sent", async () => {
+    const r = await started({ start: at(28, 16), setup: combine(meetings(), untimed) });
+    r.brain.editWrapDraft((d, tasks) => setNote(chooseMove(d, tasks, "2", "tomorrow"), "Call first"));
+    expect(r.brain.getSnapshot().wrapDraft).toMatchObject({ note: "Call first", moves: { "2": "tomorrow" } });
+    expect(r.brain.wrapDraft()).toMatchObject({ note: "Call first" });
+    await r.brain.wrapUp(r.brain.wrapDraft());
+    expect(r.brain.getSnapshot().wrapDraft).toBeNull();
+    r.brain.resumeDay();
+    expect(r.brain.wrapDraft().note).toBe("Call first"); // from the saved plan now
+    expect(r.brain.wrapDraft().moves).toEqual({});
+  });
+
+  it("drops the draft when the day ends", async () => {
+    const r = await started({ start: at(28, 16), setup: combine(meetings(), untimed, evergreen) });
+    r.brain.editWrapDraft((d) => setNote(d, "Yesterday's thoughts"));
+    r.clock.t = at(29, 9);
+    r.brain.tick();
+    await vi.waitFor(() => expect(r.brain.getSnapshot().life.dayKey).toBe("2026-10-29"));
+    expect(r.brain.getSnapshot().wrapDraft).toBeNull();
+    expect(r.brain.wrapDraft().note).toBe("");
+  });
+
+  it("pauses hunger and the distraction tally while the day is done", async () => {
+    const r = await started({ start: at(28, 16), setup: combine(meetings(), untimed) });
+    await r.brain.wrapUp(r.brain.wrapDraft());
+    r.brain.dismissBubble(r.brain.getSnapshot().bubble?.id ?? -1, "closed");
+    const before = r.brain.getSnapshot().life;
+    for (let i = 0; i < 40; i++) {
+      r.clock.t += 5 * MIN;
+      r.watchYouTube();
+      r.brain.tick();
+    }
+    const after = r.brain.getSnapshot().life;
+    expect(after.satiety).toBe(before.satiety);
+    expect(after.distraction).toEqual(before.distraction);
+  });
+
+  it("moves the wrap-up day and the sleep when a rest day is added afterwards", async () => {
+    const r = await started({ start: at(28, 16), demo: false, setup: combine(meetings(), untimed) });
+    await r.brain.wrapUp(r.brain.wrapDraft());
+    expect(r.brain.getSnapshot().doneUntil).toBe(at(29, 8));
+    await r.brain.updatePrefs({ restDays: ["2026-10-29"] });
+    expect(r.brain.getSnapshot().doneUntil).toBe(at(30, 8));
+    expect(await planOnDisk(r)).toMatchObject({ doneUntil: at(30, 8) });
+    expect((await planOnDisk(r))?.plans.map((p) => p.day)).toEqual(["2026-10-30"]);
+    // Taking the day off again brings it back.
+    await r.brain.updatePrefs({ restDays: [] });
+    expect(r.brain.getSnapshot().doneUntil).toBe(at(29, 8));
+    expect((await planOnDisk(r))?.plans.map((p) => p.day)).toEqual(["2026-10-29"]);
+  });
+
+  it("doesn't excuse a day with nothing done because you wrapped up", async () => {
+    const nothing = (b: DemoBackend) => {
+      b.todoist.completed = async () => [];
+    };
+    const r = await started({
+      start: at(28, 16),
+      demo: false,
+      setup: combine(meetings(), untimed, nothing),
+      life: { streak: 3, snacks: 0, dayCompleted: 0, dayPlanned: 3, dayTarget: 3, dayWorkday: true, daySeen: true },
+    });
+    await r.brain.wrapUp(r.brain.wrapDraft());
+    r.clock.t = at(29, 9);
+    r.brain.tick();
+    await vi.waitFor(() => expect(r.brain.getSnapshot().life.dayKey).toBe("2026-10-29"));
+    // The v0.3 rules: no task, no snack: the streak breaks (and can be repaired).
+    expect(r.brain.getSnapshot().life.streak).toBe(0);
+    expect(r.brain.getSnapshot().life.repair?.streak).toBe(3);
+  });
+});
+
+describe("Brain v0.4 review: kind words wait through 'done for today'", () => {
+  it("tells Friday's frozen streak on Monday morning, after the PC was left on all weekend", async () => {
+    const nothing = (b: DemoBackend) => {
+      b.todoist.completed = async () => [];
+    };
+    const r = await started({
+      start: at(30, 16),
+      demo: false,
+      setup: combine(meetings(), untimed, nothing),
+      life: { streak: 3, snacks: 1, dayCompleted: 0, dayPlanned: 3, dayTarget: 3, dayWorkday: true, daySeen: true },
+    });
+    await r.brain.wrapUp(r.brain.wrapDraft());
+    r.brain.dismissBubble(r.brain.getSnapshot().bubble?.id ?? -1, "closed");
+    // Two heartbeats, as in life: the first of a new day starts settling the last one, the second tells what it found.
+    const tickTo = async (t: number) => {
+      r.clock.t = t;
+      r.brain.onSample(r.sample());
+      r.brain.tick();
+      await vi.waitFor(() => expect(r.brain.getSnapshot().loading).toBe(false));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      r.brain.tick();
+      return r.brain.getSnapshot().bubble;
+    };
+    for (const t of [at(31, 0, 5), at(31, 9), at(31, 23, 59), new Date(2026, 10, 1, 9).getTime(), new Date(2026, 10, 2, 7, 30).getTime()]) {
+      const b = await tickTo(t);
+      expect(b?.text ?? "").not.toContain("🍪");
+    }
+    const monday = await tickTo(new Date(2026, 10, 2, 8, 1).getTime());
+    expect(monday?.text).toContain("🍪");
+    // Worded for Monday, not for "yesterday".
+    expect(monday?.text).toContain("3 days ago");
+  });
+});
+
+describe("Brain v0.4 review: the overbooked check's window", () => {
+  const overbooked = (b: Bubble | null) => (b?.text ?? "").includes("overbooked");
+  const heavy = (...events: Parameters<typeof meetings>) => lengths(200, 200, 200, ...events);
+
+  it("speaks up before the middle of the work day", async () => {
+    const r = await started({ start: at(28, 10, 58), setup: heavy() });
+    expect(overbooked(r.checkAt(11))).toBe(true);
+  });
+
+  it("doesn't start after the middle of the work day, however heavy it has become", async () => {
+    const r = await started({ start: at(28, 12, 58), setup: heavy() });
+    // 13:00 is the middle of 8:00-18:00.
+    const seen = r.bubblesIn(120);
+    expect(seen.some((b) => overbooked(b))).toBe(false);
+  });
+
+  it("doesn't double-count a timed task that is in a meeting", async () => {
+    const load = (await started({
+      start: at(28, 10),
+      setup: combine(
+        meetings({ uid: "m", title: "Review", start: at(28, 11), end: at(28, 12) }),
+        reshape((t) => (t.id === "2" ? { ...t, due: { date: "2026-10-28T11:00:00", string: "today", datetime: "2026-10-28T11:00:00" }, duration: { amount: 60, unit: "minute" } } : t)),
+      ),
+    })).brain.currentLoad();
+    expect(load.meetingMinutes).toBe(60);
+    // Tasks 1 and 4 at the default 30 minutes; the timed one is inside the meeting.
+    expect(load.taskMinutes).toBe(60);
   });
 });

@@ -56,6 +56,8 @@ export interface Prefs {
   keepLog: boolean;
   /** Hide the pet while a full-screen app is in front. */
   hideInFullscreen: boolean;
+  /** The "where was I?" card may name the page you were on and offer to reopen it; off, it shows only the task and the app. */
+  resumeDetails: boolean;
   /** Epoch ms of the first launch; day one never starts with a worried pet. */
   firstLaunch: number;
   /** Days off ("yyyy-MM-dd", sorted): no workday, so no reminders; missing one never hurts the streak, and tasks finished still count. */
@@ -100,6 +102,7 @@ export function defaultPrefs(now = Date.now()): Prefs {
     nudgeBudget: 8,
     keepLog: true,
     hideInFullscreen: true,
+    resumeDetails: true,
     firstLaunch: now,
     restDays: [],
   };
@@ -186,6 +189,7 @@ export function prefsFromJson(raw: unknown, now = Date.now(), today = now): Pref
     nudgeBudget: clampInt(r.nudgeBudget, 0, 30, d.nudgeBudget),
     keepLog: bool("keepLog"),
     hideInFullscreen: bool("hideInFullscreen"),
+    resumeDetails: bool("resumeDetails"),
     firstLaunch: typeof r.firstLaunch === "number" ? r.firstLaunch : d.firstLaunch,
     restDays: tidyRestDays(r.restDays, today),
   };

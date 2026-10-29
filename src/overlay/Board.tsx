@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Ref } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type Ref } from "react";
 import type { Backend } from "../backend/types";
 import { errorMessage, type Brain, type BrainState, type DueChoice } from "../core/brain";
 import { currentEvent, freeMinutes } from "../core/calendar";
@@ -6,13 +6,13 @@ import { addDays, atHour, daysAgo, dayKey, hoursText, parseDate, timeString } fr
 import { getLang, L, plural } from "../core/l10n";
 import * as life from "../core/life";
 import * as lines from "../core/lines";
-import { dueDay, dueTime, isRecurring, planned, taskTitle, uiPriority, type TodoTask } from "../core/models";
+import { dueDay, dueTime, isRecurring, openTasks, planned, taskTitle, uiPriority, type TodoTask } from "../core/models";
 import { dayStrip } from "../core/load";
 import { moodEmoji, moodLabel } from "../core/mood";
 import { isWorkday } from "../core/prefs";
-import type { StartTrigger } from "../core/triggers";
+import { MIN_APP_NAME, type StartTrigger } from "../core/triggers";
 import { ACCESSORIES, SPECIES_IDS } from "../core/types";
-import { canMove, canWrapUp, chooseFrog, chooseMove, moveAllToTomorrow, MAX_NOTE_LENGTH, setNote, wrapMoves, type WrapDraft, type WrapMove } from "../core/wrapup";
+import { canMove, canWrapUp, chooseFrog, chooseMove, moveAllToTomorrow, MAX_NOTE_LENGTH, setNote, wrapMoves, type WrapMove } from "../core/wrapup";
 import { defaultPose, renderPet, speciesInfo } from "../pets";
 import { Icon, type IconName } from "../ui/icons";
 import { localeTag } from "../ui/lang";
@@ -81,6 +81,13 @@ export function Board(props: {
   useEffect(() => {
     if (request.fromKeyboard && !request.focusAdd) ref.current?.focus({ preventScroll: true });
   }, [request]);
+
+  // Back from the Wrap up sheet: focus goes to the button that opened it.
+  const lastView = useRef(view.kind);
+  useEffect(() => {
+    if (lastView.current === "wrapup" && view.kind !== "wrapup") ref.current?.querySelector<HTMLElement>("[data-wrap-up]")?.focus();
+    lastView.current = view.kind;
+  }, [view.kind]);
 
   const needsToken = !s.hasToken || s.authError;
   const origin = placement.side === "left" ? "100% 100%" : placement.side === "right" ? "0% 100%" : "50% 100%";
@@ -517,7 +524,7 @@ function TaskRow({
   onSplit: (t: TodoTask) => void;
   onNote: (n: Note) => void;
 }) {
-  const [pop, setPop] = useState<"move" | "delete" | "more" | "when" | null>(null);
+  const [pop, setPop] = useState<"move" | "delete" | "more" | "when" | "whenApp" | null>(null);
   const moveRef = useRef<HTMLButtonElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
   const moreRef = useRef<HTMLButtonElement>(null);
@@ -573,7 +580,7 @@ function TaskRow({
   const closePop = (restoreFocus: boolean) => {
     const which = pop;
     setPop(null);
-    if (restoreFocus) (which === "move" ? moveRef : which === "more" || which === "when" ? moreRef : deleteRef).current?.focus();
+    if (restoreFocus) (which === "move" ? moveRef : which === "more" || which === "when" || which === "whenApp" ? moreRef : deleteRef).current?.focus();
   };
   return (
     <li className={`task${pop ? " active" : ""}`} style={{ ["--prio" as string]: PRIO_LINE[prio] }}>
@@ -590,7 +597,7 @@ function TaskRow({
         <IconButton icon="play" label={L("Tập trung", "Focus")} onClick={() => brain.startFocus(t)} />
         <IconButton icon="scissors" label={L("Chia nhỏ", "Split")} onClick={() => onSplit(t)} />
         <IconButton ref={moveRef} icon="reschedule" label={L("Dời", "Move")} aria-haspopup="menu" aria-expanded={pop === "move"} onClick={() => setPop(pop === "move" ? null : "move")} />
-        <IconButton ref={moreRef} icon="more" label={L("Thêm: thử 2 phút, bắt đầu khi…", "More: try 2 minutes, start when…")} aria-haspopup="menu" aria-expanded={pop === "more" || pop === "when"} onClick={() => setPop(pop === "more" || pop === "when" ? null : "more")} />
+        <IconButton ref={moreRef} icon="more" label={L("Thêm: thử 2 phút, bắt đầu khi…", "More: try 2 minutes, start when…")} aria-haspopup="menu" aria-expanded={pop === "more" || pop === "when" || pop === "whenApp"} onClick={() => setPop(pop === "more" || pop === "when" || pop === "whenApp" ? null : "more")} />
         <IconButton ref={deleteRef} icon="trash" danger label={L("Xoá", "Delete")} aria-haspopup="dialog" aria-expanded={pop === "delete"} onClick={() => setPop(pop === "delete" ? null : "delete")} />
       </div>
       {pop === "move" && (
@@ -607,7 +614,7 @@ function TaskRow({
               type="button"
               role="menuitem"
               onClick={() => {
-                setPop(null);
+                closePop(true);
                 const name = short(title, 40);
                 const where = due === "today" ? L("hôm nay", "today") : due === "tomorrow" ? L("ngày mai", "tomorrow") : L("ngoài kế hoạch", "off the plan");
                 void (due === "no date" ? brain.unplan(t) : brain.reschedule(t, due)).then((ok) =>
@@ -632,7 +639,7 @@ function TaskRow({
               type="button"
               role="menuitem"
               onClick={() => {
-                setPop(null);
+                closePop(true);
                 brain.startTwoMinutes(t);
               }}
             >
@@ -649,7 +656,12 @@ function TaskRow({
       )}
       {pop === "when" && (
         <Popover anchor={moreRef} role="menu" label={L("Bắt đầu khi…", "Start when…")} className="menu" onClose={closePop}>
-          <WhenMenu brain={brain} s={s} t={t} plan={plan?.trigger ?? null} onClose={() => setPop(null)} onNote={onNote} />
+          <WhenMenu brain={brain} s={s} t={t} plan={plan?.trigger ?? null} onClose={() => closePop(true)} onAnotherApp={() => setPop("whenApp")} onNote={onNote} />
+        </Popover>
+      )}
+      {pop === "whenApp" && (
+        <Popover anchor={moreRef} role="dialog" label={L("Ứng dụng khác", "Another app")} className="confirm pin-form app-form" onClose={closePop}>
+          <AnotherApp brain={brain} s={s} t={t} onClose={closePop} onNote={onNote} />
         </Popover>
       )}
       {pop === "delete" && (
@@ -677,13 +689,14 @@ function TaskRow({
   );
 }
 
-/** "Start when…": after one of today's meetings, when I open an app (a recent one, or typed), or after lunch. */
+/** "Start when…": after one of today's meetings, when I open an app (a recent one, or another that opens its own dialog), or after lunch. */
 function WhenMenu({
   brain,
   s,
   t,
   plan,
   onClose,
+  onAnotherApp,
   onNote,
 }: {
   brain: Brain;
@@ -691,9 +704,9 @@ function WhenMenu({
   t: TodoTask;
   plan: StartTrigger | null;
   onClose: () => void;
+  onAnotherApp: () => void;
   onNote: (n: Note) => void;
 }) {
-  const [app, setApp] = useState("");
   const title = taskTitle(t);
   // The next few meetings are enough; the list stays short on a day full of them.
   const choices = useMemo(() => {
@@ -710,11 +723,6 @@ function WhenMenu({
       text: ok ? `⏱ “${short(title, 28)}”: ${lines.triggerChoice(trigger, s.events)}` : L("Chưa hẹn được, thử lại nhé.", "Couldn't set that, try again."),
       error: !ok,
     });
-  };
-  const typed = app.trim();
-  // Arrow, Home and End move the caret in the app field, not between the menu's items.
-  const keepKeys = (e: React.KeyboardEvent) => {
-    if (e.key === "Home" || e.key === "End" || e.key.startsWith("Arrow")) e.stopPropagation();
   };
   return (
     <div className="menu-body">
@@ -734,21 +742,10 @@ function WhenMenu({
           {same(c, plan) && <Icon name="check" size={14} className="menu-end" />}
         </button>
       ))}
-      <form
-        className="menu-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (typed) choose({ kind: "appOpen", app: typed });
-        }}
-      >
-        <label className="sr-only" htmlFor={`when-app-${t.id}`}>
-          {L("Ứng dụng khác", "Another app")}
-        </label>
-        <input id={`when-app-${t.id}`} className="field" autoComplete="off" maxLength={60} placeholder={L("Mở ứng dụng khác…", "When I open another app…")} value={app} onChange={(e) => setApp(e.target.value)} onKeyDown={keepKeys} />
-        <button className="btn small" disabled={!typed}>
-          {L("Đặt", "Set")}
-        </button>
-      </form>
+      <button type="button" role="menuitem" aria-haspopup="dialog" onClick={onAnotherApp}>
+        <Icon name="reschedule" size={15} />
+        <span className="menu-label">{L("Ứng dụng khác…", "Another app…")}</span>
+      </button>
       {plan && (
         <button
           type="button"
@@ -767,11 +764,76 @@ function WhenMenu({
   );
 }
 
+/** The dialog behind "Another app…": the name of an app to wait for (3+ characters), with its own focus and Escape. */
+function AnotherApp({
+  brain,
+  s,
+  t,
+  onClose,
+  onNote,
+}: {
+  brain: Brain;
+  s: BrainState;
+  t: TodoTask;
+  onClose: (restoreFocus: boolean) => void;
+  onNote: (n: Note) => void;
+}) {
+  const [app, setApp] = useState("");
+  const id = useId();
+  const typed = app.trim();
+  const ok = typed.length >= MIN_APP_NAME;
+  const submit = () => {
+    if (!ok) return;
+    onClose(true);
+    const trigger: StartTrigger = { kind: "appOpen", app: typed };
+    const set = brain.setStartTrigger(t, trigger);
+    onNote({
+      n: Date.now(),
+      text: set ? `⏱ “${short(taskTitle(t), 28)}”: ${lines.triggerChoice(trigger, s.events)}` : L("Chưa hẹn được, thử lại nhé.", "Couldn't set that, try again."),
+      error: !set,
+    });
+  };
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <label htmlFor={`${id}-app`}>{L("Mở ứng dụng nào thì bắt đầu?", "Start when I open which app?")}</label>
+      <input
+        id={`${id}-app`}
+        className="field"
+        data-autofocus
+        autoComplete="off"
+        maxLength={60}
+        aria-describedby={`${id}-hint`}
+        placeholder={L("Ví dụ: Figma", "e.g. Figma")}
+        value={app}
+        onChange={(e) => setApp(e.target.value)}
+      />
+      <p id={`${id}-hint`} className="hint">
+        {L(`Ít nhất ${MIN_APP_NAME} chữ, đúng tên ứng dụng hoặc tên file chạy của nó.`, `At least ${MIN_APP_NAME} letters: the app's name, or its program's name.`)}
+      </p>
+      <div className="pop-actions">
+        <button type="button" className="btn small" onClick={() => onClose(true)}>
+          {L("Huỷ", "Cancel")}
+        </button>
+        <button type="submit" className="btn small primary" disabled={!ok}>
+          {L("Đặt", "Set")}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /** **📌 Pin my place** in the Today header: keeps what you're on (never saved to disk) with an optional next step. */
 function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; onNote: (n: Note) => void; compact: boolean }) {
   const [open, setOpen] = useState(false);
+  // The last note stays (in this window's memory) so pinning again starts from it; unpinning clears it.
   const [text, setText] = useState("");
   const ref = useRef<HTMLButtonElement>(null);
+  const describedBy = useId();
   const label = L("Ghim chỗ này", "Pin my place");
   const shown = s.pinned ? L("Đã ghim", "Pinned") : label;
   const explain = L(
@@ -784,8 +846,7 @@ function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; 
   };
   const submit = () => {
     const ok = brain.pinPlace(text);
-    setOpen(false);
-    setText("");
+    close(true);
     onNote({ n: Date.now(), text: ok ? lines.pinned() : L("Chưa có gì để ghim, mở một ứng dụng hoặc ghi một dòng nhé.", "Nothing to pin yet: open an app, or write a line."), error: !ok });
   };
   return (
@@ -797,13 +858,16 @@ function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; 
         data-pinned={s.pinned}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`${shown}. ${explain}`}
+        aria-describedby={describedBy}
         title={`${label}: ${explain}`}
         onClick={() => setOpen(!open)}
       >
         <Icon name="pin" size={14} />
         <span className={compact ? "sr-only" : undefined}>{shown}</span>
       </button>
+      <span id={describedBy} className="sr-only">
+        {explain}
+      </span>
       {open && (
         <Popover anchor={ref} role="dialog" label={label} className="confirm pin-form" onClose={close}>
           <form
@@ -833,6 +897,7 @@ function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; 
                   className="btn small"
                   onClick={() => {
                     brain.unpinPlace();
+                    setText("");
                     close(true);
                   }}
                 >
@@ -875,7 +940,7 @@ function DayStripCard({ brain, s, onWrapUp }: { brain: Brain; s: BrainState; onW
   }, []);
   const strip = dayStrip(brain.dayInput());
   const done = s.doneUntil !== null;
-  const wrapUpOpen = canWrapUp(Date.now());
+  const wrapUpOpen = canWrapUp(brain.clockNow(), s.prefs.workEnd);
   if (!strip.hasContent && !wrapUpOpen && !done) return null;
   const now = new Date(brain.loadClock());
   const t0 = atHour(strip.startHour, 0, now).getTime();
@@ -884,6 +949,8 @@ function DayStripCard({ brain, s, onWrapUp }: { brain: Brain; s: BrainState; onW
   const meetings = strip.segments.filter((x) => x.kind === "meeting").length;
   const timed = strip.segments.length - meetings;
   const detail = lines.loadDetail(strip.load);
+  // What the strip shows, said out loud: each meeting and timed task with its times.
+  const listed = strip.segments.map((seg) => `${seg.title} ${timeAt(seg.start)}–${timeAt(seg.end)}`).join("; ");
   const summary = L(
     `Ngày làm việc ${hh(strip.startHour)} đến ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. Bây giờ là ${timeString(now)}.`,
     `Work day ${hh(strip.startHour)} to ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. It is ${timeString(now)} now.`,
@@ -911,19 +978,24 @@ function DayStripCard({ brain, s, onWrapUp }: { brain: Brain; s: BrainState; onW
           </button>
         ) : (
           wrapUpOpen && (
-            <button type="button" className="btn small wrap-btn" onClick={onWrapUp} title={L("Dọn nốt ngày: dời việc, chọn việc đầu tiên cho mai, ghi một dòng", "Close the day: move what's left, pick tomorrow's first task, leave a note")}>
+            <button type="button" className="btn small wrap-btn" data-wrap-up="" onClick={onWrapUp} title={L("Dọn nốt ngày: dời việc, chọn việc đầu tiên cho mai, ghi một dòng", "Close the day: move what's left, pick tomorrow's first task, leave a note")}>
               <Icon name="moon" size={14} />
               {L("Tổng kết ngày", "Wrap up")}
             </button>
           )
         )}
       </div>
-      <div className="ds-track" role="img" aria-label={summary}>
+      <div className="ds-track" role="img" aria-label={`${summary} ${listed}`} style={strip.lanes > 1 ? { height: 6 + strip.lanes * 11 } : undefined}>
         {strip.segments.map((seg) => (
           <i
             key={`${seg.kind}-${seg.id}`}
             className={`ds-seg ${seg.kind === "meeting" ? "meeting" : "timed"}`}
-            style={{ left: `${seg.start * 100}%`, width: `${(seg.end - seg.start) * 100}%` }}
+            style={{
+              left: `${seg.start * 100}%`,
+              width: `${(seg.end - seg.start) * 100}%`,
+              // Blocks that overlap stack in rows.
+              ...(strip.lanes > 1 ? { top: 3 + seg.lane * 11, bottom: "auto" } : {}),
+            }}
             title={`${seg.kind === "meeting" ? "📅" : "⏰"} ${seg.title} · ${timeAt(seg.start)}–${timeAt(seg.end)}`}
           />
         ))}
@@ -958,37 +1030,58 @@ function PlanNote({ s }: { s: BrainState }) {
  * for tomorrow, and **Done for today**. The choices are made here and applied together when you press the button.
  */
 function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: BrainState; onBack: () => void; onDone: () => void }) {
-  const [draft, setDraft] = useState<WrapDraft>(() => brain.wrapDraft());
+  // The draft lives in the brain (for the day), so closing the board doesn't lose it.
+  const draft = s.wrapDraft ?? brain.wrapDraft();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const tasks = s.day.today;
+  const heading = useRef<HTMLHeadingElement>(null);
+  const id = useId();
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
+  const tasks = openTasks(s.day);
+  const overdue = new Set(s.day.overdue.map((t) => t.id));
   const wins = s.day.completed;
   const { tomorrow, none } = wrapMoves(draft, tasks);
+  // "Tomorrow" is the next workday: its name when that isn't tomorrow.
+  const next = brain.wrapDay();
+  const dayName = next.isTomorrow ? null : (parseDate(next.day)?.toLocaleDateString(localeTag(getLang()), { weekday: "long" }) ?? null);
   const choices: [WrapMove, string][] = [
-    ["tomorrow", L("Ngày mai", "Tomorrow")],
+    ["tomorrow", dayName ?? L("Ngày mai", "Tomorrow")],
     ["none", L("Không hạn", "No date")],
     ["keep", L("Giữ", "Keep")],
   ];
   const submit = async () => {
+    if (busy) return;
     setBusy(true);
     setError(null);
     const result = await brain.wrapUp(draft);
     setBusy(false);
     if (result.ok) onDone();
-    else setError(result.error ?? L("Chưa dời được hết, thử lại nhé.", "Couldn't move everything, try again."));
+    else {
+      const done = result.moved + result.offPlan;
+      setError(
+        L(
+          `Đã dời ${done} việc, ${result.failed} việc chưa dời được${result.error ? ` (${result.error})` : ""}. Pet vẫn đang thức, bạn thử lại nhé.`,
+          `Moved ${done}, and ${result.failed} couldn't move${result.error ? ` (${result.error})` : ""}. Your pet is still awake: you can try again.`,
+        ),
+      );
+    }
   };
   const plan = [
-    tomorrow.length > 0 && L(`dời ${tomorrow.length} việc sang mai`, `move ${plural(tomorrow.length, "", "task", "tasks").trim()} to tomorrow`),
+    tomorrow.length > 0 && (dayName ? L(`dời ${tomorrow.length} việc sang ${dayName}`, `move ${plural(tomorrow.length, "", "task", "tasks").trim()} to ${dayName}`) : L(`dời ${tomorrow.length} việc sang mai`, `move ${plural(tomorrow.length, "", "task", "tasks").trim()} to tomorrow`)),
     none.length > 0 && L(`bỏ ${none.length} việc khỏi kế hoạch`, `take ${plural(none.length, "", "task", "tasks").trim()} off the plan`),
   ].filter(Boolean);
+  const doneLabel = L("Xong hôm nay", "Done for today");
+  const frogLabel = dayName ? L(`Làm đầu tiên vào ${dayName}`, `First on ${dayName}`) : L("Làm đầu tiên ngày mai", "First tomorrow");
   return (
     <div className="sheet wrap">
       <div>
-        <button className="btn ghost small" onClick={onBack}>
+        <button className="btn ghost small" onClick={onBack} disabled={busy}>
           <Icon name="arrowLeft" size={14} /> {L("Quay lại", "Back")}
         </button>
       </div>
-      <h2>
+      <h2 ref={heading} tabIndex={-1}>
         <Icon name="moon" size={18} /> {L("Tổng kết ngày", "Wrap up the day")}
       </h2>
       <p className="muted wrap-intro">{L("Vài cú chạm là xong, không có đúng sai: chỉ là dọn bàn cho mai.", "A few taps, no right answers: just a tidy desk for tomorrow.")}</p>
@@ -998,7 +1091,7 @@ function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: BrainState
           {L("Hôm nay bạn đã làm", "Today's wins")} <span className="count good">{wins.length}</span>
         </h3>
         {wins.length === 0 ? (
-          <p className="wrap-empty">{L("Chưa tick việc nào, và vậy cũng không sao: bạn đã có mặt 🌱", "Nothing ticked off yet, and that's okay: you showed up 🌱")}</p>
+          <p className="wrap-empty">{L("Hôm nay chưa tick việc nào, và vậy cũng không sao. Mai là một trang mới 🌱", "Nothing ticked off today, and that's okay. Tomorrow is a fresh page 🌱")}</p>
         ) : (
           <ul className="wrap-wins">
             {wins.slice(0, 4).map((t) => (
@@ -1019,46 +1112,53 @@ function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: BrainState
           </h3>
           <span className="spacer" />
           {tasks.some(canMove) && (
-            <button type="button" className="btn small" onClick={() => setDraft((d) => moveAllToTomorrow(d, tasks))}>
-              {L("Tất cả sang mai", "All to tomorrow")}
+            <button type="button" className="btn small" onClick={() => brain.editWrapDraft((d, all) => moveAllToTomorrow(d, all))}>
+              {dayName ? L(`Tất cả sang ${dayName}`, `All to ${dayName}`) : L("Tất cả sang mai", "All to tomorrow")}
             </button>
           )}
         </div>
+        {draft.frogDone && (
+          <p className="muted wrap-frogdone" role="status">
+            🐸 {L(`“${short(draft.frogDone, 40)}” đã xong rồi, giỏi quá! Chọn việc khác hoặc để mai tính.`, `“${short(draft.frogDone, 40)}” is already done, nice! Pick another, or decide tomorrow.`)}
+          </p>
+        )}
         {tasks.length === 0 ? (
           <p className="wrap-empty">{L("Không còn việc nào dang dở 🎉", "Nothing left open 🎉")}</p>
         ) : (
-          <ul className="wrap-tasks">
+          <ul className="wrap-tasks" role="radiogroup" aria-label={L("Con ếch của ngày mai: việc làm đầu tiên", "Tomorrow's frog: the first thing to do")}>
             {tasks.map((t) => {
               const title = taskTitle(t);
               const move = draft.moves[t.id] ?? "keep";
               const movable = canMove(t);
+              const why = `${id}-why-${t.id}`;
               return (
                 <li key={t.id} className={`wrap-row${move === "none" ? " off" : ""}`}>
                   <div className="wrap-title" title={title}>
                     {title}
+                    {overdue.has(t.id) && <span className="chip late">{L("quá hạn", "overdue")}</span>}
                   </div>
                   <div className="wrap-ctl">
-                    <div className="seg" role="group" aria-label={L(`Làm gì với “${short(title, 40)}”`, `What to do with “${short(title, 40)}”`)}>
+                    <div className="seg" role="group" aria-label={L(`Làm gì với “${short(title, 40)}”`, `What to do with “${short(title, 40)}”`)} aria-describedby={movable ? undefined : why}>
                       {choices.map(([value, label]) => (
                         <button
                           key={value}
                           type="button"
                           aria-pressed={move === value}
                           disabled={value !== "keep" && !movable}
-                          onClick={() => setDraft((d) => chooseMove(d, tasks, t.id, value))}
+                          onClick={() => brain.editWrapDraft((d, all) => chooseMove(d, all, t.id, value))}
                         >
                           {label}
                         </button>
                       ))}
                     </div>
                     {!movable && (
-                      <span className="chip" title={L("Việc lặp lại giữ lịch riêng của nó", "A repeating task keeps its own schedule")}>
-                        🔁
+                      <span id={why} className="chip" tabIndex={0} title={L("Việc lặp lại giữ lịch riêng của nó", "A repeating task keeps its own schedule")}>
+                        🔁<span className="sr-only">{L("Việc lặp lại giữ lịch riêng của nó, nên chỉ có thể giữ nguyên", "A repeating task keeps its own schedule, so it can only stay")}</span>
                       </span>
                     )}
                     <label className="frog-pick" title={L("Con ếch của ngày mai: việc làm đầu tiên", "Tomorrow's frog: the first thing to do")}>
-                      <input type="radio" name="wrap-frog" checked={draft.frogId === t.id} disabled={move === "none"} onChange={() => setDraft((d) => chooseFrog(d, tasks, t.id))} />
-                      <span>🐸 {L("Đầu tiên mai", "First tomorrow")}</span>
+                      <input type="radio" name="wrap-frog" checked={draft.frogId === t.id} disabled={move === "none"} onChange={() => brain.editWrapDraft((d, all) => chooseFrog(d, all, t.id))} />
+                      <span>🐸 {frogLabel}</span>
                       <span className="sr-only">{`: ${title}`}</span>
                     </label>
                   </div>
@@ -1067,7 +1167,7 @@ function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: BrainState
             })}
             <li className="wrap-row nofrog">
               <label className="frog-pick">
-                <input type="radio" name="wrap-frog" checked={draft.frogId === null} onChange={() => setDraft((d) => chooseFrog(d, tasks, null))} />
+                <input type="radio" name="wrap-frog" checked={draft.frogId === null} onChange={() => brain.editWrapDraft((d, all) => chooseFrog(d, all, null))} />
                 <span>{L("Mai mình chọn sau", "I'll decide tomorrow")}</span>
               </label>
             </li>
@@ -1084,22 +1184,32 @@ function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: BrainState
           maxLength={MAX_NOTE_LENGTH}
           placeholder={L("Một dòng cho chính mình…", "One line for future you…")}
           value={draft.note}
-          onChange={(e) => setDraft((d) => setNote(d, e.target.value))}
+          onChange={(e) => brain.editWrapDraft((d) => setNote(d, e.target.value))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              void submit();
+            }
+          }}
         />
       </div>
 
       <p className="muted wrap-summary" role="status">
         {plan.length > 0 ? `${plan.join(L(" và ", " and ")).replace(/^./, (c) => c.toLocaleUpperCase())}. ` : ""}
         {L(
-          `Pet sẽ ngủ và im lặng tới khi ngày làm việc tới bắt đầu (${hh(s.prefs.workStart)}). Cuộc họp và việc có giờ vẫn được nhắc.`,
+          `Pet sẽ ngủ và im lặng tới khi ngày làm việc tiếp theo bắt đầu (${hh(s.prefs.workStart)}). Cuộc họp và việc có giờ vẫn được nhắc.`,
           `Your pet will sleep and stay quiet until the next workday starts (${hh(s.prefs.workStart)}). Meetings and timed tasks still get through.`,
         )}
       </p>
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
       <div className="wrap-actions">
-        <button className="btn primary" disabled={busy} onClick={() => void submit()}>
+        <button className="btn primary" disabled={busy} aria-busy={busy} aria-label={doneLabel} onClick={() => void submit()}>
           <Icon name="moon" size={15} />
-          {busy ? "…" : L("Xong hôm nay", "Done for today")}
+          {busy ? "…" : doneLabel}
         </button>
         <button className="btn" onClick={onBack} disabled={busy}>
           {L("Chưa đâu", "Not yet")}
@@ -1155,13 +1265,14 @@ function AddTask({
   }, [focusAdd, seq]);
   useEffect(() => {
     if (prefill === null) return;
-    setText(prefill);
+    // Whatever you were typing stays: the prefill only fills an empty field.
+    setText((draft) => (draft.trim() ? draft : prefill));
     // After the value lands, with the cursor at its end so typing goes on from "Team sync: ".
     const id = requestAnimationFrame(() => {
       const el = input.current;
       if (!el) return;
       el.focus();
-      el.setSelectionRange(prefill.length, prefill.length);
+      el.setSelectionRange(el.value.length, el.value.length);
     });
     return () => cancelAnimationFrame(id);
   }, [prefill, seq]);

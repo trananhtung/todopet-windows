@@ -111,6 +111,14 @@ export function BehaviorSection() {
         />
         <SwitchRow k="stillWhileTyping" label={L("Đứng yên khi bạn gõ phím", "Keep still while I type")} />
         <SwitchRow
+          k="resumeDetails"
+          label={L("Thẻ “bạn đang làm gì” nêu tên trang", "Name the page on the “where was I?” card")}
+          help={L(
+            "Tắt thì thẻ chỉ có việc và ứng dụng: không tiêu đề trang, không địa chỉ, không nút Mở lại. Cửa sổ riêng tư (InPrivate, Ẩn danh…) luôn chỉ hiện tên ứng dụng.",
+            "Off, the card shows only the task and the app: no page title, no address, no Reopen. Private windows (InPrivate, Incognito…) only ever show the app.",
+          )}
+        />
+        <SwitchRow
           k="hideInFullscreen"
           label={L("Ẩn khi có ứng dụng toàn màn hình", "Hide during full-screen apps")}
           help={L("Game, phim, trình chiếu.", "Games, videos, slideshows.")}

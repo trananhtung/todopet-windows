@@ -200,8 +200,10 @@ export const review = (completed: number, plannedCount: number, left: number) =>
   );
 
 /** "Done for today": a good evening, naming the frog that starts tomorrow when you picked one. */
-export const wrappedUp = (frog: TodoTask | null) =>
-  L("Xong ngày rồi 🌙 Nghỉ ngơi nhé.", "All wrapped up 🌙 Rest well.") + (frog ? L(` Mai mình bắt đầu với ${q(frog)} 🐸`, ` Tomorrow starts with ${q(frog)} 🐸`) : "");
+export const wrappedUp = (frog: TodoTask | string | null) => {
+  const name = frog === null ? null : typeof frog === "string" ? `“${shortText(frog, 60)}”` : q(frog);
+  return L("Xong ngày rồi 🌙 Nghỉ ngơi nhé.", "All wrapped up 🌙 Rest well.") + (name ? L(` Mai mình bắt đầu với ${name} 🐸`, ` Tomorrow starts with ${name} 🐸`) : "");
+};
 
 export const backToWork = () => L("Mình dậy rồi 🌤 Cần gì cứ gọi mình nhé.", "I'm up again 🌤 Call me whenever you need me.");
 
@@ -246,13 +248,16 @@ export const meetingSoon = (e: CalEvent, minutes: number, related: TodoTask[] = 
   ) + (related.length > 0 ? `\n${L("Liên quan: ", "Related: ")}${related.slice(0, 2).map((t) => `“${shortText(taskTitle(t), 40)}”`).join(", ")}` : "");
 
 /**
- * After a meeting of 15+ minutes: a kind question. `next` is the following meeting when it starts within 15 minutes,
- * and then a short breather is suggested.
+ * After a meeting of 15+ minutes: a kind question. `next` is the following meeting when there is time for a breather
+ * before it (`breather` minutes, at most 5), and then a short one is suggested.
  */
-export const meetingOver = (e: CalEvent, next: CalEvent | null = null) =>
+export const meetingOver = (e: CalEvent, next: CalEvent | null = null, breather = 5) =>
   L(`“${shortText(e.title)}” xong rồi. Có gì cần ghi lại không?`, `“${shortText(e.title)}” is over. Anything to capture?`) +
   (next
-    ? `\n${L(`“${shortText(next.title)}” bắt đầu lúc ${timeString(next.start)} — nghỉ 5 phút trước nhé?`, `“${shortText(next.title)}” starts at ${timeString(next.start)} — a 5-minute breather first?`)}`
+    ? `\n${L(
+        `“${shortText(next.title)}” bắt đầu lúc ${timeString(next.start)} — nghỉ ${breather} phút trước nhé?`,
+        `“${shortText(next.title)}” starts at ${timeString(next.start)} — a ${breather}-minute breather first?`,
+      )}`
     : "");
 
 export function calendarDay(meetings: number, busyMinutes: number, free: number, target: number, reduced: boolean): string {
@@ -311,16 +316,26 @@ export function resumeCard(r: ResumeSummary, reason: ResumeReason = "away"): str
     reason === "meeting"
       ? L("Họp xong rồi nhé 👋", "Meeting's done 👋")
       : reason === "distraction"
-        ? L("Mình cùng quay lại nhé 🌱", "Ready to pick it back up? 🌱")
+        ? L("Không vội đâu, khi nào sẵn sàng nhé 🌱", "No rush, whenever you're ready 🌱")
         : L("Bạn về rồi! 👋", "Welcome back! 👋");
   const task = r.task ? `“${shortText(r.task, 60)}”` : null;
   const parts = [lead];
-  if (task && r.where) parts.push(L(`Bạn đang làm: ${task} · trong ${r.where}`, `You were on: ${task} · in ${r.where}`));
+  if (task && r.taskIsNext) {
+    // Not something you were doing: it's the next one in line, and where you were is a side note.
+    parts.push(r.where ? L(`Việc tiếp theo: ${task} · bạn vừa ở ${r.where}`, `Next up: ${task} · you were in ${r.where}`) : L(`Việc tiếp theo: ${task}`, `Next up: ${task}`));
+  } else if (task && r.where) parts.push(L(`Bạn đang làm: ${task} · trong ${r.where}`, `You were on: ${task} · in ${r.where}`));
   else if (task) parts.push(L(`Bạn đang làm: ${task}`, `You were on: ${task}`));
   else if (r.where) parts.push(L(`Bạn đang ở: ${r.where}`, `You were in: ${r.where}`));
   if (r.note) parts.push(L(`📌 Bước tiếp theo: ${r.note}`, `📌 Next step: ${r.note}`));
   return parts.join("\n");
 }
+
+/** The Reopen button: "Reopen ↗ docs.google.com" (the host is cut when it is long). */
+export const reopenTitle = (host: string | null) => L("Mở lại ↗", "Reopen ↗") + (host ? ` ${shortText(host, 28)}` : "");
+
+/** Reopen didn't work. */
+export const reopenFailed = () =>
+  L("Mình chưa mở lại được trang đó 😅 Lịch sử trình duyệt chắc còn giữ nó.", "Couldn't reopen that page 😅 Your browser's history should still have it.");
 
 /** What the diary keeps of a resume card: never the app, the page or the note. */
 export const resumeDiary = (task: string | null, hasNote: boolean) =>
@@ -363,6 +378,18 @@ export function triggerChoice(trigger: StartTrigger, events: CalEvent[], max = 3
   }
 }
 
+/** What the diary says about a plan: its kind only, never the meeting's title or the app's name. */
+export function triggerKindText(trigger: StartTrigger): string {
+  switch (trigger.kind) {
+    case "afterMeeting":
+      return L("sau một cuộc họp", "after a meeting");
+    case "appOpen":
+      return L("khi một ứng dụng mở", "when an app opens");
+    case "afterLunch":
+      return L("sau bữa trưa", "after lunch");
+  }
+}
+
 export const starterStart = (t: TodoTask | null, minutes = 2) =>
   t
     ? L(`Chỉ ${minutes} phút thôi cho ${q(t)}. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")} on ${q(t)}. Open it and see, that's all 🌱`)
@@ -372,6 +399,11 @@ export const starterEnd = (t: TodoTask | null) =>
   t
     ? L(`Xong 2 phút rồi, bạn đã bắt đầu ${q(t)}! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?`, `Two minutes done, you've started ${q(t)}! 🌱 Keep going with a full session, or stop here for now?`)
     : L("Xong 2 phút rồi, bạn đã bắt đầu! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?", "Two minutes done, you've started! 🌱 Keep going with a full session, or stop here for now?");
+
+export const starterGone = (t: TodoTask | null) =>
+  t
+    ? L(`Xong 2 phút rồi, và ${q(t)} cũng đã xong! 🌱`, `Two minutes done, and ${q(t)} is already off your list! 🌱`)
+    : starterEnd(null);
 
 export const starterEnough = () => L("Hay lắm, bắt đầu là phần khó nhất 🌱 Lần sau sẽ dễ hơn.", "Nice, starting is the hardest part 🌱 It gets easier next time.");
 

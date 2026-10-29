@@ -12,6 +12,8 @@ const SHOWN_TITLE = 60;
 export interface WorkContext {
   taskId: string | null;
   taskTitle: string | null;
+  /** The task is only the next one in line, not one you were focusing on or last acted on: the card says "Next up". */
+  taskIsNext: boolean;
   /** Friendly app name ("Visual Studio Code"). */
   app: string | null;
   windowTitle: string | null;
@@ -51,7 +53,50 @@ function clean(s: string | null | undefined, max = MAX_TITLE): string | null {
   return t.length > 0 ? shortText(t, max) : null;
 }
 
-/** An http(s) address without credentials or #fragment, at most 2048 characters (never ending in a cut %-escape). */
+/** Words that make a query parameter's name look like a secret (an OAuth code, a signed link, a session id…). */
+const SECRET_WORDS = new Set(["token", "code", "key", "secret", "sig", "signature", "auth", "session", "password", "passwd", "pwd", "state", "credential", "credentials", "jwt", "sid"]);
+/** Names that run the word together ("sessionid", "accesstoken", "clientsecret"). */
+const SECRET_ENDINGS = ["token", "secret", "password", "passwd", "signature", "apikey", "sessionid", "session"];
+
+/** "access_token", "X-Amz-Signature", "apiKey" and "sessionid" look sensitive; "keyword", "author" and "page" don't. */
+export function isSecretParam(name: string): boolean {
+  const parts = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 0);
+  const compact = parts.join("");
+  return parts.some((w) => SECRET_WORDS.has(w)) || SECRET_ENDINGS.some((e) => compact.endsWith(e));
+}
+
+/** The query without the parameters that look like secrets; everything else stays exactly as written. */
+function withoutSecretParams(search: string): string {
+  if (search.length <= 1) return "";
+  const kept = search
+    .slice(1)
+    .split("&")
+    .filter((part) => {
+      if (part.length === 0) return false;
+      const raw = part.split("=")[0];
+      let name = raw;
+      try {
+        name = decodeURIComponent(raw.replace(/\+/g, " "));
+      } catch {
+        // A name that isn't valid %-encoding is checked as it is written.
+      }
+      return !isSecretParam(name);
+    });
+  return kept.length > 0 ? `?${kept.join("&")}` : "";
+}
+
+/** Characters the opener refuses in a link; the URL parser leaves some of them as they are. */
+const UNOPENABLE = /["<>\\^`|]/g;
+
+/**
+ * An http(s) address for the card and for Reopen: no credentials, no #fragment, no query parameters that look like
+ * secrets (`token`, `code`, `key`, `session`…), the characters the opener refuses (pipe, caret, backtick, backslash,
+ * quotes, angle brackets) percent-encoded, at most 2048 characters (never ending in a cut %-escape).
+ */
 export function workUrl(raw: string | null | undefined): string | null {
   if (typeof raw !== "string" || raw.trim().length === 0) return null;
   let u: URL;
@@ -64,9 +109,65 @@ export function workUrl(raw: string | null | undefined): string | null {
   u.hash = "";
   u.username = "";
   u.password = "";
-  let href = u.href;
+  u.search = withoutSecretParams(u.search);
+  let href = u.href.replace(UNOPENABLE, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
   if (href.length > MAX_URL) href = href.slice(0, MAX_URL).replace(/%[0-9a-f]?$/i, "");
   return href;
+}
+
+/** Private-window markers in Latin script, whole words, on a lower-cased title with accents removed. */
+const PRIVATE_LATIN = new RegExp(
+  "(?<![a-z])(?:" +
+    [
+      "inprivate",
+      "incognito",
+      "inkognito",
+      "private (?:browsing|window|mode|tab)",
+      "privates? (?:fenster|surfen|modus)",
+      "privater modus",
+      "navigation privee",
+      "fenetre privee",
+      "navegacion privada",
+      "ventana (?:privada|de incognito)",
+      "navegacao privada",
+      "janela (?:privada|anonima)",
+      "anonima",
+      "navigazione (?:privata|in incognito)",
+      "finestra privata",
+      "privenavigatie",
+      "privevenster",
+      "okno prywatne",
+      "tryb prywatny",
+      "gizli (?:sekme|pencere)",
+      "ozel (?:pencere|gezinme)",
+      "rieng tu",
+      "an danh",
+      "samaran",
+      "penjelajahan pribadi",
+      "jendela pribadi",
+    ].join("|") +
+    ")(?![a-z])",
+);
+/** The same in scripts that have no accents to remove (Cyrillic, Japanese, Chinese, Korean, Thai, Arabic, Hindi, Greek). */
+const PRIVATE_OTHER = /инкогнито|приватн|シークレット|プライベート(ブラウジング|ウィンドウ)|无痕|無痕|隐身|隱私瀏覽|隐私浏览|私密浏览|私人浏览|시크릿|비공개 브라우징|사생활 보호|ไม่ระบุตัวตน|التصفح (المتخفي|الخاص)|गुप्त|ιδιωτική περιήγηση|ανώνυμη|anonymní|soukromé prohlížení/;
+
+/** Does this window title come from a private or incognito window (InPrivate, Incognito, Private Browsing, "Riêng tư", "Ẩn danh"…)? */
+export function isPrivateTitle(title: string | null | undefined): boolean {
+  if (typeof title !== "string" || title.length === 0) return false;
+  const lower = title.toLowerCase();
+  if (PRIVATE_OTHER.test(lower)) return true;
+  const plain = lower
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    .replace(/đ/g, "d");
+  return PRIVATE_LATIN.test(plain);
+}
+
+export interface SnapshotOptions {
+  /** The task comes from "next in line" rather than from what you were doing. */
+  taskIsNext?: boolean;
+  /** False when the page title and address are not to be kept (`prefs.resumeDetails` off). Default true. */
+  details?: boolean;
 }
 
 /**
@@ -78,21 +179,31 @@ export function snapshot(
   task: TodoTask | null,
   isDistracting: IsDistracting,
   now: Date | number,
+  opts: SnapshotOptions = {},
 ): WorkContext | null {
   const app = sample?.app ?? null;
   const url = sample?.url ?? null;
   if (app && isDistracting(app, url)) return null;
-  const work = app && !isNotWork(app) ? app : null;
+  // A call, the pet itself and shell pop-ups are never where you were.
+  const work = app && !isNotWork(app) && !isConferencing(app, url) ? app : null;
+  // A private window keeps its app's name only; so does a card the user asked to keep short.
+  const details = work !== null && opts.details !== false && !isPrivateTitle(work.title);
   const ctx: WorkContext = {
     taskId: task?.id ?? null,
     taskTitle: task ? clean(taskTitle(task)) : null,
+    taskIsNext: task !== null && opts.taskIsNext === true,
     app: work ? clean(work.name) : null,
-    windowTitle: work ? clean(work.title) : null,
-    url: work ? workUrl(url) : null,
+    windowTitle: details ? clean(work.title) : null,
+    url: details ? workUrl(url) : null,
     note: null,
     at: new Date(now).getTime(),
   };
   return ctx.taskId || ctx.app || ctx.windowTitle || ctx.url ? ctx : null;
+}
+
+/** The context without its page title and address (the app and the task stay). */
+export function withoutDetails(ctx: WorkContext): WorkContext {
+  return { ...ctx, windowTitle: null, url: null };
 }
 
 /** The context with a one-line "next step" (or none when the note is empty). */
@@ -123,6 +234,10 @@ export interface ResumeSummary {
   note: string | null;
   /** There is an http(s) address to reopen. */
   canReopen: boolean;
+  /** The host of that address ("docs.google.com"), shown next to Reopen; null when there is none. */
+  host: string | null;
+  /** The task is only the next one in line. */
+  taskIsNext: boolean;
 }
 
 /** "Docs - Google Chrome" in Google Chrome → "Docs" (apps that repeat their name in the title). */
@@ -145,5 +260,5 @@ export function resumeSummary(ctx: WorkContext): ResumeSummary {
   else if (ctx.app) where = ctx.app;
   else if (title) where = title;
   else if (url) where = hostOf(url);
-  return { task: ctx.taskTitle, where, note: ctx.note, canReopen: url !== null };
+  return { task: ctx.taskTitle, where, note: ctx.note, canReopen: url !== null, host: url ? hostOf(url) : null, taskIsNext: ctx.taskIsNext };
 }

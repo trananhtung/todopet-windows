@@ -406,7 +406,11 @@ async function rig(opts: { life?: Partial<LifeState>; prefs?: Partial<Prefs>; se
     throw new Error("no matching bubble");
   };
   const watchYouTube = (patch: Partial<SystemSample> = {}) => brain.onSample(sample({ ...YOUTUBE, appSwitchedAt: clock.t, ...patch }));
-  const backToWork = () => brain.onSample(sample({ appSwitchedAt: clock.t }));
+  // Samples come every second, and a distraction ends after two in a row away from it.
+  const backToWork = () => {
+    brain.onSample(sample({ appSwitchedAt: clock.t }));
+    brain.onSample(sample({ appSwitchedAt: clock.t }));
+  };
   const diary = vi.spyOn(brain.diary, "add");
   const diaryTexts = (kind?: string) => diary.mock.calls.filter((c) => kind === undefined || c[0] === kind).map((c) => c[1]);
   return { clock, backend, brain, boot, step, answer, until, watchYouTube, backToWork, diaryTexts, sample };
@@ -1222,8 +1226,8 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
     try {
       const left = r.brain.getSnapshot().nudgesLeft;
       const b = awayAndBack(r, DOCS, 6);
-      expect(b?.text).toContain("You were on: “Write the weekly report” · in Google Chrome — Spec");
-      expect(titles(b)).toEqual(["Reopen ↗", "▶ Focus 25'", "Something else"]);
+      expect(b?.text).toContain("Next up: “Write the weekly report” · you were in Google Chrome — Spec");
+      expect(titles(b)).toEqual(["Reopen ↗ docs.example.com", "▶ Focus 25'", "Something else"]);
       expect(b?.kind).toBeUndefined();
       expect(r.brain.getSnapshot().nudgesLeft).toBe(left);
       // It replaces the generic welcome-back, which is for when there is nothing to resume.
@@ -1282,6 +1286,7 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       expect(r.brain.getSnapshot().focus?.task?.id).toBe("1");
       r.brain.stopFocus();
       r.brain.dismissBubble(r.brain.getSnapshot().bubble!.id, "closed");
+      r.clock.t += 31 * MIN; // one resume card every 30 minutes
       b = awayAndBack(r, DOCS, 6)!;
       r.brain.pickAction(b.id, 2);
       expect(openBoard).toHaveBeenCalledWith(false);
@@ -1312,7 +1317,7 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       r.backToWork();
       r.brain.runRules(r.clock.t);
       const b = r.brain.getSnapshot().bubble;
-      expect(b?.text).toContain("You were on: “Write the weekly report” · in Google Chrome — Spec");
+      expect(b?.text).toContain("Next up: “Write the weekly report” · you were in Google Chrome — Spec");
       expect(b?.text).not.toContain("YouTube");
       expect(b?.kind).toBeUndefined();
     } finally {
@@ -1403,8 +1408,9 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       expect(b?.text).toContain("in Google Chrome — Spec");
       expect(b?.kind).toBeUndefined();
       expect(r.brain.getSnapshot().pinned).toBe(false);
-      // Used up: the next absence reports where you are then.
+      // Used up: the next absence (a resume card comes every 30 minutes at most) reports where you are then.
       r.brain.dismissBubble(b!.id, "closed");
+      r.clock.t += 31 * MIN;
       const again = awayAndBack(r, { app: { name: "Notepad", exe: "notepad.exe", title: "todo.txt - Notepad" }, url: null }, 6);
       expect(again?.text).not.toContain("Fix the retry loop");
       expect(again?.text).toContain("Notepad");
@@ -1446,7 +1452,7 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       r.brain.onSample(r.sample({ ...DOCS, appSwitchedAt: r.clock.t }));
       const b = awayAndBack(r, DOCS, 6);
       expect(b?.text).not.toContain("Old plan");
-      expect(b?.text).toContain("You were on");
+      expect(b?.text).toContain("Next up");
     } finally {
       r.brain.stop();
     }
@@ -1458,12 +1464,16 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       const sprint = r.brain.getSnapshot().day.today.find((t) => t.id === "4")!;
       await r.brain.reschedule(sprint, "today");
       r.brain.pinPlace(null);
-      expect(awayAndBack(r, DOCS, 6)?.text).toContain("“Plan the next sprint”");
+      const first = awayAndBack(r, DOCS, 6)!;
+      expect(first.text).toContain("You were on: “Plan the next sprint”");
+      r.brain.pickAction(first.id, 2);
       const call = r.brain.getSnapshot().day.today.find((t) => t.id === "2")!;
       r.brain.startFocus(call);
       r.brain.pinPlace(null);
       r.brain.stopFocus();
-      expect(awayAndBack(r, DOCS, 6)?.text).toContain("“Call client ABC”");
+      r.brain.dismissBubble(r.brain.getSnapshot().bubble!.id, "closed");
+      r.clock.t += 31 * MIN; // one resume card every 30 minutes
+      expect(awayAndBack(r, DOCS, 6)?.text).toContain("You were on: “Call client ABC”");
     } finally {
       r.brain.stop();
     }
@@ -1568,11 +1578,16 @@ describe("Brain v0.4: meeting bookends", () => {
     }
   });
 
-  /** A rig where the day's first greeting is behind us and the clock is `h:m`. */
+  /** A rig where the day's first greeting is behind us, you were at every meeting (a 2-minute quiet stretch in each), and the clock is `h:m`. */
   async function afterGreeting(setup: (b: DemoBackend) => void, h: number, m: number) {
     const r = await rig({ prefs: { bubbleGap: 0 }, setup });
     r.answer(r.step()!); // morning greeting
+    for (const e of r.brain.getSnapshot().events) {
+      r.clock.t = e.start.getTime() + MIN;
+      r.brain.onSample(r.sample({ idleSeconds: 150 }));
+    }
     r.clock.t = at(28, h, m);
+    r.brain.onSample(r.sample());
     return r;
   }
 
@@ -1697,13 +1712,19 @@ describe("Brain v0.4: meeting bookends", () => {
       // Team sync starts at 10:00 with Chrome in front: that's the place to come back to.
       r.clock.t = at(28, 10, 1);
       r.brain.runRules(r.clock.t);
-      r.brain.onSample(r.sample({ app: { name: "Zoom", exe: "zoom.exe", title: "Team sync" }, url: null }));
+      r.brain.onSample(r.sample({ app: { name: "Zoom", exe: "zoom.exe", title: "Team sync" }, url: null, appSwitchedAt: r.clock.t }));
+      // The call runs over and then leaves the front: only then do the question and the card come.
       r.clock.t = at(28, 11, 1);
+      const meanwhile = r.step(0); // some other reminder, perhaps, but neither of the follow-ups
+      expect(meanwhile?.text ?? "").not.toMatch(/is over|Meeting's done/);
+      if (meanwhile) r.brain.dismissBubble(meanwhile.id, "ignored");
+      r.brain.onSample(r.sample({ ...DOCS, appSwitchedAt: r.clock.t }));
       let b = r.step(0)!;
       expect(b.text).toContain("is over");
       r.brain.pickAction(b.id, 1); // Nothing
       b = r.step(0)!;
-      expect(b.text).toContain("You were on");
+      expect(b.text).toContain("Meeting's done");
+      expect(b.text).toContain("Next up");
       expect(b.text).not.toContain("Zoom");
       expect(b.kind).toBeUndefined();
     } finally {
@@ -1713,9 +1734,11 @@ describe("Brain v0.4: meeting bookends", () => {
     try {
       quick.brain.onSample(quick.sample(DOCS));
       quick.brain.runRules(quick.clock.t); // the stand-up has started: Chrome is the place to come back to
-      quick.brain.onSample(quick.sample({ app: { name: "Zoom", exe: "zoom.exe", title: "Stand-up" }, url: null }));
-      const b = quick.step(6);
-      expect(b?.text).toContain("You were on");
+      quick.brain.onSample(quick.sample({ app: { name: "Zoom", exe: "zoom.exe", title: "Stand-up" }, url: null, appSwitchedAt: quick.clock.t }));
+      quick.clock.t += 6 * MIN;
+      quick.brain.onSample(quick.sample({ ...DOCS, appSwitchedAt: quick.clock.t }));
+      const b = quick.step(0);
+      expect(b?.text).toContain("Meeting's done");
       expect(b?.text).toContain("Google Chrome");
       expect(b?.text).not.toContain("Anything to capture");
     } finally {
@@ -1811,6 +1834,8 @@ describe("Brain v0.4: if-then starts and the 2-minute starter", () => {
     const r = await ready();
     try {
       r.brain.setStartTrigger(sprint(r), { kind: "appOpen", app: "figma" });
+      // Figma came to the front a minute ago, after the plan was made.
+      r.clock.t += 2 * MIN;
       r.brain.onSample(r.sample({ ...FIGMA, appSwitchedAt: r.clock.t - 60_000, secondsSinceKey: 2 }));
       expect(r.step(0)).toBeNull();
       r.brain.onSample(r.sample({ ...FIGMA, appSwitchedAt: r.clock.t - 60_000, secondsSinceKey: 20 }));
@@ -1840,6 +1865,7 @@ describe("Brain v0.4: if-then starts and the 2-minute starter", () => {
       await r.brain.complete(sprint(r));
       await vi.waitFor(() => expect(r.brain.getSnapshot().loading).toBe(false));
       r.brain.dismissBubble(r.brain.getSnapshot().bubble?.id ?? -1, "closed");
+      r.clock.t += MIN;
       r.brain.onSample(r.sample({ ...FIGMA, appSwitchedAt: r.clock.t }));
       expect(planBubble(r)).toBeNull();
       expect(r.brain.getSnapshot().triggers[0].fired).toBe(true);
@@ -1854,7 +1880,9 @@ describe("Brain v0.4: if-then starts and the 2-minute starter", () => {
       r.brain.setStartTrigger(sprint(r), { kind: "afterLunch" });
       r.brain.setStartTrigger(sprint(r), { kind: "appOpen", app: "  Figma  " });
       expect(r.brain.getSnapshot().triggers.map((t) => t.trigger)).toEqual([{ kind: "appOpen", app: "Figma" }]);
-      expect(r.diaryTexts().some((t) => t.includes("Figma"))).toBe(true);
+      // The diary is on disk: it says what kind of plan, never which app.
+      expect(r.diaryTexts().some((t) => t.includes("Start plan for") && t.includes("when an app opens"))).toBe(true);
+      expect(r.diaryTexts().some((t) => t.includes("Figma"))).toBe(false);
       r.brain.clearStartTrigger(sprint(r));
       expect(r.brain.getSnapshot().triggers).toEqual([]);
       expect(await triggersOnDisk(r)).toEqual([]);
@@ -1874,10 +1902,11 @@ describe("Brain v0.4: if-then starts and the 2-minute starter", () => {
       r.brain.onSample(r.sample({ app: { name: "TodoPet", exe: "todopet.exe", title: "TodoPet" }, appSwitchedAt: r.clock.t }));
       r.backToWork();
       const kinds = r.brain.startTriggerChoices().map((c) => (c.kind === "appOpen" ? `app:${c.app}` : c.kind));
-      expect(kinds).toEqual(["afterMeeting", "app:Visual Studio Code", "app:Figma", "afterLunch"]);
+      // Visual Studio Code is in front (backToWork), so it isn't offered.
+      expect(kinds).toEqual(["afterMeeting", "app:Figma", "afterLunch"]);
       r.clock.t = at(28, 13, 5);
-      // The meeting is over and lunch has come: only apps are left.
-      expect(r.brain.startTriggerChoices().map((c) => c.kind)).toEqual(["appOpen", "appOpen"]);
+      // The meeting is over and lunch has come: only an app is left.
+      expect(r.brain.startTriggerChoices().map((c) => c.kind)).toEqual(["appOpen"]);
     } finally {
       r.brain.stop();
     }
@@ -1892,6 +1921,7 @@ describe("Brain v0.4: if-then starts and the 2-minute starter", () => {
       r.brain.stop();
       again = await r.boot();
       expect(again.getSnapshot().triggers).toMatchObject([{ taskId: "4", fired: false }]);
+      r.clock.t += MIN;
       again.onSample(r.sample({ ...FIGMA, appSwitchedAt: r.clock.t }));
       const step = stepWith(again, r.clock);
       const b = step(1);
@@ -1973,14 +2003,15 @@ describe("Brain v0.4: if-then starts and the 2-minute starter", () => {
     try {
       r.answer(r.step()!); // morning greeting
       r.brain.demoComeBack();
-      expect(r.brain.getSnapshot().bubble?.text).toContain("You were on: “Write the weekly report”");
+      expect(r.brain.getSnapshot().bubble?.text).toContain("Next up: “Write the weekly report”");
       r.brain.dismissBubble(r.brain.getSnapshot().bubble!.id, "closed");
       r.brain.demoMeetingSoon();
       expect(r.brain.getSnapshot().bubble?.text).toContain("Related: “Call client ABC”");
       r.brain.pickAction(r.brain.getSnapshot().bubble!.id, 0);
       r.brain.demoMeetingEnds();
       expect(r.brain.getSnapshot().bubble?.text).toContain("“Q4 planning” is over");
-      expect(titles(r.brain.getSnapshot().bubble)).toContain("☕ 5-min breather");
+      // (The meeting from the demo before is 4 minutes away, so the breather is cut to 4.)
+      expect(titles(r.brain.getSnapshot().bubble)).toContain("☕ 4-min breather");
     } finally {
       r.brain.stop();
     }
@@ -1997,6 +2028,767 @@ describe("Brain v0.4: if-then starts and the 2-minute starter", () => {
       expect(r.brain.getSnapshot().focus).toMatchObject({ minutes: 2, starter: true, task: { id: "3" } });
     } finally {
       r.brain.stop();
+    }
+  });
+});
+
+// ---------- v0.4 part A, after review ----------
+
+const ZOOM = { app: { name: "Zoom", exe: "zoom.exe", title: "Zoom Meeting" }, url: null };
+const MEET = { app: { name: "Google Chrome", exe: "chrome.exe", title: "Meet - Google Chrome" }, url: "https://meet.google.com/abc-defg-hij" };
+const NOTEPAD = { app: { name: "Notepad", exe: "notepad.exe", title: "todo.txt - Notepad" }, url: null };
+const REDDIT = { app: { name: "Google Chrome", exe: "chrome.exe", title: "r/aww - Google Chrome" }, url: "https://www.reddit.com/r/aww" };
+
+/** Puts `x` in front as of right now (it just came to the front). */
+const front = (r: Rig, x: Partial<SystemSample>) => r.brain.onSample(r.sample({ appSwitchedAt: r.clock.t, ...x }));
+/** Moves the clock to `t` and runs the rules like the heartbeat does. */
+const tickTo = (r: Rig, t: number): Bubble | null => {
+  r.clock.t = t;
+  r.brain.recompute();
+  r.brain.runRules(t);
+  return r.brain.getSnapshot().bubble;
+};
+/** After the morning greeting, with the clock at h:m, Chrome in front and the budget of reminders at 0, so only check-ins and cards speak. */
+async function quietRig(setup: (b: DemoBackend) => void, h: number, m: number, opts: Parameters<typeof rig>[0] = {}) {
+  const r = await rig({ ...opts, prefs: { bubbleGap: 0, nudgeBudget: 0, ...opts.prefs }, setup });
+  r.answer(r.step()!); // morning greeting
+  front(r, DOCS);
+  r.clock.t = at(28, h, m);
+  return r;
+}
+const diaryOnDisk = async (b: DemoBackend, day = "2026-10-28") => (await b.diary.read(day)).map((l) => JSON.parse(l).text as string);
+const triggersStored = async (r: Rig) => (await r.backend.storage.load<{ taskId: string; trigger: { kind: string; eventId?: string; title?: string }; fired: boolean; notBefore: number | null }[]>("triggers")) ?? [];
+const sprintOf = (r: Rig) => r.brain.getSnapshot().day.today.find((t) => t.id === "4")!;
+
+describe("Brain v0.4 review: the meeting's follow-ups wait for the call and a sign you were there", () => {
+  const TEAM = { uid: "team", title: "Team sync", start: at(28, 10), end: at(28, 11) };
+
+  it("holds the question and the card while the call is in front, and counts their 10 minutes from when it leaves", async () => {
+    const r = await quietRig(meetings(TEAM), 9, 30);
+    try {
+      tickTo(r, at(28, 10, 1)); // it started with Chrome in front: that's the place to come back to
+      front(r, ZOOM);
+      expect(tickTo(r, at(28, 11, 5))).toBeNull(); // over on the calendar, still on the call
+      expect(tickTo(r, at(28, 11, 40))).toBeNull();
+      r.clock.t = at(28, 11, 41);
+      front(r, DOCS); // the call has left the front
+      const b = tickTo(r, at(28, 11, 41))!;
+      expect(b.text).toContain("“Team sync” is over");
+      r.brain.pickAction(b.id, 1); // Nothing
+      const card = tickTo(r, at(28, 11, 42));
+      expect(card?.text).toContain("Meeting's done");
+      expect(card?.text).not.toContain("Zoom");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("drops them 10 minutes after the call left, not after the calendar's end", async () => {
+    const r = await quietRig(meetings(TEAM), 9, 30);
+    try {
+      tickTo(r, at(28, 10, 1));
+      front(r, ZOOM);
+      expect(tickTo(r, at(28, 11, 40))).toBeNull();
+      r.clock.t = at(28, 11, 41);
+      front(r, DOCS);
+      expect(tickTo(r, at(28, 11, 52))?.text ?? "").not.toMatch(/is over|Meeting's done/);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("offers neither when nothing says you were there: you kept working in the same window", async () => {
+    const r = await quietRig(meetings(TEAM), 9, 30);
+    try {
+      tickTo(r, at(28, 10, 1));
+      for (let t = at(28, 10, 5); t < at(28, 11); t += 10 * MIN) {
+        r.clock.t = t;
+        front(r, { ...DOCS, secondsSinceKey: 30, appSwitchedAt: at(28, 9) });
+      }
+      const b = tickTo(r, at(28, 11, 1));
+      expect(b?.text ?? "").not.toMatch(/is over|Meeting's done/);
+      expect(tickTo(r, at(28, 11, 2))?.text ?? "").not.toMatch(/is over|Meeting's done/);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it.each([
+    ["a call app was in front", (r: Rig) => front(r, ZOOM)],
+    ["a call tab was in front", (r: Rig) => front(r, MEET)],
+    ["you were idle for 2 minutes", (r: Rig) => front(r, { ...DOCS, idleSeconds: 150 })],
+    ["another app than before the meeting was in front", (r: Rig) => front(r, NOTEPAD)],
+  ])("offers both when there is a sign you were there: %s", async (_sign, sign) => {
+    const r = await quietRig(meetings(TEAM), 9, 30);
+    try {
+      tickTo(r, at(28, 10, 1));
+      r.clock.t = at(28, 10, 20);
+      sign(r);
+      r.clock.t = at(28, 11, 1);
+      front(r, DOCS);
+      const b = tickTo(r, at(28, 11, 1))!;
+      expect(b.text).toContain("is over");
+      r.brain.pickAction(b.id, 1);
+      expect(tickTo(r, at(28, 11, 2))?.text).toContain("Meeting's done");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("doesn't take a distraction in the meeting's time for a sign that you were there", async () => {
+    const r = await quietRig(meetings(TEAM), 9, 30);
+    try {
+      tickTo(r, at(28, 10, 1));
+      r.clock.t = at(28, 10, 20);
+      front(r, YOUTUBE);
+      r.clock.t = at(28, 11, 1);
+      front(r, DOCS);
+      expect(tickTo(r, at(28, 11, 1))?.text ?? "").not.toContain("is over");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("never shows the resume card with a call in front, and keeps it until its 10 minutes run out", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      front(r, { ...DOCS, idleSeconds: 310 });
+      r.brain.runRules(r.clock.t);
+      const back = r.clock.t + 6 * MIN;
+      r.clock.t = back;
+      front(r, { ...MEET, idleSeconds: 0 }); // back, with a screen share in front
+      expect(tickTo(r, back + MIN)).toBeNull();
+      expect(tickTo(r, back + 3 * MIN)).toBeNull();
+      r.clock.t = back + 4 * MIN;
+      front(r, DOCS);
+      expect(tickTo(r, back + 4 * MIN)?.text).toContain("Welcome back!");
+    } finally {
+      r.brain.stop();
+    }
+    const late = await quietRig(meetings(), 9, 30);
+    try {
+      front(late, { ...DOCS, idleSeconds: 310 });
+      late.brain.runRules(late.clock.t);
+      const back = late.clock.t + 6 * MIN;
+      late.clock.t = back;
+      front(late, { ...ZOOM, idleSeconds: 0 });
+      expect(tickTo(late, back + MIN)).toBeNull();
+      expect(tickTo(late, back + 11 * MIN)).toBeNull();
+      late.clock.t = back + 12 * MIN;
+      front(late, DOCS);
+      expect(tickTo(late, back + 12 * MIN)?.text ?? "").not.toContain("Welcome back");
+    } finally {
+      late.brain.stop();
+    }
+  });
+
+  it("holds a short meeting's card the same way", async () => {
+    const r = await quietRig(meetings({ uid: "q", title: "Stand-up", start: at(28, 10), end: at(28, 10, 10) }), 10, 5);
+    try {
+      tickTo(r, at(28, 10, 5));
+      front(r, ZOOM);
+      expect(tickTo(r, at(28, 10, 12))).toBeNull();
+      r.clock.t = at(28, 10, 14);
+      front(r, DOCS);
+      expect(tickTo(r, at(28, 10, 14))?.text).toContain("Meeting's done");
+    } finally {
+      r.brain.stop();
+    }
+  });
+});
+
+describe("Brain v0.4 review: pacing the cards", () => {
+  /** A detour of 3 minutes on YouTube, then back to the docs; returns what the return brings. */
+  const detour = (r: Rig): Bubble | null => {
+    front(r, YOUTUBE);
+    r.clock.t += 3 * MIN;
+    front(r, YOUTUBE);
+    front(r, DOCS);
+    front(r, DOCS);
+    return tickTo(r, r.clock.t);
+  };
+
+  it("lets a resume card come at most every 30 minutes", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      const first = detour(r)!;
+      expect(first.text).toContain("No rush");
+      const shownAt = r.clock.t;
+      r.brain.pickAction(first.id, first.actions.length - 1); // Something else: a real answer
+      r.clock.t += 5 * MIN;
+      expect(detour(r)).toBeNull();
+      r.clock.t = shownAt + 31 * MIN;
+      expect(detour(r)?.text).toContain("No rush");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("counts a closed or ignored resume card as a refusal, and stops offering after 2 in a day", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      r.brain.dismissBubble(detour(r)!.id, "closed");
+      expect(r.brain.getSnapshot().life.dismissedInRow).toBe(1);
+      r.clock.t += 31 * MIN;
+      const second = detour(r)!;
+      r.brain.dismissBubble(second.id, "ignored");
+      expect(r.brain.getSnapshot().life.dismissedInRow).toBe(2);
+      r.clock.t += 31 * MIN;
+      expect(detour(r)).toBeNull();
+      r.clock.t += 31 * MIN;
+      expect(detour(r)).toBeNull();
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("doesn't count an answer, or a card that expired unseen, as a refusal", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      const b = detour(r)!;
+      r.brain.dismissBubble(b.id, "expired");
+      expect(r.brain.getSnapshot().life.dismissedInRow).toBe(0);
+      r.clock.t += 31 * MIN;
+      r.brain.pickAction(detour(r)!.id, 1); // Focus
+      expect(r.brain.getSnapshot().life.dismissedInRow).toBe(0);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("stops asking about a meeting after 2 refusals in a day", async () => {
+    const M = (n: number, h: number) => ({ uid: `m${n}`, title: `Sync ${n}`, start: at(28, h), end: at(28, h, 30) });
+    const r = await quietRig(meetings(M(1, 10), M(2, 11), M(3, 12)), 9, 30);
+    try {
+      const results: (string | null)[] = [];
+      for (const h of [10, 11, 12]) {
+        tickTo(r, at(28, h, 1));
+        r.clock.t = at(28, h, 10);
+        front(r, { ...DOCS, idleSeconds: 150 });
+        r.clock.t = at(28, h, 31);
+        front(r, DOCS);
+        const b = tickTo(r, at(28, h, 31));
+        results.push(b?.text.includes("is over") ? b.text : null);
+        if (b) r.brain.dismissBubble(b.id, "closed");
+      }
+      expect(results[0]).toContain("Sync 1");
+      expect(results[1]).toContain("Sync 2");
+      expect(results[2]).toBeNull();
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("holds the card and the question while reminders are held, but not a plan you made", async () => {
+    const TEAM = { uid: "team", title: "Team sync", start: at(28, 10), end: at(28, 11) };
+    const r = await quietRig(meetings(TEAM), 9, 30, { life: { nudgeHoldUntil: at(28, 15) } });
+    try {
+      tickTo(r, at(28, 10, 1));
+      r.clock.t = at(28, 10, 20);
+      front(r, { ...DOCS, idleSeconds: 150 });
+      r.clock.t = at(28, 11, 1);
+      front(r, DOCS);
+      expect(tickTo(r, at(28, 11, 1))?.text ?? "").not.toMatch(/is over|Meeting's done/);
+      expect(r.diaryTexts("hold").some((t) => t.includes("Held"))).toBe(true);
+      // The detour's card waits too.
+      expect(detourCard(r)).toBeNull();
+      // A plan you set yourself does not.
+      r.brain.setStartTrigger(sprintOf(r), { kind: "afterLunch" });
+      expect(tickTo(r, at(28, 13))?.text).toBe("As planned: “Plan the next sprint”");
+    } finally {
+      r.brain.stop();
+    }
+  });
+});
+
+function detourCard(r: Rig): Bubble | null {
+  front(r, YOUTUBE);
+  r.clock.t += 3 * MIN;
+  front(r, YOUTUBE);
+  front(r, DOCS);
+  front(r, DOCS);
+  return tickTo(r, r.clock.t);
+}
+
+describe("Brain v0.4 review: start-when plans", () => {
+  it("doesn't offer the app in front, and an app plan waits for it to go away and come back", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      front(r, FIGMA);
+      const names = () => r.brain.startTriggerChoices().flatMap((c) => (c.kind === "appOpen" ? [c.app] : []));
+      expect(names()).not.toContain("Figma");
+      expect(names()).toContain("Google Chrome");
+      r.brain.setStartTrigger(sprintOf(r), { kind: "appOpen", app: "Figma" });
+      expect(tickTo(r, r.clock.t + MIN)).toBeNull();
+      r.clock.t += 2 * MIN;
+      front(r, DOCS);
+      expect(tickTo(r, r.clock.t + MIN)).toBeNull();
+      r.clock.t += MIN;
+      front(r, FIGMA);
+      expect(tickTo(r, r.clock.t)?.text).toBe("As planned: “Plan the next sprint”");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("refuses a typed app name under 3 characters and keeps the exe of a recent app", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      expect(r.brain.setStartTrigger(sprintOf(r), { kind: "appOpen", app: "ab" })).toBe(false);
+      front(r, FIGMA);
+      front(r, DOCS);
+      const choice = r.brain.startTriggerChoices().find((c) => c.kind === "appOpen" && c.app === "Figma");
+      expect(choice).toEqual({ kind: "appOpen", app: "Figma", exe: "figma.exe" });
+      expect(r.brain.setStartTrigger(sprintOf(r), choice!)).toBe(true);
+      expect((await triggersStored(r))[0].trigger).toMatchObject({ kind: "appOpen", exe: "figma.exe" });
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("re-arms the plan for 30 minutes when you tap Later on 'As planned', and does not drop it", async () => {
+    const r = await quietRig(meetings(), 12, 58);
+    try {
+      r.brain.setStartTrigger(sprintOf(r), { kind: "afterLunch" });
+      const b = tickTo(r, at(28, 13))!;
+      expect(b.text).toBe("As planned: “Plan the next sprint”");
+      r.brain.pickAction(b.id, 1); // Later
+      expect(r.brain.getSnapshot().triggers[0]).toMatchObject({ fired: false, notBefore: at(28, 13, 30) });
+      expect(tickTo(r, at(28, 13, 29))).toBeNull();
+      expect(tickTo(r, at(28, 13, 30))?.text).toBe("As planned: “Plan the next sprint”");
+      expect(r.brain.getSnapshot().triggers[0].fired).toBe(true);
+      expect(await triggersStored(r)).toMatchObject([{ fired: true }]);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("isn't spent while the task's completion is in flight, and fires if the close fails", async () => {
+    const r = await quietRig(meetings(), 12, 58);
+    try {
+      let fail!: (e: unknown) => void;
+      r.backend.todoist.close = () => new Promise<void>((_, reject) => (fail = reject));
+      r.brain.setStartTrigger(sprintOf(r), { kind: "afterLunch" });
+      const done = r.brain.complete(sprintOf(r));
+      expect(tickTo(r, at(28, 13))?.text ?? "").not.toContain("As planned");
+      expect(r.brain.getSnapshot().triggers[0].fired).toBe(false);
+      fail(new BackendError({ kind: "network", message: "offline" }));
+      await done;
+      r.brain.dismissBubble(r.brain.getSnapshot().bubble?.id ?? -1, "closed");
+      await vi.waitFor(() => expect(r.brain.getSnapshot().loading).toBe(false));
+      expect(tickTo(r, at(28, 13, 1))?.text).toBe("As planned: “Plan the next sprint”");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("drops a plan whose meeting moved or was cancelled when the calendar syncs, with a diary line, but not when the sync fails", async () => {
+    const STAND = { uid: "stand", title: "Stand-up", start: at(28, 10), end: at(28, 10, 10) };
+    const r = await quietRig(meetings(STAND), 9, 30);
+    try {
+      await r.brain.refreshCalendar(true);
+      const eventId = r.brain.getSnapshot().events[0].id;
+      r.brain.setStartTrigger(sprintOf(r), { kind: "afterMeeting", eventId, title: "Stand-up" });
+      // A failed fetch says nothing about the meeting.
+      r.backend.calendar.fetchIcs = async () => [{ host: "demo.todopet", ok: false, error: "offline" }];
+      await r.brain.refreshCalendar(true);
+      expect(r.brain.getSnapshot().triggers).toHaveLength(1);
+      // The meeting moved to 11:00: the plan can't come true any more.
+      r.backend.calendar.fetchIcs = async () => [{ host: "demo.todopet", ok: true, text: icsOf({ ...STAND, start: at(28, 11), end: at(28, 11, 10) }) }];
+      await r.brain.refreshCalendar(true);
+      expect(r.brain.getSnapshot().triggers).toEqual([]);
+      expect(await triggersStored(r)).toEqual([]);
+      expect(r.diaryTexts("system").some((t) => t.includes("plan dropped: meeting moved"))).toBe(true);
+      expect(r.diaryTexts().join("\n")).not.toContain("Stand-up");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("stores a short hash for a very long event id, and the plan still fires after the meeting", async () => {
+    const uid = "u".repeat(230);
+    const LONG = { uid, title: "Planning", start: at(28, 10), end: at(28, 10, 20) };
+    const r = await quietRig(meetings(LONG), 9, 30);
+    try {
+      await r.brain.refreshCalendar(true);
+      const choice = r.brain.startTriggerChoices().find((c) => c.kind === "afterMeeting")!;
+      expect(choice.kind === "afterMeeting" && choice.eventId.length).toBeLessThanOrEqual(24);
+      r.brain.setStartTrigger(sprintOf(r), choice);
+      expect((await triggersStored(r))[0].trigger.eventId!.length).toBeLessThanOrEqual(24);
+      tickTo(r, at(28, 10, 5));
+      expect(tickTo(r, at(28, 10, 21))?.text).toBe("As planned: “Plan the next sprint”");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("writes only generic words about plans in the diary, and keeps event ids out of the day's gates", async () => {
+    const TEAM = { uid: "team-secret-id", title: "Secret merger", start: at(28, 10), end: at(28, 11) };
+    const r = await quietRig(meetings(TEAM), 9, 30);
+    try {
+      await r.brain.refreshCalendar(true);
+      const eventId = r.brain.getSnapshot().events[0].id;
+      r.brain.setStartTrigger(sprintOf(r), { kind: "afterMeeting", eventId, title: "Secret merger" });
+      r.brain.setStartTrigger(sprintOf(r), { kind: "appOpen", app: "Figma" });
+      r.brain.setStartTrigger(sprintOf(r), { kind: "afterMeeting", eventId, title: "Secret merger" });
+      tickTo(r, at(28, 10, 1));
+      r.clock.t = at(28, 10, 20);
+      front(r, { ...DOCS, idleSeconds: 150 });
+      r.clock.t = at(28, 11, 1);
+      front(r, DOCS);
+      expect(tickTo(r, at(28, 11, 1))?.text).toContain("is over"); // the question comes before the plan
+      r.brain.dismissBubble(r.brain.getSnapshot().bubble!.id, "closed");
+      expect(tickTo(r, at(28, 11, 2))?.text).toContain("As planned");
+      const text = r.diaryTexts().join("\n");
+      expect(text).not.toContain("Figma");
+      const planLines = r.diaryTexts().filter((t) => /plan/i.test(t)).join("\n");
+      expect(planLines).toContain("Start plan for");
+      expect(planLines).toContain("because your plan: after a meeting");
+      expect(planLines).not.toContain("Secret merger");
+      const gates = Object.keys(r.brain.getSnapshot().life.dayFired).filter((k) => k.startsWith("aftermeeting-"));
+      expect(gates).toHaveLength(1);
+      expect(gates[0]).not.toContain("team-secret-id");
+    } finally {
+      r.brain.stop();
+    }
+  });
+});
+
+describe("Brain v0.4 review: where the pet looks", () => {
+  it("doesn't end a distraction on a sample whose address couldn't be read, nor take that page for the place", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      front(r, REDDIT);
+      r.clock.t += 3 * MIN;
+      front(r, REDDIT);
+      front(r, { app: REDDIT.app, url: null }); // the address isn't there for a second; the title doesn't say Reddit
+      expect(tickTo(r, r.clock.t)?.text ?? "").not.toContain("You were");
+      front(r, REDDIT);
+      r.clock.t += 3 * MIN;
+      front(r, REDDIT);
+      front(r, DOCS);
+      front(r, DOCS);
+      const card = tickTo(r, r.clock.t);
+      expect(card?.text).toContain("Google Chrome — Spec");
+      expect(card?.text).not.toContain("r/aww");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("needs 2 samples in a row away from a distraction to end it", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      front(r, YOUTUBE);
+      r.clock.t += 3 * MIN;
+      front(r, YOUTUBE);
+      front(r, DOCS); // one blip
+      expect(tickTo(r, r.clock.t)?.text ?? "").not.toContain("No rush");
+      front(r, YOUTUBE);
+      front(r, DOCS);
+      front(r, DOCS);
+      expect(tickTo(r, r.clock.t)?.text).toContain("No rush");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("keeps the last readable page as the place while the address is unreadable, but believes a title that stays that way", async () => {
+    const SECRET = { app: { name: "Google Chrome", exe: "chrome.exe", title: "Secret plans - Google Chrome" }, url: null };
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      expect(awayAndBack(r, SECRET, 6)?.text).toContain("Spec");
+    } finally {
+      r.brain.stop();
+    }
+    const stuck = await quietRig(meetings(), 9, 30);
+    try {
+      for (let i = 0; i < 6; i++) front(stuck, SECRET);
+      expect(awayAndBack(stuck, SECRET, 6)?.text).toContain("Secret plans");
+    } finally {
+      stuck.brain.stop();
+    }
+  });
+
+  it("never takes a call for the place, even when the pet starts with one in front", async () => {
+    const clock = { t: at(28, 9) };
+    const backend = createDemoBackend({ now: () => clock.t, persist: false });
+    const brain = await Brain.create(backend, { demo: true, now: () => clock.t, random: () => 0.5 });
+    setLang("en");
+    await brain.start();
+    try {
+      brain.dismissBubble(brain.getSnapshot().bubble?.id ?? -1, "closed");
+      const call = (patch: Partial<SystemSample>): SystemSample => ({ ...ZOOM, idleSeconds: 0, secondsSinceKey: 999, fullscreen: false, appSwitchedAt: clock.t, ...patch });
+      brain.onSample(call({}));
+      brain.onSample(call({ idleSeconds: 310 }));
+      brain.runRules(clock.t);
+      clock.t += 6 * MIN;
+      brain.onSample(call({ idleSeconds: 0 }));
+      brain.onSample(front2(clock, DOCS));
+      brain.recompute();
+      brain.runRules(clock.t);
+      const text = brain.getSnapshot().bubble?.text ?? "";
+      expect(text).toContain("Next up: “Write the weekly report”");
+      expect(text).not.toContain("Zoom");
+    } finally {
+      brain.stop();
+    }
+  });
+
+  it("keeps only the app name of a private window, and the task", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      const secret = { app: { name: "Google Chrome", exe: "chrome.exe", title: "Payroll (InPrivate) - Microsoft Edge" }, url: "https://hr.example.com/payroll" };
+      const b = awayAndBack(r, secret, 6)!;
+      expect(b.text).toContain("Google Chrome");
+      expect(b.text).not.toMatch(/Payroll|hr\.example/);
+      expect(titles(b)).toEqual(["▶ Focus 25'", "Something else"]);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("shows only the task and the app when 'resumeDetails' is off", async () => {
+    const r = await quietRig(meetings(), 9, 30, { prefs: { resumeDetails: false } });
+    try {
+      const b = awayAndBack(r, DOCS, 6)!;
+      expect(b.text).toContain("Google Chrome");
+      expect(b.text).not.toMatch(/Spec|docs\.example/);
+      expect(titles(b)).toEqual(["▶ Focus 25'", "Something else"]);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("says the task is only the next one when it is, and 'you were on' when it is one you acted on", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      const first = awayAndBack(r, DOCS, 6)!;
+      expect(first.text).toContain("Next up: “Write the weekly report” · you were in Google Chrome — Spec");
+      r.brain.pickAction(first.id, 2);
+      await r.brain.reschedule(sprintOf(r), "today");
+      r.clock.t += 31 * MIN;
+      expect(awayAndBack(r, DOCS, 6)?.text).toContain("You were on: “Plan the next sprint” · in Google Chrome — Spec");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("labels Reopen with the host and says so kindly when the page can't be opened", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      vi.spyOn(r.backend.system, "openUrl").mockRejectedValue(new Error("refused"));
+      const b = awayAndBack(r, DOCS, 6)!;
+      expect(b.actions[0].title).toBe("Reopen ↗ docs.example.com");
+      r.brain.pickAction(b.id, 0);
+      await vi.waitFor(() => expect(r.brain.getSnapshot().bubble?.text).toContain("Couldn't reopen that page"));
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("leaves secret-looking parameters out of what Reopen opens", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      const open = vi.spyOn(r.backend.system, "openUrl").mockResolvedValue();
+      const b = awayAndBack(r, { ...DOCS, url: "https://docs.example.com/spec?id=7&token=abc&code=1#x" }, 6)!;
+      r.brain.pickAction(b.id, 0);
+      expect(open).toHaveBeenCalledExactlyOnceWith("https://docs.example.com/spec?id=7");
+    } finally {
+      r.brain.stop();
+    }
+  });
+});
+
+const front2 = (clock: { t: number }, x: Partial<SystemSample>): SystemSample => ({
+  app: null,
+  url: null,
+  idleSeconds: 0,
+  secondsSinceKey: 999,
+  fullscreen: false,
+  appSwitchedAt: clock.t,
+  ...x,
+});
+
+describe("Brain v0.4 review: coming back and the focus", () => {
+  it("settles a return that happened during a meeting then, not at its end", async () => {
+    const r = await quietRig(meetings({ uid: "m", title: "Planning", start: at(28, 10), end: at(28, 11) }), 9, 40);
+    try {
+      front(r, { ...DOCS, idleSeconds: 310 });
+      r.brain.runRules(r.clock.t);
+      r.clock.t = at(28, 10, 5);
+      front(r, { ...ZOOM, idleSeconds: 0 });
+      tickTo(r, at(28, 10, 5));
+      const came = r.diaryTexts("system").filter((t) => t.includes("You came back after"));
+      expect(came).toHaveLength(1);
+      expect(came[0]).toContain("after 30 minutes");
+      r.clock.t = at(28, 11, 1);
+      front(r, DOCS);
+      const q = tickTo(r, at(28, 11, 1))!;
+      expect(q.text).toContain("is over");
+      r.brain.pickAction(q.id, 1);
+      const card = tickTo(r, at(28, 11, 2))!;
+      expect(card.text).toContain("Meeting's done");
+      expect(card.text).not.toContain("Welcome back");
+      expect(r.diaryTexts("system").filter((t) => t.includes("You came back after"))).toHaveLength(1);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("forgets a return when you start a focus session before the next heartbeat, so no stale card comes later", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      front(r, { ...DOCS, idleSeconds: 310 });
+      r.brain.runRules(r.clock.t);
+      r.clock.t += 6 * MIN;
+      front(r, DOCS);
+      r.brain.startFocus(r.brain.getSnapshot().next!, 25);
+      r.brain.dismissBubble(r.brain.getSnapshot().bubble!.id, "closed");
+      r.clock.t += 26 * MIN;
+      front(r, DOCS);
+      r.brain.tick();
+      r.brain.dismissBubble(r.brain.getSnapshot().bubble!.id, "closed");
+      await vi.waitFor(() => expect(r.brain.getSnapshot().loading).toBe(false));
+      r.clock.t += 6 * MIN;
+      r.brain.tick();
+      expect(r.brain.getSnapshot().bubble?.text ?? "").not.toMatch(/Welcome back|Next up|You were/);
+      expect(r.diaryTexts("system").some((t) => t.includes("You came back after"))).toBe(false);
+    } finally {
+      r.brain.stop();
+    }
+  });
+});
+
+describe("Brain v0.4 review: the 2-minute starter, the breather and the related tasks", () => {
+  it("offers no Focus (or Done) when the task is no longer open at the end of the starter", async () => {
+    const r = await quietRig(meetings(), 9, 30);
+    try {
+      const task = sprintOf(r);
+      r.brain.startTwoMinutes(task);
+      // Finished in the Todoist app meanwhile: the next sync no longer lists it.
+      await r.backend.todoist.close(task.id);
+      await r.brain.refresh();
+      r.clock.t += 2 * MIN + 1000;
+      r.brain.tick();
+      const b = r.brain.getSnapshot().bubble!;
+      expect(b.text).toContain("Two minutes done");
+      expect(titles(b)).toEqual(["That's enough"]);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("shortens the breather to the time before the next meeting, and leaves it out under 3 minutes", async () => {
+    const TEAM = { uid: "team", title: "Team sync", start: at(28, 10), end: at(28, 11) };
+    const attended = async (next: { uid: string; title: string; start: number; end: number }) => {
+      const r = await quietRig(meetings(TEAM, next), 9, 30);
+      tickTo(r, at(28, 10, 1));
+      r.clock.t = at(28, 10, 20);
+      front(r, { ...DOCS, idleSeconds: 150 });
+      r.clock.t = at(28, 11, 1);
+      front(r, DOCS);
+      let b = tickTo(r, at(28, 11, 1))!;
+      // 5 minutes or less to the next meeting: its own reminder comes first.
+      if (b.text.startsWith("📅")) {
+        r.brain.dismissBubble(b.id, "closed");
+        b = tickTo(r, at(28, 11, 1))!;
+      }
+      return { r, b };
+    };
+    const four = await attended({ uid: "n", title: "Design", start: at(28, 11, 5), end: at(28, 12) });
+    try {
+      expect(four.b.text).toContain("a 4-minute breather");
+      expect(titles(four.b)).toEqual(["＋ Next step", "☕ 4-min breather", "Nothing"]);
+      four.r.brain.pickAction(four.b.id, 1);
+      expect(four.r.brain.getSnapshot().focus).toMatchObject({ isBreak: true, minutes: 4 });
+    } finally {
+      four.r.brain.stop();
+    }
+    const three = await attended({ uid: "n", title: "Design", start: at(28, 11, 4), end: at(28, 12) });
+    try {
+      expect(titles(three.b)).toEqual(["＋ Next step", "☕ 3-min breather", "Nothing"]);
+    } finally {
+      three.r.brain.stop();
+    }
+    const two = await attended({ uid: "n", title: "Design", start: at(28, 11, 3), end: at(28, 12) });
+    try {
+      expect(two.b.text).toContain("is over");
+      expect(two.b.text).not.toContain("breather");
+      expect(titles(two.b)).toEqual(["＋ Next step", "Nothing"]);
+    } finally {
+      two.r.brain.stop();
+    }
+  });
+
+  it("lists related tasks from the ranked list, so the higher-priority one wins a tie", async () => {
+    const r = await rig({
+      prefs: { bubbleGap: 0 },
+      setup: meetings({ uid: "abc", title: "Client renewal", start: at(28, 9, 20), end: at(28, 10) }),
+    });
+    try {
+      await r.brain.add("Client invoice", "today", 2); // P3
+      await r.brain.add("Client contract", "today", 4); // P1, added last
+      r.clock.t = at(28, 9, 16);
+      r.brain.recompute();
+      r.brain.runRules(r.clock.t);
+      const b = r.brain.getSnapshot().bubble!;
+      expect(b.text).toContain("Related: “Client contract”");
+    } finally {
+      r.brain.stop();
+    }
+  });
+});
+
+describe("Brain v0.4 review: stored plans", () => {
+  it("saves the pruned list when it started with yesterday's plans", async () => {
+    const r = await rig({
+      setup: (b) => {
+        void b.storage.save("triggers", [
+          { taskId: "4", day: "2026-10-27", trigger: { kind: "afterLunch" }, fired: false },
+          { taskId: "1", day: "2026-10-28", trigger: { kind: "afterLunch" }, fired: false },
+        ]);
+      },
+    });
+    try {
+      const stored = await triggersStored(r);
+      expect(stored.map((t) => t.taskId)).toEqual(["1"]);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("says in the diary when the plans can't be read, and when they can't be saved", async () => {
+    const clock = { t: at(28, 9) };
+    const backend = createDemoBackend({ now: () => clock.t, persist: false });
+    const load = backend.storage.load.bind(backend.storage);
+    backend.storage.load = async (key) => {
+      if (key === "triggers") throw new Error("locked");
+      return load(key);
+    };
+    const brain = await Brain.create(backend, { demo: true, now: () => clock.t, random: () => 0.5 });
+    setLang("en");
+    await brain.start();
+    try {
+      await vi.waitFor(async () => expect((await diaryOnDisk(backend)).some((t) => t.includes("Couldn't read saved data"))).toBe(true));
+      const save = vi.spyOn(backend.storage, "save");
+      brain.setStartTrigger(brain.getSnapshot().day.today[0], { kind: "afterLunch" });
+      expect(save).not.toHaveBeenCalledWith("triggers", expect.anything());
+      await vi.waitFor(async () => expect((await diaryOnDisk(backend)).some((t) => t.includes("start plans won't be saved"))).toBe(true));
+    } finally {
+      brain.stop();
+    }
+    const ok = createDemoBackend({ now: () => clock.t, persist: false });
+    ok.storage.save = async (key) => {
+      if (key === "triggers") throw new Error("disk full");
+    };
+    const again = await Brain.create(ok, { demo: true, now: () => clock.t, random: () => 0.5 });
+    await again.start();
+    try {
+      again.setStartTrigger(again.getSnapshot().day.today[0], { kind: "afterLunch" });
+      await vi.waitFor(async () => expect((await diaryOnDisk(ok)).some((t) => t.includes("Couldn't save your start plans"))).toBe(true));
+    } finally {
+      again.stop();
     }
   });
 });
