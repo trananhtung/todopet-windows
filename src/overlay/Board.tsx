@@ -2,15 +2,17 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Ref } 
 import type { Backend } from "../backend/types";
 import { errorMessage, type Brain, type BrainState, type DueChoice } from "../core/brain";
 import { currentEvent, freeMinutes } from "../core/calendar";
-import { atHour, daysAgo, dayKey, hoursText, timeString } from "../core/dates";
+import { atHour, daysAgo, dayKey, hoursText, parseDate, timeString } from "../core/dates";
 import { getLang, L, plural } from "../core/l10n";
 import * as life from "../core/life";
 import * as lines from "../core/lines";
 import { dueDay, dueTime, isRecurring, planned, taskTitle, uiPriority, type TodoTask } from "../core/models";
 import { moodEmoji, moodLabel } from "../core/mood";
+import { isWorkday } from "../core/prefs";
 import { ACCESSORIES, SPECIES_IDS } from "../core/types";
 import { defaultPose, renderPet, speciesInfo } from "../pets";
 import { Icon, type IconName } from "../ui/icons";
+import { localeTag } from "../ui/lang";
 import type { BoardRequest } from "./App";
 import type { BoardPlacement } from "./placement";
 import { Popover } from "./Popover";
@@ -169,6 +171,7 @@ function Header({ s, backend, onClose, onWardrobe }: { s: BrainState; backend: B
         <IconButton icon="close" label={L("Đóng (Esc)", "Close (Esc)")} onClick={onClose} />
       </div>
       {s.hasToken && !s.authError && <Stats s={s} />}
+      {s.hasToken && !s.authError && <RepairLine s={s} />}
       {s.loading && <span className="sr-only">{L("Đang đồng bộ", "Syncing")}</span>}
     </header>
   );
@@ -182,7 +185,28 @@ function Stats({ s }: { s: BrainState }) {
   const base = life.STAGE_THRESHOLDS[stage];
   const satiety = Math.round(s.life.satiety);
   const streak = s.life.streak;
+  const snacks = s.life.snacks;
+  const dirt = s.life.dirt;
   const days = (n: number) => plural(n, "ngày", "day", "days");
+  const quest = s.life.repair;
+  const questToday = life.activeRepair(s.life) !== null;
+  const streakTitle = [
+    L(`Chuỗi ${days(streak)}: mỗi ngày làm việc xong ít nhất 1 việc.`, `${days(streak)} in a row with at least 1 task done.`),
+    L("Ngày nghỉ, ngày tắt máy và ngày lịch họp kín không làm đứt chuỗi.", "Days off, days the PC is off and packed meeting days never break it."),
+    L(
+      `🍪 Túi bánh: ${snacks}/${life.MAX_SNACKS}. Lỡ một ngày thì pet ăn 1 bánh để giữ chuỗi; ngày nào đạt mục tiêu được thêm bánh.`,
+      `🍪 Snacks: ${snacks}/${life.MAX_SNACKS}. Miss a day and the pet eats one to keep your streak; hit your daily goal to earn more.`,
+    ),
+    quest &&
+      (questToday
+        ? L(`🔧 Xong ${life.REPAIR_TASKS} việc hôm nay để nối lại chuỗi ${quest.streak} ngày (${Math.min(done, life.REPAIR_TASKS)}/${life.REPAIR_TASKS}).`, `🔧 Finish ${life.REPAIR_TASKS} tasks today to bring back your ${quest.streak}-day streak (${Math.min(done, life.REPAIR_TASKS)}/${life.REPAIR_TASKS}).`)
+        : L(`🔧 Xong ${life.REPAIR_TASKS} việc vào ngày làm việc tới (đến hết ${shortDay(quest.until)}) để nối lại chuỗi ${quest.streak} ngày.`, `🔧 Finish ${life.REPAIR_TASKS} tasks on your next workday (by ${shortDay(quest.until)}) to bring back your ${quest.streak}-day streak.`)),
+    s.stats && L(`Chuỗi Todoist: ${days(s.stats.streak)}.`, `Todoist streak: ${days(s.stats.streak)}.`),
+    dirt > 0 && L(`🪰 Bẩn ${dirt} lớp vì lỡ ${dirt} ngày; mỗi việc xong tắm sạch 1 lớp.`, `🪰 ${plural(dirt, "", "layer", "layers").trim()} of dirt from missed days; each finished task washes one off.`),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const stash = [snacks > 0 ? `🍪${snacks > 1 ? `×${snacks}` : ""}` : "", dirt > 0 ? `🪰${dirt > 1 ? `×${dirt}` : ""}` : ""].filter(Boolean).join(" ") || undefined;
   return (
     <ul className="stats" aria-label={L("Tiến độ", "Progress")}>
       <Stat
@@ -216,15 +240,36 @@ function Stats({ s }: { s: BrainState }) {
         icon="flame"
         tone="hot"
         value={String(streak)}
+        // Compact, to leave room for the snack stash and the flies: the flame and the tooltip say what it is.
         label={L("ngày", streak === 1 ? "day" : "days")}
-        extra={s.life.dirt > 0 ? `🪰${s.life.dirt > 1 ? `×${s.life.dirt}` : ""}` : undefined}
-        title={
-          L(`Chuỗi ngày đạt mục tiêu: ${days(streak)}`, `Goal streak: ${days(streak)}`) +
-          (s.stats ? L(` · chuỗi Todoist: ${days(s.stats.streak)}`, ` · Todoist streak: ${days(s.stats.streak)}`) : "") +
-          (s.life.dirt > 0 ? L(` · bẩn ${s.life.dirt} lớp (ngày lỡ mục tiêu)`, ` · ${plural(s.life.dirt, "", "layer", "layers").trim()} of dirt from missed days`) : "")
-        }
+        labelHidden
+        extra={stash}
+        title={streakTitle}
       />
     </ul>
+  );
+}
+
+/** "12 Nov" / "12 thg 11" for a day key. */
+function shortDay(key: string): string {
+  const d = parseDate(key);
+  return d ? d.toLocaleDateString(localeTag(getLang()), { day: "numeric", month: "short" }) : key;
+}
+
+/** Today's repair quest, when there is one: "Finish 2 tasks today to bring back your 6-day streak (1/2)". */
+function RepairLine({ s }: { s: BrainState }) {
+  const quest = life.activeRepair(s.life);
+  if (!quest) return null;
+  const need = life.REPAIR_TASKS;
+  const have = Math.min(s.day.completed.length, need);
+  return (
+    <div className="repair-line">
+      <Icon name="flame" size={14} />
+      <span className="repair-text">{L(`Xong ${need} việc hôm nay để nối lại chuỗi ${quest.streak} ngày`, `Finish ${need} tasks today to bring back your ${quest.streak}-day streak`)}</span>
+      <b className="repair-count" aria-label={L(`đã xong ${have} trên ${need}`, `${have} of ${need} done`)}>
+        {have}/{need}
+      </b>
+    </div>
   );
 }
 
@@ -236,11 +281,14 @@ function Stat({
   title,
   meter,
   extra,
+  labelHidden,
 }: {
   icon: IconName;
   tone: string;
   value: string;
   label?: string;
+  /** Read out but not shown. */
+  labelHidden?: boolean;
   title: string;
   meter?: number;
   extra?: string;
@@ -249,7 +297,7 @@ function Stat({
     <li className={`stat tone-${tone}`} title={title}>
       <Icon name={icon} size={14} />
       <b>{value}</b>
-      {label && <span className="stat-label">{label}</span>}
+      {label && <span className={labelHidden ? "sr-only" : "stat-label"}>{label}</span>}
       {extra && <span aria-hidden>{extra}</span>}
       {meter !== undefined && (
         <span className="stat-meter" aria-hidden>
@@ -302,11 +350,30 @@ function Connect({ brain, backend, error, authError }: { brain: Brain; backend: 
   );
 }
 
+/** "Take today off": shown on days that would be workdays (the demo always works), pressed on a rest day. */
+function DayOffToggle({ brain, s }: { brain: Brain; s: BrainState }) {
+  const now = new Date();
+  const dayOff = s.prefs.restDays.includes(dayKey(now));
+  if (!dayOff && !s.isDemo && !isWorkday({ ...s.prefs, restDays: [] }, now)) return null;
+  return (
+    <button
+      className="btn small day-off"
+      onClick={() => void brain.takeDayOff(!dayOff)}
+      aria-pressed={dayOff}
+      title={dayOff ? L("Hôm nay là ngày nghỉ. Bấm để làm việc lại.", "Today is a day off. Tap to work after all.") : L("Không nhắc việc hôm nay, chuỗi giữ nguyên", "No reminders today, and your streak stays put")}
+    >
+      <Icon name="leaf" size={14} />
+      {L("Nghỉ hôm nay", "Take today off")}
+    </button>
+  );
+}
+
 function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; backend: Backend; s: BrainState; focusAdd: boolean; seq: number; onSplit: (t: TodoTask) => void }) {
   const day = s.day;
   const stuckIds = new Map(s.stuck.map((x) => [x.task.id, x.days]));
   const done = day.completed.length;
-  const toPlan = s.target - planned(day);
+  const dayOff = s.prefs.restDays.includes(dayKey(new Date()));
+  const toPlan = dayOff ? 0 : s.target - planned(day);
   // One confirmation line under the add form, for adds and for moves.
   const [note, setNote] = useState<Note | null>(null);
   return (
@@ -341,6 +408,7 @@ function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; bac
           </h2>
           <span className="spacer" />
           {toPlan > 0 && <span className="chip stuck">{L(`thiếu ${toPlan} việc`, `${toPlan} to plan`)}</span>}
+          <DayOffToggle brain={brain} s={s} />
         </div>
         {day.today.length === 0 ? (
           <div className="tasks empty">{done > 0 ? L("Xong hết rồi! 🎉", "All done! 🎉") : L("Chưa có việc nào. Thêm 3 việc quan trọng nhất nhé.", "Nothing yet. Add your 3 most important tasks.")}</div>
@@ -857,6 +925,10 @@ function Wardrobe({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: (
   const days = Array.from({ length: 30 }, (_, i) => dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29 + i)));
   const perfect = new Set(s.life.perfectDays);
   const locked = SPECIES_IDS.map(speciesInfo).filter((x) => x.unlock);
+  const progress = (a: (typeof ACCESSORIES)[number]) => {
+    const p = life.accessoryProgress(a, s.life);
+    return `${p.have}/${p.need}`;
+  };
   return (
     <div className="sheet">
       <div>
@@ -881,7 +953,7 @@ function Wardrobe({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: (
             >
               <span className="emoji">{life.accessoryEmoji(a)}</span>
               {life.accessoryName(a)}
-              <small>{has ? (wearing ? L("Đang đeo", "Wearing") : L("Bấm để đeo", "Tap to wear")) : life.accessoryRequirement(a)}</small>
+              <small>{has ? (wearing ? L("Đang đeo", "Wearing") : L("Bấm để đeo", "Tap to wear")) : `${life.accessoryRequirement(a)} (${progress(a)})`}</small>
             </button>
           );
         })}
@@ -902,8 +974,9 @@ function Wardrobe({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: (
           );
         })}
       </div>
+      <StickerPage s={s} />
       <h2>
-        <Icon name="star" size={18} /> {L("Sổ sticker (30 ngày)", "Sticker book (30 days)")}
+        <Icon name="calendar" size={18} /> {L("Ngày hoàn hảo (30 ngày)", "Perfect days (last 30)")}
       </h2>
       <div className="stickers" role="img" aria-label={L(`${s.life.perfectDays.length} ngày hoàn hảo`, `${plural(s.life.perfectDays.length, "", "perfect day", "perfect days").trim()}`)}>
         {days.map((d) => (
@@ -919,6 +992,38 @@ function Wardrobe({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: (
         )}
       </div>
     </div>
+  );
+}
+
+/** The sticker page being filled: 2 gift stickers, one per perfect day, and the empty slots left until the reward. */
+function StickerPage({ s }: { s: BrainState }) {
+  const { stickerPage: page, pageFilled: filled } = s.life;
+  const earned = Math.max(0, filled - life.PAGE_GIFTS);
+  // The page's own stickers are the latest perfect days.
+  const dates = earned > 0 ? s.life.perfectDays.slice(-earned) : [];
+  const left = life.PAGE_SIZE - filled;
+  const slots = Array.from({ length: life.PAGE_SIZE }, (_, i) => (i < Math.min(filled, life.PAGE_GIFTS) ? "gift" : i < filled ? "star" : "empty"));
+  const perfectHelp = L("Ngày hoàn hảo: đạt mục tiêu và xong hết việc đã lên kế hoạch.", "A perfect day: you hit your goal and finished everything you planned.");
+  return (
+    <>
+      <h2>
+        <Icon name="star" size={18} /> {L(`Trang sticker ${page}`, `Sticker page ${page}`)}
+      </h2>
+      <div className="sticker-page" role="img" aria-label={L(`Trang ${page}: ${filled} trên ${life.PAGE_SIZE} ô đã dán`, `Page ${page}: ${filled} of ${life.PAGE_SIZE} stickers`)}>
+        {slots.map((kind, i) => {
+          const date = kind === "star" ? dates[i - life.PAGE_GIFTS] : undefined;
+          return (
+            <span key={i} className={`slot ${kind}`} title={kind === "gift" ? L("Quà tặng 🎁", "A gift 🎁") : date ?? (kind === "star" ? "🌟" : undefined)}>
+              {kind === "gift" ? "🎁" : kind === "star" ? "🌟" : ""}
+            </span>
+          );
+        })}
+      </div>
+      <div className="muted page-note" title={perfectHelp}>
+        {filled}/{life.PAGE_SIZE} ·{" "}
+        {L(`còn ${left} ngày hoàn hảo nữa là có quà (+50 XP, 🍪)`, `${plural(left, "", "more perfect day", "more perfect days").trim()} for a gift (+50 XP, 🍪)`)}
+      </div>
+    </>
   );
 }
 

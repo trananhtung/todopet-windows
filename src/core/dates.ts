@@ -101,6 +101,16 @@ export function nextDayKey(key: string): string {
   return dayKey(new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 12));
 }
 
+/** The day key `n` days after `key` (before it when negative); "9999" when `key` does not parse. */
+export function addDays(key: string, n: number): string {
+  const date = parseDate(key);
+  if (!date) return "9999";
+  return dayKey(new Date(date.getFullYear(), date.getMonth(), date.getDate() + n, 12));
+}
+
+/** True for a real "yyyy-MM-dd" day ("2026-02-30" and "2026-11-2" are not). */
+export const isDayKey = (x: unknown): x is string => typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x) && parseDate(x) !== null;
+
 /** Strips Todoist markdown so titles read nicely in bubbles. */
 export function plainText(s: string): string {
   return s

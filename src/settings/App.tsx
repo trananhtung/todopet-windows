@@ -165,9 +165,10 @@ function Settings({ backend, initial }: { backend: Backend; initial: Loaded }) {
     if (saver.busy) return;
     const raw = await backend.storage.load<unknown>("prefs").catch(() => null);
     if (raw === null || saver.busy) return;
-    const loaded = prefsFromJson(raw, latest.current.firstLaunch);
+    const now = Date.now();
+    const loaded = prefsFromJson(raw, latest.current.firstLaunch, now);
     // Our own save coming back (stored text may have stray spaces that loading trims): keep what's on screen.
-    if (sameJson(loaded, prefsFromJson(saver.lastSaved, latest.current.firstLaunch))) return;
+    if (sameJson(loaded, prefsFromJson(saver.lastSaved, latest.current.firstLaunch, now))) return;
     saver.reset(loaded);
     latest.current = loaded;
     setPrefs(loaded);

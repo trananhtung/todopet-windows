@@ -226,9 +226,44 @@ export const levelUp = (s: StageIndex) => L(`⬆️ Mình lớn lên thành ${st
 export const unlocked = (items: Accessory[]) => L("🎁 Mở khoá: ", "🎁 Unlocked: ") + items.map((a) => `${accessoryEmoji(a)} ${accessoryName(a)}`).join(", ");
 export const speciesUnlocked = (emoji: string, name: string) =>
   L(`🥚 Bạn mới mở khoá một bạn mới: ${emoji} ${name}! Đổi trong Cài đặt nhé.`, `🥚 New friend unlocked: ${emoji} ${name}! Switch in Settings.`);
-export const streak = (n: number) => L(`🔥 Chuỗi ${n} ngày đạt mục tiêu — giữ nhé!`, `🔥 ${n}-day streak — keep it going!`);
+export const streak = (n: number) => L(`🔥 Chuỗi ${n} ngày — giữ nhé!`, `🔥 ${n}-day streak — keep it going!`);
 export const dirty = (dirt: number) =>
   L(`🪰 Mình bẩn quá… ${dirt} ngày rồi bạn không làm gì. Xong 1 việc để tắm cho mình nhé.`, `🪰 I'm filthy… ${n(dirt, "lazy day")}. Finish a task to give me a bath.`);
+
+// Forgiving streaks: one kind word the morning after, never a scolding. `when` is "yesterday" / "3 days ago".
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const snacksLeft = (left: number) =>
+  left > 0 ? L(` Còn ${left} bánh trong túi.`, ` ${left} left in the stash.`) : L(" Hết bánh rồi, ngày nào đạt mục tiêu là có thêm.", " That was the last one; hit your daily goal to earn another.");
+
+export const dayFrozen = (when: string, streak: number, left: number) =>
+  (streak > 0
+    ? L(`🍪 ${cap(when)} bạn chưa xong việc nào, nên mình ăn một bánh để giữ chuỗi 🔥${streak} cho bạn.`, `🍪 Nothing got done ${when}, so I ate a snack to keep your 🔥${streak} streak safe.`)
+    : L(`🍪 ${cap(when)} bạn chưa xong việc nào, nên mình ăn một bánh cho đỡ buồn — vẫn sạch sẽ nhé.`, `🍪 Nothing got done ${when}, so I had a snack instead of getting grubby.`)) + snacksLeft(left);
+
+export const dayExcused = (when: string, streak: number) =>
+  L(`📅 ${cap(when)} lịch họp kín mít nên mình không tính ngày đó.`, `📅 Your calendar was packed ${when}, so that day doesn't count.`) +
+  (streak > 0 ? L(` Chuỗi 🔥${streak} vẫn nguyên nhé.`, ` Your 🔥${streak} streak is safe.`) : "");
+
+export const dayBroken = (when: string, lost: number, tasks: number, today: boolean) =>
+  L(
+    `🌱 Chuỗi ${lost} ngày tạm đứt ${when} — không sao đâu! Xong ${tasks} việc ${today ? "hôm nay" : "vào ngày làm việc tới"} là mình nối lại cho bạn.`,
+    `🌱 Your ${lost}-day streak slipped ${when}. No worries! Finish ${tasks} tasks ${today ? "today" : "on your next workday"} and I'll bring it back.`,
+  );
+
+export const pageDone = (page: number, snack: boolean) =>
+  L(
+    `📒 Trang sticker ${page} đầy rồi! +50 XP${snack ? " và một 🍪 cho túi" : ""}. Trang mới tặng sẵn 2 sticker 🎁.`,
+    `📒 Sticker page ${page} is full! +50 XP${snack ? " and a 🍪 for the stash" : ""}. The new page starts with 2 free stickers 🎁.`,
+  );
+
+export const streakRepaired = (n: number) => L(`🎉 Chuỗi 🔥${n} đã được nối lại! Hôm nay cũng được tính nữa.`, `🎉 Your 🔥${n} streak is back! Today counts too.`);
+
+export const dayOff = (on: boolean, streak: number) =>
+  on
+    ? L("🌿 Hôm nay nghỉ nhé! Mình không nhắc gì đâu", "🌿 Day off! No reminders today") +
+      (streak > 0 ? L(`, chuỗi 🔥${streak} vẫn nguyên.`, `, and your 🔥${streak} streak stays put.`) : ".")
+    : L("💼 Quay lại làm việc rồi! Mình nhắc như thường nhé.", "💼 Back to work! I'll keep you on track as usual.");
 
 export function hungry(satiety: number, next: TodoTask | null): string {
   const n = next ? L(` Xong ${q(next)} cho mình ăn với 🥺`, ` Finish ${q(next)} and feed me 🥺`) : "";

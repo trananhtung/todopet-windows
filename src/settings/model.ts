@@ -3,7 +3,8 @@ import type { BusEvent } from "../backend/types";
 import { BackendError } from "../backend/types";
 import { L } from "../core/l10n";
 import type { LifeState } from "../core/life";
-import type { Prefs } from "../core/prefs";
+import { addDays, daysBetween } from "../core/dates";
+import { MAX_REST_RANGE, type Prefs } from "../core/prefs";
 
 export const SECTION_IDS = ["pet", "todoist", "workday", "focus", "distractions", "calendar", "postponed", "behavior", "about"] as const;
 export type SectionId = (typeof SECTION_IDS)[number];
@@ -101,7 +102,8 @@ export function changedEvents(prev: Prefs, next: Prefs): BusEvent[] {
   const keys = new Set([...Object.keys(prev), ...Object.keys(next)]) as Set<keyof Prefs>;
   let other = false;
   for (const k of keys) {
-    if (k === "species" || prev[k] === next[k]) continue;
+    // By value: lists (rest days) come back from a save as new arrays.
+    if (k === "species" || prev[k] === next[k] || JSON.stringify(prev[k]) === JSON.stringify(next[k])) continue;
     other = true;
     break;
   }
@@ -147,3 +149,34 @@ export function workHoursProblem(p: Pick<Prefs, "workStart" | "workEnd" | "planD
 
 /** "8" → "08:00". */
 export const hourLabel = (h: number) => `${String(h).padStart(2, "0")}:00`;
+
+export interface RestRun {
+  from: string;
+  to: string;
+  days: string[];
+}
+
+/** Rest days from `today` on, grouped into runs of consecutive days ("24–28 Nov"). */
+export function restRuns(days: readonly string[], today: string): RestRun[] {
+  const runs: RestRun[] = [];
+  for (const d of [...days].sort()) {
+    if (d < today) continue;
+    const last = runs.at(-1);
+    if (last && addDays(last.to, 1) === d) {
+      last.to = d;
+      last.days.push(d);
+    } else {
+      runs.push({ from: d, to: d, days: [d] });
+    }
+  }
+  return runs;
+}
+
+/** Why a new rest-day range can't be added, or null (also while a date is still empty). */
+export function restRangeProblem(from: string, to: string, today: string): string | null {
+  if (!from || !to) return null;
+  const [a, b] = from <= to ? [from, to] : [to, from];
+  if (a < today) return L("Chỉ thêm được ngày nghỉ từ hôm nay trở đi.", "Days off can start today at the earliest.");
+  if (daysBetween(a, b) + 1 > MAX_REST_RANGE) return L(`Mỗi lần thêm tối đa ${MAX_REST_RANGE} ngày.`, `Add up to ${MAX_REST_RANGE} days at a time.`);
+  return null;
+}

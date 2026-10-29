@@ -12,6 +12,8 @@ import {
   hourLabel,
   listItems,
   parseBounded,
+  restRangeProblem,
+  restRuns,
   secretErrorText,
   sectionFromHash,
   unlockProgress,
@@ -97,6 +99,9 @@ describe("changedEvents", () => {
 
   it("says nothing when nothing changed", () => {
     expect(changedEvents(base, { ...base })).toEqual([]);
+    // Lists compare by value: a save hands back a new array.
+    expect(changedEvents({ ...base, restDays: ["2026-11-02"] }, { ...base, restDays: ["2026-11-02"] })).toEqual([]);
+    expect(changedEvents(base, { ...base, restDays: ["2026-11-02"] })).toEqual([{ type: "prefs-changed" }]);
   });
 
   it("uses species-changed for the species alone", () => {
@@ -109,6 +114,26 @@ describe("changedEvents", () => {
       { type: "species-changed" },
       { type: "prefs-changed" },
     ]);
+  });
+});
+
+describe("rest days", () => {
+  it("groups upcoming rest days into runs of consecutive days", () => {
+    const days = ["2026-10-28", "2026-10-30", "2026-10-31", "2026-11-01", "2026-11-05"];
+    expect(restRuns(days, "2026-10-29")).toEqual([
+      { from: "2026-10-30", to: "2026-11-01", days: ["2026-10-30", "2026-10-31", "2026-11-01"] },
+      { from: "2026-11-05", to: "2026-11-05", days: ["2026-11-05"] },
+    ]);
+    expect(restRuns([], "2026-10-29")).toEqual([]);
+  });
+
+  it("flags ranges that start in the past or run past 30 days", () => {
+    setLang("en");
+    expect(restRangeProblem("2026-10-30", "2026-11-02", "2026-10-29")).toBeNull();
+    expect(restRangeProblem("2026-11-02", "2026-10-30", "2026-10-29")).toBeNull();
+    expect(restRangeProblem("2026-10-28", "2026-10-30", "2026-10-29")).toContain("today");
+    expect(restRangeProblem("2026-11-01", "2026-12-15", "2026-10-29")).toContain("30 days");
+    expect(restRangeProblem("", "2026-11-02", "2026-10-29")).toBeNull();
   });
 });
 

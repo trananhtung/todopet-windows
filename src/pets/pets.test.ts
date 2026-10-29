@@ -64,7 +64,8 @@ describe("species registry", () => {
     expect(speciesInfo("bee").unlock).toMatchObject({ kind: "tasks", value: 20 });
     expect(speciesInfo("dragon").unlock).toMatchObject({ kind: "streak", value: 7 });
     expect(speciesInfo("unicorn").unlock).toMatchObject({ kind: "tasks", value: 50 });
-    expect(speciesInfo("dragon").unlock?.label.vi).toBe("Đạt mục tiêu 7 ngày liền");
+    expect(speciesInfo("dragon").unlock?.label.vi).toBe("Giữ chuỗi 7 ngày");
+    expect(speciesInfo("dragon").unlock?.label.en).toBe("Keep a 7-day streak");
   });
 
   it("uses the gaits from the spec", () => {

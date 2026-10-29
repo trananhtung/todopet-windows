@@ -13,7 +13,7 @@ import {
   type CalEvent,
   type SlotSuggestion,
 } from "./calendar";
-import { atHour, dayKey, parseDate, shortText, startOfDay, timeString, utcString } from "./dates";
+import { addDays, atHour, dayKey, daysAgo, parseDate, shortText, startOfDay, timeString, utcString } from "./dates";
 import { Diary } from "./diary";
 import { L, langFromLocale, plural, setLang } from "./l10n";
 import * as life from "./life";
@@ -36,7 +36,7 @@ import {
   type TodoTask,
 } from "./models";
 import { defaultMoodInputs, evaluateMood, moodEmoji, moodLabel, type MoodReason } from "./mood";
-import { effectiveClaudeModel, effectiveFilter, isWorkday, prefsFromJson, type Prefs } from "./prefs";
+import { effectiveClaudeModel, effectiveFilter, isRestDay, isWorkday, prefsFromJson, type Prefs } from "./prefs";
 import { appRules, currentDistraction, siteRules } from "./sites";
 import { findStuck, pretendSeen, recordSeen, type SeenLog, type StuckTask } from "./stuck";
 import type { Accessory, CelebrationKind, Lang, Mood, SpeciesId } from "./types";
@@ -214,6 +214,9 @@ export class Brain {
   /** Demo controls: a mood shown for a few seconds while a stunt plays. */
   private demoMood: { mood: Mood; until: number } | null = null;
   private filterTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Kind words that wait until you're around: how the last day was settled, and a repaired streak. */
+  private dayNote: string | null = null;
+  private repairNote: string | null = null;
 
   private constructor(
     readonly backend: Backend,
@@ -270,7 +273,7 @@ export class Brain {
       loadRetrying<SeenLog>(backend, "stuck"),
       backend.system.systemLocale().catch(() => "en"),
     ]);
-    const prefs = prefsFromJson(p.ok ? p.value : null, now);
+    const prefs = prefsFromJson(p.ok ? p.value : null, now, now);
     // A failed read (antivirus scanning at logon…) is not a missing file: only a missing file gets defaults saved.
     if (p.ok && p.value === null && !opts.demo) await backend.storage.save("prefs", prefs).catch(() => undefined);
     setLang(prefs.lang ?? langFromLocale(locale));
@@ -429,7 +432,7 @@ export class Brain {
     const raw = await this.backend.storage.load<unknown>("prefs").catch(() => null);
     const locale = await this.backend.system.systemLocale().catch(() => "en");
     const before = this.state.prefs;
-    const prefs = prefsFromJson(raw ?? before, before.firstLaunch);
+    const prefs = prefsFromJson(raw ?? before, before.firstLaunch, this.now());
     setLang(prefs.lang ?? langFromLocale(locale));
     this.diary.enabled = prefs.keepLog;
     this.set({ prefs });
@@ -713,12 +716,12 @@ export class Brain {
     const d = new Date(now);
     const h = d.getHours() + d.getMinutes() / 60;
     const p = this.state.prefs;
-    // The demo is always a working day, so every behavior can be tried at any hour.
+    // The demo is always a working day (unless you take it off), so every behavior can be tried at any hour.
     const demo = this.state.isDemo;
-    const workday = demo || isWorkday(p, d);
+    const workday = demo ? !isRestDay(p, d) : isWorkday(p, d);
     return {
       workday,
-      inWork: demo || (workday && h >= p.workStart && h < p.workEnd),
+      inWork: workday && (demo || (h >= p.workStart && h < p.workEnd)),
       night: !demo && (h >= 23 || h < 6),
       hoursAfterPlanDeadline: h - p.planDeadline,
       reviewTime: atHour(p.workEnd, 0, d).getTime() - 30 * MIN,
@@ -751,7 +754,10 @@ export class Brain {
     const events = this.state.events;
     const dayStart = atHour(p.workStart, 0, now);
     const dayEnd = atHour(p.workEnd, 0, now);
-    const target = p.adaptTarget && events.length > 0 ? adaptiveTarget(freeMinutes(events, dayStart, dayEnd), p.dailyTarget) : p.dailyTarget;
+    const free = events.length > 0 ? freeMinutes(events, dayStart, dayEnd) : null;
+    const target = p.adaptTarget && free !== null ? adaptiveTarget(free, p.dailyTarget) : p.dailyTarget;
+    // A packed calendar excuses a day with nothing done.
+    const busy = p.useCalendar && free !== null && free < 60;
     const suggestions = ctx.inWork ? suggestSlots(actionable(day), events, now, dayEnd) : [];
     const stuck = findStuck(this.seen, openTasks(day), p.stuckDays, now);
     this.patchState({ day, target, suggestions, stuck, next: nextTask(day) });
@@ -760,8 +766,16 @@ export class Brain {
       const s = this.state.life;
       const done = day.completed.length;
       const plannedCount = planned(day);
-      if (s.dayCompleted !== done || s.dayPlanned !== plannedCount || s.dayTarget !== target || s.dayWorkday !== ctx.workday) {
-        this.mutateLife((l) => life.syncDay(l, done, plannedCount, target, ctx.workday));
+      const changed = s.dayCompleted !== done || s.dayPlanned !== plannedCount || s.dayTarget !== target || s.dayWorkday !== ctx.workday;
+      if (changed || s.dayBusy !== busy || !s.daySeen) {
+        const restored = this.mutateLife((l) => {
+          life.syncDay(l, done, plannedCount, target, ctx.workday, busy);
+          return life.checkRepair(l);
+        });
+        if (restored > 0) {
+          this.repairNote = lines.streakRepaired(restored);
+          this.diary.add("life", L(`Xong ${done} việc hôm nay → nối lại chuỗi ${restored} ngày`, `${done} tasks done today → the ${restored}-day streak is back`));
+        }
       }
     }
 
@@ -837,26 +851,71 @@ export class Brain {
     this.backend.system.setTrayStatus(text).catch(() => undefined);
   }
 
-  /** Settles a finished day (streak, perfect-day sticker, dirt) once the date has changed, even after a restart. */
+  /**
+   * Settles a finished day (streak, snack, sticker, dirt, repair quest) once the date has changed, even after a
+   * restart, and keeps a kind word about it for when you're around.
+   */
   private settleLife(nowMs: number): void {
     const today = dayKey(new Date(nowMs));
     if (this.state.life.dayKey === today) return;
     const before = this.state.life;
-    const unlocked = this.mutateLife((s) => life.closeDay(s, today, (key) => {
+    const r = this.mutateLife((s) => life.closeDay(s, today, (key) => {
       const d = parseDate(key);
-      return d ? isWorkday(this.state.prefs, d) : false;
+      return d ? (this.state.isDemo ? !isRestDay(this.state.prefs, d) : isWorkday(this.state.prefs, d)) : false;
     }));
     const after = this.state.life;
-    if (before.dayKey) {
-      let text = L(
-        `Chốt ngày ${before.dayKey}: xong ${before.dayCompleted}/${before.dayTarget} → chuỗi ${after.streak} ngày`,
-        `Closed ${before.dayKey}: ${before.dayCompleted}/${before.dayTarget} done → ${after.streak}-day streak`,
-      );
-      if (after.perfectDays.length > before.perfectDays.length) text += L(", nhận sticker 🌟", ", earned a 🌟 sticker");
+    if (r.day) {
+      const done = L(`xong ${before.dayCompleted}/${before.dayTarget}`, `${before.dayCompleted}/${before.dayTarget} done`);
+      let text = L(`Chốt ngày ${r.day}: `, `Closed ${r.day}: `);
+      switch (r.outcome) {
+        case "kept":
+          text += L(`${done} → chuỗi ${after.streak} ngày`, `${done} → ${after.streak}-day streak`);
+          break;
+        case "excused":
+          text += L(`lịch kín, chưa xong việc nào → được miễn, chuỗi giữ ${after.streak} ngày`, `packed calendar, nothing done → excused, streak stays at ${after.streak}`);
+          break;
+        case "frozen":
+          text += L(`chưa xong việc nào → ăn 1 🍪 để giữ chuỗi ${after.streak} ngày (còn ${after.snacks})`, `nothing done → ate a 🍪 to keep the ${after.streak}-day streak (${after.snacks} left)`);
+          break;
+        case "broken":
+          text += L(`chưa xong việc nào, hết 🍪 → chuỗi ${r.lost} ngày đứt`, `nothing done, no 🍪 left → the ${r.lost}-day streak broke`);
+          break;
+        case "none":
+          text += !before.daySeen
+            ? L("không đồng bộ được với Todoist hôm đó → không tính", "never synced with Todoist that day → not counted")
+            : L("ngày nghỉ → chuỗi giữ nguyên", "a day off → streak unchanged");
+      }
+      if (r.snackEarned) text += L(", thêm 1 🍪", ", +1 🍪");
+      if (r.sticker) text += L(", nhận sticker 🌟", ", earned a 🌟 sticker");
+      if (r.pageDone) text += L(`, xong trang sticker ${after.stickerPage - 1} (+50 XP)`, `, filled sticker page ${after.stickerPage - 1} (+50 XP)`);
       if (after.dirt > before.dirt) text += L(`, bẩn thêm ${after.dirt - before.dirt} lớp`, `, ${after.dirt - before.dirt} more layer(s) of dirt`);
+      if (r.repairOffered && after.repair) text += L(`, có nhiệm vụ nối chuỗi tới hết ${after.repair.until}`, `, repair quest open until ${after.repair.until}`);
+      if (r.repairExpired) text += L(", nhiệm vụ nối chuỗi đã hết hạn", ", the repair quest ran out");
       this.diary.add("life", text);
+      this.dayNote = this.dayCloseNote(r, after, nowMs);
     }
-    if (unlocked.length > 0) this.say({ text: lines.unlocked(unlocked), seconds: 12, urgent: true });
+    if (r.unlocked.length > 0) this.say({ text: lines.unlocked(r.unlocked), seconds: 12, urgent: true });
+  }
+
+  /** The morning-after explanation of a frozen, excused or broken (repairable) day, and a filled sticker page. */
+  private dayCloseNote(r: life.DayClose, s: life.LifeState, nowMs: number): string | null {
+    const when = daysAgo(r.day, new Date(nowMs));
+    const parts: string[] = [];
+    if (r.outcome === "frozen") parts.push(lines.dayFrozen(when, s.streak, s.snacks));
+    if (r.outcome === "excused") parts.push(lines.dayExcused(when, s.streak));
+    if (r.outcome === "broken" && r.repairOffered) parts.push(lines.dayBroken(when, r.lost, life.REPAIR_TASKS, life.activeRepair(s) !== null));
+    if (r.pageDone) parts.push(lines.pageDone(s.stickerPage - 1, r.snackEarned));
+    return parts.length > 0 ? parts.join("\n") : null;
+  }
+
+  /** Says the waiting kind words once you're here: a reply, not a reminder (no `why`), so it isn't counted. */
+  private tellNotes(nowMs: number): void {
+    const text = [this.dayNote, this.repairNote].filter(Boolean).join("\n");
+    if (!text || this.state.bubble || this.outOfTheWay || this.sample.idleSeconds > 300) return;
+    if (this.state.quietUntil !== null && nowMs < this.state.quietUntil) return;
+    this.dayNote = null;
+    this.repairNote = null;
+    this.say({ text, seconds: 12 });
   }
 
   // ---------- Talking ----------
@@ -989,6 +1048,7 @@ export class Brain {
     this.trackDistraction(nowMs);
     this.updateFlow(now);
     this.recompute();
+    this.tellNotes(nowMs);
     this.runRules(nowMs);
   }
 
@@ -1452,9 +1512,14 @@ export class Brain {
       if (r.cleaned) parts.push(lines.cleaned(this.state.life.dirt));
       if (levelUp !== null) parts.push(lines.levelUp(levelUp));
       if (unlocked.length > 0) parts.push(lines.unlocked(unlocked));
+      // The task that finished today's repair quest: say so in the same bubble.
+      const repaired = this.repairNote;
+      if (repaired) parts.push(repaired);
+      this.repairNote = null;
       const actions: BubbleAction[] = viaPet ? [{ title: L("Hoàn tác", "Undo"), run: () => void this.undoComplete(task) }] : [];
       this.lastBubbleAt = nowMs;
-      this.set({ bubble: { id: ++this.bubbleSeq, text: parts.join("\n"), actions, seconds: unlocked.length === 0 && levelUp === null ? 8 : 14, urgent: true, reminder: false } });
+      const big = unlocked.length > 0 || levelUp !== null || repaired !== null;
+      this.set({ bubble: { id: ++this.bubbleSeq, text: parts.join("\n"), actions, seconds: big ? 14 : 8, urgent: true, reminder: false } });
       if (levelUp !== null || r.golden) this.speak(lines.voiceCheer());
     }
     this.later(() => this.recompute(), 4200);
@@ -1682,6 +1747,15 @@ export class Brain {
     await this.reloadSecrets(false);
   }
 
+  /** "Take today off" from the board: today becomes a rest day (like a weekend), or a workday again. */
+  async takeDayOff(on: boolean): Promise<void> {
+    const today = dayKey(new Date(this.now()));
+    const rest = this.state.prefs.restDays.filter((d) => d !== today);
+    await this.updatePrefs({ restDays: on ? [...rest, today].sort() : rest });
+    this.diary.add("system", on ? L("Bạn nghỉ hôm nay — pet không nhắc gì", "You took today off — no reminders") : L("Bạn làm việc lại hôm nay", "You're back at work today"));
+    this.say({ text: lines.dayOff(on, this.state.life.streak), seconds: 8 });
+  }
+
   toggleAccessory(a: Accessory): void {
     this.mutateLife((s) => life.toggleAccessory(s, a));
   }
@@ -1815,6 +1889,20 @@ export class Brain {
   }
 
   /** Dev hook (demo only): celebrate as if a task was finished. */
+  /** Demo: pretend yesterday went by with nothing done, and wake up to it (a snack saves it, or the streak breaks). */
+  demoMissDay(): void {
+    const nowMs = this.now();
+    const yesterday = addDays(dayKey(new Date(nowMs)), -1);
+    this.mutateLife((s) => {
+      life.syncDay(s, 0, Math.max(s.dayPlanned, 3), s.dayTarget, true);
+      s.dayKey = yesterday;
+    });
+    this.settleLife(nowMs);
+    this.recompute();
+    this.set({ bubble: null });
+    this.tellNotes(nowMs);
+  }
+
   demoCelebrate(): void {
     const t = this.state.next;
     this.celebrate(t, true, 1, this.speciesSound);

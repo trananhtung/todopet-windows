@@ -3,6 +3,7 @@ import { createDemoBackend, type DemoBackend } from "../backend/demo";
 import type { SystemSample } from "../backend/types";
 import { Brain } from "./brain";
 import { setLang } from "./l10n";
+import { demoLife, type LifeState } from "./life";
 
 const MIN = 60_000;
 
@@ -152,5 +153,74 @@ describe("Brain with the demo backend", () => {
     expect(brain.getSnapshot().bubble?.text).toContain(`Split into ${steps.length} steps`);
     const step = brain.getSnapshot().day.today.find((x) => x.parentId === "3");
     expect(step?.content).toBe(steps[0]);
+  });
+});
+
+describe("Brain and forgiving streaks", () => {
+  const work = (t: number): SystemSample => ({
+    app: { name: "Visual Studio Code", exe: "code.exe", title: "work" },
+    url: null,
+    idleSeconds: 0,
+    secondsSinceKey: 999,
+    fullscreen: false,
+    appSwitchedAt: t - 60 * MIN,
+  });
+
+  /** Boots the demo on Wednesday 28 October, 9:00, with yesterday saved as `yesterday` left it. */
+  async function boot(yesterday: Partial<LifeState>) {
+    const clock = { t: new Date(2026, 9, 28, 9, 0).getTime() };
+    const backend = createDemoBackend({ now: () => clock.t, persist: false });
+    await backend.storage.save("life", { ...demoLife(), dayKey: "2026-10-27", dayCompleted: 0, dayPlanned: 3, dayTarget: 3, dayWorkday: true, daySeen: true, ...yesterday });
+    const brain = await Brain.create(backend, { demo: true, now: () => clock.t, random: () => 0.5 });
+    setLang("en");
+    await brain.start();
+    brain.dismissBubble(brain.getSnapshot().bubble?.id ?? -1, "closed");
+    brain.onSample(work(clock.t));
+    return { brain, clock };
+  }
+
+  it("explains a frozen day kindly the next morning, as a reply rather than a reminder", async () => {
+    const { brain } = await boot({ streak: 5, snacks: 1 });
+    expect(brain.getSnapshot().life.snacks).toBe(0);
+    expect(brain.getSnapshot().life.streak).toBe(5);
+    brain.tick();
+    const b = brain.getSnapshot().bubble;
+    expect(b?.text).toContain("🍪");
+    expect(b?.text).toContain("5");
+    expect(b?.reminder).toBe(false);
+    expect(b?.seconds).toBe(12);
+    // Once only.
+    brain.dismissBubble(b!.id, "closed");
+    brain.tick();
+    expect(brain.getSnapshot().bubble?.text ?? "").not.toContain("🍪");
+    brain.stop();
+  });
+
+  it("offers a repair after a broken streak and brings it back with the second task today", async () => {
+    const { brain } = await boot({ streak: 6, snacks: 0 });
+    let s = brain.getSnapshot().life;
+    expect(s.streak).toBe(0);
+    expect(s.repair?.streak).toBe(6);
+    brain.tick();
+    expect(brain.getSnapshot().bubble?.text).toContain("2 tasks");
+    brain.dismissBubble(brain.getSnapshot().bubble!.id, "closed");
+    // The demo already has one task done today; one more finishes the quest.
+    await brain.complete(brain.getSnapshot().next!);
+    s = brain.getSnapshot().life;
+    expect(s.streak).toBe(6);
+    expect(s.repair).toBeNull();
+    expect(brain.getSnapshot().bubble?.text).toContain("streak is back");
+    brain.stop();
+  });
+
+  it("marks a day off from the board and takes it back", async () => {
+    const { brain } = await boot({ dayCompleted: 1 });
+    await brain.takeDayOff(true);
+    expect(brain.getSnapshot().prefs.restDays).toEqual(["2026-10-28"]);
+    expect(brain.getSnapshot().life.dayWorkday).toBe(false);
+    await brain.takeDayOff(false);
+    expect(brain.getSnapshot().prefs.restDays).toEqual([]);
+    expect(brain.getSnapshot().life.dayWorkday).toBe(true);
+    brain.stop();
   });
 });

@@ -7,7 +7,7 @@ import { L, langFromLocale, pick, setLang } from "./l10n";
 import * as life from "./life";
 import { actionable, buildDay, dueTime, nextTask, planned, ranked, statsFromRaw, taskFromRaw, uiPriority, type TodoTask } from "./models";
 import { defaultMoodInputs, evaluateMood } from "./mood";
-import { defaultPrefs, isWorkday, prefsFromJson } from "./prefs";
+import { dayRange, defaultPrefs, isWorkday, MAX_REST_DAYS, MAX_REST_RANGE, prefsFromJson } from "./prefs";
 import { appRules, currentDistraction, hostOf, matchSite, siteRules } from "./sites";
 import { findStuck, recordSeen, stuckDays } from "./stuck";
 
@@ -16,6 +16,17 @@ const task = (id: string, extra: Partial<TodoTask> = {}): TodoTask => ({
   ...extra,
 });
 const due = (date: string) => ({ date, string: null, isRecurring: false, datetime: null });
+/** Monday 26 October 2026 as the app saw it: a workday with 3 planned and a target of 3. */
+const seenDay = (patch: Partial<life.LifeState> = {}): life.LifeState => ({
+  ...life.newLife(),
+  dayKey: "2026-10-26",
+  dayTarget: 3,
+  dayPlanned: 3,
+  dayWorkday: true,
+  daySeen: true,
+  ...patch,
+});
+const always = () => true;
 
 describe("dates", () => {
   it("parses every Todoist date shape", () => {
@@ -130,8 +141,13 @@ describe("mood", () => {
   });
 
   it("feels hunger and dirt", () => {
+    setLang("en");
     const r = evaluateMood({ ...defaultMoodInputs(), planned: 3, remaining: 3, satiety: 10, dirt: 2 });
     expect(r.score).toBe(60 - 10 - 10);
+    expect(r.reasons.map((x) => x.text)).toContain("needs a bath (2 missed days)");
+    setLang("vi");
+    expect(evaluateMood({ ...defaultMoodInputs(), dirt: 1 }).reasons.map((x) => x.text)).toContain("cần tắm (lỡ 1 ngày)");
+    setLang("en");
   });
 });
 
@@ -174,18 +190,22 @@ describe("life", () => {
     expect(s.satiety).toBe(43);
   });
 
-  it("settles days: streaks, stickers, lazy days and missed workdays", () => {
-    const s = { ...life.newLife(), dayKey: "2026-10-26", dayCompleted: 3, dayPlanned: 3, dayTarget: 3, streak: 2, bestStreak: 2 };
-    const unlocked = life.closeDay(s, "2026-10-27", () => true);
+  it("settles days: streaks, stickers, snacks and days the app never saw", () => {
+    const s = seenDay({ dayCompleted: 3, streak: 2, bestStreak: 2 });
+    const r = life.closeDay(s, "2026-10-27", always);
+    expect(r.outcome).toBe("kept");
     expect(s.streak).toBe(3);
     expect(s.perfectDays).toEqual(["2026-10-26"]);
-    expect(unlocked).toContain("scarf");
-    s.dayCompleted = 0;
-    life.closeDay(s, "2026-10-30", (k) => k !== "2026-10-29");
-    // 27th lazy (+1), 28th missed workday (+1), 29th not a workday.
-    expect(s.dirt).toBe(2);
-    expect(s.streak).toBe(0);
+    expect(r.sticker).toBe(true);
+    expect(r.unlocked).toContain("scarf");
+    // The 27th was seen with nothing done: a snack saves it. The 28th (PC off) and 29th (not a workday) are neutral.
+    life.syncDay(s, 0, 3, 3, true);
+    expect(life.closeDay(s, "2026-10-30", (k) => k !== "2026-10-29").outcome).toBe("frozen");
+    expect(s.dirt).toBe(0);
+    expect(s.streak).toBe(3);
+    expect(s.snacks).toBe(1);
     expect(s.dayKey).toBe("2026-10-30");
+    expect(s.daySeen).toBe(false);
   });
 
   it("tolerates broken saved state and toggles accessories by slot", () => {
@@ -200,6 +220,193 @@ describe("life", () => {
     expect(life.stageOf(700)).toBe(3);
     expect(life.meetsUnlock({ kind: "tasks", value: 50 }, { ...s, totalDone: 50 })).toBe(true);
     expect(life.meetsUnlock({ kind: "streak", value: 7 }, { ...s, bestStreak: 6 })).toBe(false);
+  });
+
+  it("shows how far a locked accessory is", () => {
+    const s = { ...life.newLife(), totalDone: 12, bestStreak: 9 };
+    expect(life.accessoryProgress("tophat", s)).toEqual({ have: 12, need: 25 });
+    expect(life.accessoryProgress("crown", s)).toEqual({ have: 7, need: 7 });
+    expect(life.isEarned("crown", s)).toBe(true);
+    expect(life.accessoryProgress("gradcap", { ...s, xp: 350 })).toEqual({ have: 350, need: 700 });
+  });
+});
+
+describe("forgiving streaks", () => {
+  it("keeps the streak with a single finished task", () => {
+    const s = seenDay({ dayCompleted: 1, streak: 2 });
+    const r = life.closeDay(s, "2026-10-27", always);
+    expect(r).toMatchObject({ day: "2026-10-26", outcome: "kept", snackEarned: false, sticker: false });
+    expect(s.streak).toBe(3);
+    expect(s.bestStreak).toBe(3);
+    expect(s.snacks).toBe(1);
+  });
+
+  it("leaves days the app never saw alone", () => {
+    const s = seenDay({ dayCompleted: 1, streak: 2 });
+    // Tuesday to Thursday the PC stayed off.
+    life.closeDay(s, "2026-10-30", always);
+    expect(s.streak).toBe(3);
+    expect(s.dirt).toBe(0);
+    // Friday the app ran but never reached Todoist: nothing is known about it, so nothing changes.
+    const r = life.closeDay(s, "2026-10-31", always);
+    expect(r.outcome).toBe("none");
+    expect(s.streak).toBe(3);
+    expect(s.dirt).toBe(0);
+    expect(s.snacks).toBe(1);
+  });
+
+  it("treats rest days like a weekend", () => {
+    const s = seenDay({ dayWorkday: false, streak: 4, snacks: 0 });
+    expect(life.closeDay(s, "2026-10-27", always).outcome).toBe("none");
+    expect(s.streak).toBe(4);
+    expect(s.dirt).toBe(0);
+    // The new day starts with what the schedule says about it.
+    expect(s.dayWorkday).toBe(true);
+    life.closeDay(s, "2026-10-28", (k) => k !== "2026-10-28");
+    expect(s.dayWorkday).toBe(false);
+  });
+
+  it("excuses a packed calendar day when nothing got done", () => {
+    const s = seenDay({ dayBusy: true, streak: 4, snacks: 1 });
+    expect(life.closeDay(s, "2026-10-27", always).outcome).toBe("excused");
+    expect(s.streak).toBe(4);
+    expect(s.dirt).toBe(0);
+    expect(s.snacks).toBe(1);
+    // A busy day with a finished task still counts.
+    life.syncDay(s, 1, 3, 1, true, true);
+    expect(life.closeDay(s, "2026-10-28", always).outcome).toBe("kept");
+    expect(s.streak).toBe(5);
+  });
+
+  it("eats a snack to save a missed day", () => {
+    const s = seenDay({ streak: 5, snacks: 1 });
+    const r = life.closeDay(s, "2026-10-27", always);
+    expect(r.outcome).toBe("frozen");
+    expect(s.snacks).toBe(0);
+    expect(s.streak).toBe(5);
+    expect(s.dirt).toBe(0);
+    expect(s.repair).toBeNull();
+  });
+
+  it("earns a snack on a goal day, two at most", () => {
+    // 3 of 3 done but 4 planned: a goal day, not a perfect day.
+    const s = seenDay({ dayCompleted: 3, dayPlanned: 4, snacks: 1 });
+    const r = life.closeDay(s, "2026-10-27", always);
+    expect(r).toMatchObject({ outcome: "kept", snackEarned: true, sticker: false });
+    expect(s.snacks).toBe(2);
+    life.syncDay(s, 3, 4, 3, true);
+    expect(life.closeDay(s, "2026-10-28", always).snackEarned).toBe(false);
+    expect(s.snacks).toBe(life.MAX_SNACKS);
+  });
+
+  it("breaks the streak without a snack, offering a repair only for streaks of 2+", () => {
+    const s = seenDay({ streak: 3, snacks: 0 });
+    const r = life.closeDay(s, "2026-10-27", always);
+    expect(r).toMatchObject({ outcome: "broken", lost: 3, repairOffered: true });
+    expect(s.streak).toBe(0);
+    expect(s.dirt).toBe(1);
+    expect(s.repair).toEqual({ streak: 3, until: "2026-11-09" });
+
+    const short = seenDay({ streak: 1, snacks: 0 });
+    const r1 = life.closeDay(short, "2026-10-27", always);
+    expect(r1).toMatchObject({ outcome: "broken", lost: 1, repairOffered: false });
+    expect(short.repair).toBeNull();
+  });
+
+  it("repairs the streak once 2 tasks are done on the next workday, and that day counts too", () => {
+    const s = seenDay({ streak: 6, snacks: 0 });
+    life.closeDay(s, "2026-10-27", always);
+    expect(life.activeRepair(s)).toEqual({ streak: 6, until: "2026-11-09" });
+    life.syncDay(s, 1, 3, 3, true);
+    expect(life.checkRepair(s)).toBe(0);
+    expect(s.streak).toBe(0);
+    life.syncDay(s, 2, 3, 3, true);
+    expect(life.checkRepair(s)).toBe(6);
+    expect(s.streak).toBe(6);
+    expect(s.repair).toBeNull();
+    expect(life.closeDay(s, "2026-10-28", always).outcome).toBe("kept");
+    expect(s.streak).toBe(7);
+    expect(s.bestStreak).toBe(7);
+  });
+
+  it("waits through weekends for the repair, then lets it expire", () => {
+    // Broken on Friday 30 October.
+    const s = seenDay({ dayKey: "2026-10-30", streak: 4, snacks: 0 });
+    life.closeDay(s, "2026-10-31", always);
+    // Saturday is not a workday: the quest waits for Monday.
+    life.syncDay(s, 0, 0, 3, false);
+    expect(life.activeRepair(s)).toBeNull();
+    expect(life.closeDay(s, "2026-11-02", always).repairExpired).toBe(false);
+    expect(s.repair).not.toBeNull();
+    // Monday: one task only, so the quest ends with the day (the day itself still counts).
+    life.syncDay(s, 1, 3, 3, true);
+    expect(life.activeRepair(s)?.streak).toBe(4);
+    const r = life.closeDay(s, "2026-11-03", always);
+    expect(r).toMatchObject({ outcome: "kept", repairExpired: true });
+    expect(s.repair).toBeNull();
+    expect(s.streak).toBe(1);
+  });
+
+  it("drops a repair quest 14 days after the break, but not a day earlier", () => {
+    const s = seenDay({ streak: 4, snacks: 0 });
+    life.closeDay(s, "2026-10-27", always);
+    // The PC stays off for two weeks.
+    expect(life.closeDay(s, "2026-11-09", always).repairExpired).toBe(false);
+    expect(life.activeRepair(s)?.until).toBe("2026-11-09");
+    expect(life.closeDay(s, "2026-11-10", always).repairExpired).toBe(true);
+    expect(s.repair).toBeNull();
+  });
+});
+
+describe("sticker pages", () => {
+  it("fills the page one perfect day at a time", () => {
+    const s = life.newLife();
+    expect(s.stickerPage).toBe(1);
+    expect(s.pageFilled).toBe(life.PAGE_GIFTS);
+    s.dayKey = "2026-10-26";
+    life.syncDay(s, 3, 3, 3, true);
+    const r = life.closeDay(s, "2026-10-27", always);
+    expect(r).toMatchObject({ sticker: true, pageDone: false });
+    expect(s.pageFilled).toBe(3);
+    expect(s.xp).toBe(30);
+  });
+
+  it("rewards a full page with XP and a snack, then starts a new page with 2 gifts", () => {
+    const s = seenDay({ dayCompleted: 3, stickerPage: 2, pageFilled: 9, snacks: 0, xp: 0 });
+    const r = life.closeDay(s, "2026-10-27", always);
+    expect(r).toMatchObject({ sticker: true, pageDone: true, snackEarned: true });
+    expect(s.xp).toBe(30 + 50);
+    // One snack for the goal day, one for the page.
+    expect(s.snacks).toBe(2);
+    expect(s.stickerPage).toBe(3);
+    expect(s.pageFilled).toBe(life.PAGE_GIFTS);
+  });
+});
+
+describe("life migration", () => {
+  it("fills in snacks, repair and sticker pages for a pet saved by an older version", () => {
+    const perfectDays = Array.from({ length: 10 }, (_, i) => `2026-10-${String(10 + i).padStart(2, "0")}`);
+    const s = life.lifeFromJson({ streak: 4, perfectDays, dayKey: "2026-10-26", dayCompleted: 0 });
+    expect(s.snacks).toBe(1);
+    expect(s.repair).toBeNull();
+    // 10 perfect days: page 1 + ⌊10 ÷ 8⌋ = 2, with 2 gifts + 10 mod 8 = 4 filled.
+    expect(s.stickerPage).toBe(2);
+    expect(s.pageFilled).toBe(4);
+    // The stored day was seen by the older version.
+    expect(s.daySeen).toBe(true);
+    expect(s.dayBusy).toBe(false);
+  });
+
+  it("clamps broken new fields", () => {
+    const s = life.lifeFromJson({ snacks: 9, stickerPage: 0, pageFilled: 42, repair: { streak: "x" } });
+    expect(s.snacks).toBe(2);
+    expect(s.stickerPage).toBe(1);
+    expect(s.pageFilled).toBe(10);
+    expect(s.repair).toBeNull();
+    const t = life.lifeFromJson({ snacks: -1, repair: { streak: 5, until: "2026-11-01" }, daySeen: false });
+    expect(t.snacks).toBe(0);
+    expect(t.repair).toEqual({ streak: 5, until: "2026-11-01" });
+    expect(t.daySeen).toBe(false);
   });
 });
 
@@ -316,6 +523,31 @@ describe("prefs", () => {
     expect(p.petName).toBe("Mochi");
     expect(prefsFromJson({ species: "trex" }).species).toBe("mochi");
     expect(isWorkday(defaultPrefs(), new Date(2026, 9, 31))).toBe(false);
+  });
+
+  it("keeps rest days tidy: valid, deduped, sorted, from yesterday on, 60 at most", () => {
+    const now = new Date(2026, 9, 29, 12).getTime();
+    const p = prefsFromJson({ restDays: ["2026-11-02", "2026-10-27", "bad", 5, "2026-10-28", "2026-11-02", "2026-02-30", "2026-11-2"] }, now);
+    expect(p.restDays).toEqual(["2026-10-28", "2026-11-02"]);
+    expect(prefsFromJson({ restDays: "2026-11-02" }, now).restDays).toEqual([]);
+    expect(defaultPrefs(now).restDays).toEqual([]);
+    const many = dayRange("2026-10-29", "2026-12-31", 100);
+    const capped = prefsFromJson({ restDays: many }, now).restDays;
+    expect(capped).toHaveLength(MAX_REST_DAYS);
+    expect(capped[0]).toBe("2026-10-29");
+  });
+
+  it("is not a workday on a rest day", () => {
+    const p = { ...defaultPrefs(), restDays: ["2026-10-28"] };
+    expect(isWorkday(p, new Date(2026, 9, 28, 9))).toBe(false);
+    expect(isWorkday(p, new Date(2026, 9, 29, 9))).toBe(true);
+  });
+
+  it("lists the days of a range, in either order, 30 at most", () => {
+    expect(dayRange("2026-10-30", "2026-11-02")).toEqual(["2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02"]);
+    expect(dayRange("2026-11-02", "2026-10-30")).toHaveLength(4);
+    expect(dayRange("2026-11-01", "2026-12-31")).toHaveLength(MAX_REST_RANGE);
+    expect(dayRange("2026-11-01", "")).toEqual([]);
   });
 });
 

@@ -105,6 +105,9 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
                 😴 {s.mood === "sleeping" ? L("Thức dậy", "Wake up") : L("Rời máy", "Step away")}
               </button>
             )}
+            <button className="btn" title={L("Giả vờ hôm qua chưa xong việc nào, rồi sang ngày mới", "Pretend nothing got done yesterday, then wake up to it")} onClick={() => brain.demoMissDay()}>
+              🍪 {L("Lỡ một ngày", "Miss a day")}
+            </button>
             <button className="btn" onClick={() => brain.tick()}>
               ⏱ {L("Chạy luật", "Run rules")}
             </button>

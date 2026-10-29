@@ -531,7 +531,7 @@ body.overlay {
   }
 }
 
-/* Header: avatar | name | tools, then the mood line under name and tools, then the stats line. */
+/* Header: avatar | name | tools, then the mood line under name and tools, then the stats line (and a repair quest). */
 .board-head {
   position: relative;
   z-index: 3;
@@ -540,7 +540,8 @@ body.overlay {
   grid-template-areas:
     "avatar name tools"
     "avatar mood mood"
-    "stats stats stats";
+    "stats stats stats"
+    "quest quest quest";
   column-gap: 10px;
   align-items: center;
   padding: 9px 8px 8px 12px;
@@ -688,14 +689,15 @@ body.overlay {
 }
 .stat {
   position: relative;
-  flex: 1 0 auto;
+  /* Labels give way (ellipsis) before a pill gets cut off at the edge. */
+  flex: 1 1 auto;
   min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
   height: 26px;
-  padding: 0 8px 2px;
+  padding: 0 7px 2px;
   border-radius: 8px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -718,8 +720,8 @@ body.overlay {
 }
 .stat-meter {
   position: absolute;
-  left: 8px;
-  right: 8px;
+  left: 7px;
+  right: 7px;
   bottom: 3px;
   height: 2px;
   border-radius: 2px;
@@ -751,6 +753,37 @@ body.overlay {
 }
 .stat.tone-hot .icon {
   color: var(--accent-strong);
+}
+/* Today's repair quest: one dashed line under the stats, with its count on the right. */
+.repair-line {
+  grid-area: quest;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+  font-size: 12px;
+  color: var(--ink);
+}
+.repair-line .icon {
+  flex: none;
+  color: var(--accent-strong);
+}
+.repair-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repair-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
 }
 /* Narrow boards (small screens): the icons and tooltips carry the labels. */
 @container board (max-width: 380px) {
@@ -939,6 +972,15 @@ body.overlay {
   min-height: 24px;
   padding: 0 9px;
   font-size: 12px;
+}
+.sec-head .day-off {
+  gap: 5px;
+  color: var(--ink-2);
+}
+.sec-head .day-off[aria-pressed="true"] {
+  background: var(--good-soft);
+  border-color: var(--good);
+  color: var(--good-ink);
 }
 .count {
   display: inline-grid;
@@ -1452,6 +1494,33 @@ body.overlay {
   display: grid;
   place-items: center;
   font-size: 13px;
+}
+/* The page being filled: gifts and stickers on cards, empty slots dashed. */
+.sticker-page {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 4px;
+}
+.sticker-page .slot {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.sticker-page .slot.gift {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+.sticker-page .slot.empty {
+  background: transparent;
+  border-style: dashed;
+}
+.page-note {
+  margin-top: -4px;
+  font-size: 12px;
 }
 
 /* ---------- Demo controls ---------- */

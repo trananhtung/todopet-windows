@@ -1,4 +1,5 @@
 // User preferences (Prefs.swift). Stored as JSON through the Backend; the Todoist token lives in Credential Manager.
+import { addDays, dayKey, isDayKey } from "./dates";
 import type { Lang, SpeciesId } from "./types";
 import { SPECIES_IDS } from "./types";
 
@@ -53,6 +54,8 @@ export interface Prefs {
   hideInFullscreen: boolean;
   /** Epoch ms of the first launch; day one never starts with a grumpy pet. */
   firstLaunch: number;
+  /** Days off ("yyyy-MM-dd", sorted): no workday, so no reminders and no streak change. */
+  restDays: string[];
 }
 
 export const DEFAULT_FILTER = "today | overdue";
@@ -92,14 +95,41 @@ export function defaultPrefs(now = Date.now()): Prefs {
     keepLog: true,
     hideInFullscreen: true,
     firstLaunch: now,
+    restDays: [],
   };
+}
+
+export const MAX_REST_DAYS = 60;
+/** The longest range Settings adds in one go. */
+export const MAX_REST_RANGE = 30;
+
+/** Valid day keys, deduped and sorted; yesterday is kept (it still gets settled), older days go. At most 60. */
+export function tidyRestDays(raw: unknown, now = Date.now()): string[] {
+  if (!Array.isArray(raw)) return [];
+  const yesterday = addDays(dayKey(new Date(now)), -1);
+  return [...new Set(raw.filter(isDayKey))]
+    .filter((k) => k >= yesterday)
+    .sort()
+    .slice(0, MAX_REST_DAYS);
+}
+
+/** Every day from `from` to `to` (either order), at most `max` of them; [] when either does not parse. */
+export function dayRange(from: string, to: string, max = MAX_REST_RANGE): string[] {
+  if (!isDayKey(from) || !isDayKey(to)) return [];
+  const [a, b] = from <= to ? [from, to] : [to, from];
+  const out: string[] = [];
+  for (let k = a; k <= b && out.length < max; k = addDays(k, 1)) out.push(k);
+  return out;
 }
 
 const clampInt = (v: unknown, lo: number, hi: number, d: number) =>
   typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : d;
 
-/** Merges stored JSON over the defaults, ignoring unknown keys and wrong types. */
-export function prefsFromJson(raw: unknown, now = Date.now()): Prefs {
+/**
+ * Merges stored JSON over the defaults, ignoring unknown keys and wrong types. `now` stands in for a missing
+ * `firstLaunch`; `today` (epoch ms) decides which rest days are past.
+ */
+export function prefsFromJson(raw: unknown, now = Date.now(), today = now): Prefs {
   const d = defaultPrefs(now);
   if (!raw || typeof raw !== "object") return d;
   const r = raw as Record<string, unknown>;
@@ -138,13 +168,17 @@ export function prefsFromJson(raw: unknown, now = Date.now()): Prefs {
     keepLog: bool("keepLog"),
     hideInFullscreen: bool("hideInFullscreen"),
     firstLaunch: typeof r.firstLaunch === "number" ? r.firstLaunch : d.firstLaunch,
+    restDays: tidyRestDays(r.restDays, today),
   };
 }
 
 export const effectiveFilter = (p: Prefs) => p.filterQuery.trim() || DEFAULT_FILTER;
 export const effectiveClaudeModel = (p: Prefs) => p.claudeModel.trim() || DEFAULT_CLAUDE_MODEL;
 
+export const isRestDay = (p: Prefs, date: Date) => p.restDays.includes(dayKey(date));
+
 export function isWorkday(p: Prefs, date: Date): boolean {
+  if (isRestDay(p, date)) return false;
   const wd = date.getDay();
   if (wd === 6) return p.workSaturday;
   if (wd === 0) return p.workSunday;

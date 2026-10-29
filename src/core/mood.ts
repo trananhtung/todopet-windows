@@ -118,7 +118,7 @@ export function evaluateMood(i: MoodInputs): MoodResult {
     add(-(30 - i.satiety) / 2, L(`đang đói (no ${Math.trunc(i.satiety)}%)`, `hungry (${Math.trunc(i.satiety)}% full)`));
   }
   if (i.dirt > 0) {
-    add(-i.dirt * 5, L(`bẩn vì ${i.dirt} ngày lười`, `dirty after ${n(i.dirt, "lazy day")}`));
+    add(-i.dirt * 5, L(`cần tắm (lỡ ${i.dirt} ngày)`, `needs a bath (${n(i.dirt, "missed day")})`));
   }
   if (i.stuck > 0) {
     add(-Math.min(i.stuck, 3) * 3, L(`${i.stuck} việc bị dời mãi`, `${n(i.stuck, "task")} ${i.stuck === 1 ? "keeps" : "keep"} getting postponed`));

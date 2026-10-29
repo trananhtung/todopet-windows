@@ -20,7 +20,7 @@ export const dragon: SpeciesDef = {
     emoji: "🐲",
     gait: "float",
     sound: { en: "rawr!", vi: "grào!" },
-    unlock: { kind: "streak", value: 7, label: { en: "Hit your goal 7 days in a row", vi: "Đạt mục tiêu 7 ngày liền" } },
+    unlock: { kind: "streak", value: 7, label: { en: "Keep a 7-day streak", vi: "Giữ chuỗi 7 ngày" } },
   },
   base: makeBase({ top: "#A0E6C4", bottom: "#3DAD86", belly: "#FFF1C6", mark: "#2C8C6A", accent: "#FFE3A3", inner: "#FFB48A" }),
   w: 80,
