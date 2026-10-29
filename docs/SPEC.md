@@ -375,3 +375,57 @@ sets, and gentle failure. Rewards stay cosmetic, random rewards have published o
 - **Done for today** holds the trip offer and the "I found a chest" note until the next workday, like every other
   non-urgent bubble. Chests still accrue silently meanwhile, and the note comes once the pet is awake again.
 - The end of a **Try 2 minutes** starter says what was knitted, and a chest earned meanwhile, like a full session.
+
+## v0.6 "Friends" (Bạn bè)
+
+Why: research proposal 13. A friend streak goes with completing more days (Duolingo, correlational), and
+collaboration plus a little competition beats competition alone. The plan left the server and privacy choice open.
+**Decision:** no server, in line with "no servers of its own". Friends swap **pet cards**: short text codes sent over
+any chat app. That means nothing to host or pay for, and no data leaves the PC unless you send your card yourself.
+Cards work on trust; with no rankings and no penalties there is nothing worth cheating for.
+
+### 1. Pet cards (`src/core/friends.ts`)
+- **Format:** `TODOPET1.<base64url JSON>`, at most 1500 characters.
+- **Card fields:**
+  - format version and a random install id (made once, kept locally);
+  - pet name (≤ 20 chars, plain text), species, up to 3 worn accessories, growth stage;
+  - current and best streak;
+  - ISO week key and tasks finished that week;
+  - a 28-day history ending on the card's date, one char per day: `G` goal met, `K` kept (≥ 1 task), `R` rest day or
+    weekend, `-` nothing;
+  - the date issued.
+- **Never in a card:** task titles, times, app names, or the user's name.
+- **Reading a card:**
+  - Parsing is strict: size cap, schema check, known species and accessories only, numbers clamped, dates validated.
+  - A bad card gets a kind error and changes nothing.
+  - Your own card can't be added.
+  - A newer card from the same id replaces the older one.
+  - At most 12 friends.
+- Friends and the install id are stored under a new key `friends` (overlay window only).
+
+### 2. Buddy streak
+- For each friend, count back from the latest day both histories cover.
+- A day where both hit their goal (`G`) adds 1.
+- A day where either rested (`R`) is skipped and doesn't break the streak.
+- Anything else ends it.
+- It grows each time cards are swapped; the sheet says when the friend's card is from.
+
+### 3. Weekly co-op boss
+- **"The Procrastination Blob" 👾:** its HP is 15 per member (you + friends with a card from this ISO week).
+- **Damage:** your tasks finished this week, counted live, plus each friend's `weekDone` from their latest card that week.
+- **Win:** when HP reaches 0 everyone wins: +50 XP and a 🏅 in the sticker book, once a week.
+- **No losing, no penalties.** The blob resets on Monday.
+
+### 4. Visits
+- A friend whose card is at most 7 days old may visit at most twice a day, and only at a calm moment: not typing, not
+  focusing, not in a meeting, not done for today, not quiet, hidden or full-screen.
+- Their pet walks in beside yours for about 25 s, with a small label: "⟨name⟩ dropped by! 🔥 buddy streak N".
+  Clicking it opens Friends.
+- A visit is ambient, not a bubble, so it doesn't count against the nudge budget.
+
+### 5. Friends sheet (board)
+- **My card:** your card with Copy.
+- **Add:** paste a friend's card, then Add.
+- **Friends list:** each friend with their pet, buddy streak, their card's date and Remove.
+- **This week:** the blob with an HP bar and who contributed.
+- **Privacy:** a one-line note on exactly what a card contains.
