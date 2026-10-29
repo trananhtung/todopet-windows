@@ -1534,6 +1534,543 @@ body.overlay {
   font-size: 12px;
 }
 
+/* ---------- v0.5 Game: wardrobe groups, chests, souvenirs, home, knitting, trips ---------- */
+
+.sheet-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sheet-nav .btn.small:not(.ghost) {
+  gap: 5px;
+  color: var(--ink-2);
+}
+.sheet-lead {
+  margin: -4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.w-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.w-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 2px;
+}
+.w-group-head h3 {
+  margin: 0;
+  flex: none;
+  font: 700 11.5px/1 var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.w-group-head .count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.w-aside {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+/* Chest finds: eight short tiles in two rows. */
+.wardrobe.cols-4 {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.wardrobe.cols-4 .item {
+  padding: 8px 4px;
+  font-size: 11.5px;
+  line-height: 1.25;
+}
+.wardrobe.cols-4 .item .emoji {
+  font-size: 22px;
+  margin-bottom: 2px;
+}
+.wardrobe.cols-4 .item small {
+  font-size: 10.5px;
+}
+/* A seasonal item that chests can hold right now. */
+.item.locked.in-season {
+  border-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 10%, var(--surface));
+}
+.item.locked.in-season .emoji {
+  opacity: 0.8;
+  filter: grayscale(0.3);
+}
+.item.locked.in-season small {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+
+/* The chest strip: held · progress to the next · today, then the season and the odds. */
+.chests {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.chest-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.chest-held {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  padding: 0 8px 0 6px;
+  border-radius: 8px;
+  background: var(--paper-2);
+  font-size: 15px;
+  cursor: default;
+}
+.chest-held b {
+  font: 700 12.5px/1 var(--font);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.chest-held.has {
+  background: var(--accent-soft);
+}
+.chest-held:not(.has) > span:first-child {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+.chest-next {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chest-next-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chest-meter {
+  height: 4px;
+  border-radius: 4px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.chest-meter i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+  transition: width 0.6s var(--ease-out);
+}
+.chest-today {
+  flex: none;
+  white-space: nowrap;
+  cursor: default;
+}
+.chest-today b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.season-chip {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.season-chip.on {
+  flex: 0 1 auto;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--gold) 16%, var(--surface));
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.odds-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  min-height: 24px;
+  padding: 0 4px 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.odds-toggle:hover {
+  background: var(--paper-2);
+}
+.odds-toggle .chev {
+  transition: transform 0.2s var(--ease-out);
+}
+.odds-toggle[aria-expanded="true"] .chev {
+  transform: rotate(180deg);
+}
+.odds {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  animation: note-in 0.2s var(--ease-out);
+}
+.odds-bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+}
+.odds-bar i {
+  flex-basis: 0;
+  min-width: 6px;
+  border-radius: 3px;
+}
+.odds ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 5px;
+  align-items: baseline;
+}
+.odds li {
+  display: contents;
+}
+.tier-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.tier-name i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.tier-pct {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+}
+.tier-gives {
+  line-height: 1.35;
+}
+.odds-bar .tier-common,
+.tier-common .tier-name i {
+  background: var(--p4-line);
+}
+.odds-bar .tier-rare,
+.tier-rare .tier-name i {
+  background: var(--info);
+}
+.odds-bar .tier-legendary,
+.tier-legendary .tier-name i {
+  background: var(--gold);
+}
+.odds-note {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* Souvenir shelf: 2 planks of 8; what's still out there shows as a faint silhouette. */
+.shelf {
+  --plank: color-mix(in srgb, var(--accent) 30%, var(--line-strong));
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-auto-rows: 36px;
+  row-gap: 10px;
+  margin: 0;
+  padding: 0 4px 4px;
+  list-style: none;
+  border-radius: 10px;
+  background: repeating-linear-gradient(180deg, transparent 0 36px, var(--plank) 36px 40px, transparent 40px 46px);
+}
+.souvenir {
+  display: grid;
+  place-items: end center;
+  font-size: 22px;
+  line-height: 1;
+  padding-bottom: 2px;
+  cursor: default;
+}
+.souvenir span {
+  transition: transform 0.2s var(--ease-spring);
+}
+.souvenir:not(.missing):hover span {
+  transform: translateY(-3px) scale(1.12);
+}
+.souvenir.missing span {
+  filter: brightness(0);
+  opacity: 0.1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .souvenir.missing span {
+    filter: brightness(0) invert(1);
+    opacity: 0.14;
+  }
+}
+:root[data-theme="dark"] .souvenir.missing span {
+  filter: brightness(0) invert(1);
+  opacity: 0.14;
+}
+
+/* Home sheet: a preview of the corner, the taskbar switch, and the 12 decorations. */
+.home-preview {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 14px;
+  height: 76px;
+  padding: 0 12px 10px;
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, transparent 0 calc(100% - 12px), color-mix(in srgb, var(--ink) 9%, var(--paper-2)) calc(100% - 12px)),
+    linear-gradient(180deg, var(--accent-soft), var(--paper-2));
+  overflow: hidden;
+}
+.home-spot {
+  display: block;
+  width: 52px;
+  height: 52px;
+}
+.home-spot svg {
+  display: block;
+}
+/* A free spot in the corner. */
+.home-spot.empty {
+  width: 40px;
+  height: 40px;
+  margin: 0 6px 4px;
+  border: 1.5px dashed color-mix(in srgb, var(--ink) 22%, transparent);
+  border-radius: 10px;
+}
+.home-preview.off .home-spot {
+  opacity: 0.35;
+  filter: grayscale(0.8);
+}
+.home-off {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.home-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.decor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.decor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 4px 7px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.25;
+  text-align: center;
+}
+button.decor {
+  cursor: pointer;
+}
+button.decor:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+.decor.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.decor-art {
+  display: block;
+  width: 40px;
+  height: 40px;
+}
+.decor-art svg {
+  display: block;
+}
+.decor-name {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.decor.missing {
+  background: var(--surface-2);
+  border-style: dashed;
+  color: var(--muted);
+}
+.decor.missing .decor-art {
+  filter: brightness(0);
+  opacity: 0.1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .decor.missing .decor-art {
+    filter: brightness(0) invert(1);
+    opacity: 0.14;
+  }
+}
+:root[data-theme="dark"] .decor.missing .decor-art {
+  filter: brightness(0) invert(1);
+  opacity: 0.14;
+}
+.decor-check {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+}
+.decor-check .icon {
+  stroke-width: 2.4;
+}
+.home-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: var(--paper-2);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.home-note .icon {
+  color: var(--accent-strong);
+}
+.home-note.warn {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+
+/* Knitting in the focus bar: a yarn ball in a ring that fills up. */
+.yarn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: default;
+}
+.yarn svg {
+  display: block;
+}
+.yarn-track,
+.yarn-ring {
+  fill: none;
+  stroke-width: 2.5;
+}
+.yarn-track {
+  stroke: color-mix(in srgb, var(--info) 22%, transparent);
+}
+.yarn-ring {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.6s var(--ease-out);
+}
+.yarn-ball {
+  fill: #f4a3b8;
+  stroke: #c9627f;
+  stroke-width: 1.2;
+}
+.yarn-lines,
+.yarn-tail {
+  fill: none;
+  stroke: #c9627f;
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+.yarn-pct {
+  font: 700 11.5px/1 var(--font);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+/* While the pet is away on a trip. */
+.trip-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 8px;
+  border-radius: 12px;
+  background: var(--good-soft);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+.trip-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--good-ink);
+}
+.trip-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.trip-banner .btn {
+  flex: none;
+}
+
 /* ---------- Demo controls ---------- */
 
 .demo-panel {

@@ -1,12 +1,13 @@
 import { type CSSProperties, useId, useRef } from "react";
+import { decorName, homeDecor } from "../../core/craft";
 import { L } from "../../core/l10n";
 import { meetsUnlock } from "../../core/life";
-import type { Lang } from "../../core/types";
-import { SPECIES, speciesInfo } from "../../pets";
+import { DECOR_IDS, type Lang } from "../../core/types";
+import { renderDecor, SPECIES, speciesInfo } from "../../pets";
 import { Icon } from "../../ui/icons";
 import { PetLive, PetStill } from "../../ui/PetArt";
 import { useSettings } from "../context";
-import { Group, Page, Row } from "../controls";
+import { Group, Page, Row, SwitchRow } from "../controls";
 import { PET_SCALE, unlockProgress } from "../model";
 
 const PREVIEW_SIZE = 104;
@@ -102,8 +103,33 @@ export function PetSection() {
         </Row>
       </Group>
 
+      <Group title={L("Góc nhà", "Home corner")}>
+        <SwitchRow k="showHome" label={L("Bày góc nhà trên thanh tác vụ", "Show home on the taskbar")} help={<HomeHelp />} />
+      </Group>
+
       <SpeciesPicker />
     </Page>
+  );
+}
+
+/** What the home corner is, and the decorations it shows now. */
+function HomeHelp() {
+  const { prefs, life } = useSettings();
+  const shown = homeDecor(prefs.homeItems, life.decor);
+  return (
+    <>
+      {L(
+        `Tối đa 3 món đồ pet tự đan trong lúc bạn tập trung (đã có ${life.decor.length}/${DECOR_IDS.length}), bày cạnh pet. Chọn món trên bảng việc → Tủ đồ → Góc nhà.`,
+        `Up to 3 of the decorations your pet knits while you focus (${life.decor.length} of ${DECOR_IDS.length} so far), set out beside it. Pick them on the board → Wardrobe → Home.`,
+      )}
+      {shown.length > 0 && (
+        <span className={`home-mini${prefs.showHome ? "" : " off"}`}>
+          {shown.map((d) => (
+            <span key={d} className="home-mini-item" title={decorName(d)} dangerouslySetInnerHTML={{ __html: renderDecor(d, { size: 30, idPrefix: `set-home-${d}` }) }} />
+          ))}
+        </span>
+      )}
+    </>
   );
 }
 

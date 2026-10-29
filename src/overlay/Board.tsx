@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Ref } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type Ref } from "react";
 import type { Backend } from "../backend/types";
 import { errorMessage, type Brain, type BrainState, type DueChoice } from "../core/brain";
 import { currentEvent, freeMinutes } from "../core/calendar";
@@ -7,17 +7,34 @@ import { getLang, L, plural } from "../core/l10n";
 import * as life from "../core/life";
 import * as lines from "../core/lines";
 import { dueDay, dueTime, isRecurring, planned, taskTitle, uiPriority, type TodoTask } from "../core/models";
+import { decorName, homeDecor } from "../core/craft";
 import { moodEmoji, moodLabel } from "../core/mood";
-import { isWorkday } from "../core/prefs";
-import { ACCESSORIES, SPECIES_IDS } from "../core/types";
-import { defaultPose, renderPet, speciesInfo } from "../pets";
+import { isWorkday, MAX_HOME_ITEMS } from "../core/prefs";
+import { itemName, placeName, SOUVENIRS } from "../core/trips";
+import { DECOR_IDS, SPECIES_IDS, type Accessory, type DecorId } from "../core/types";
+import { defaultPose, renderDecor, renderPet, speciesInfo } from "../pets";
 import { Icon, type IconName } from "../ui/icons";
 import { localeTag } from "../ui/lang";
 import type { BoardRequest } from "./App";
+import {
+  chestProgress,
+  groupTitle,
+  oddsPercent,
+  seasonLabel,
+  seasonLine,
+  TIERS,
+  tierGives,
+  tierName,
+  toggleHomeItem,
+  tripBanner,
+  WARDROBE_GROUPS,
+  yarnText,
+  type WardrobeGroupId,
+} from "./boardGame";
 import type { BoardPlacement } from "./placement";
 import { Popover } from "./Popover";
 
-type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "wardrobe" };
+type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "wardrobe" } | { kind: "home" };
 
 /** Priority text colors (AA on the board's surfaces) and check-circle colors, P1…P4. */
 const PRIO_INK = ["", "var(--p1-ink)", "var(--p2-ink)", "var(--p3-ink)", "var(--p4-ink)"];
@@ -96,7 +113,9 @@ export function Board(props: {
         ) : view.kind === "split" ? (
           <SplitSheet brain={brain} s={s} task={view.task} onDone={() => setView({ kind: "main" })} />
         ) : view.kind === "wardrobe" ? (
-          <Wardrobe brain={brain} s={s} onBack={() => setView({ kind: "main" })} />
+          <Wardrobe brain={brain} s={s} onBack={() => setView({ kind: "main" })} onHome={() => setView({ kind: "home" })} />
+        ) : view.kind === "home" ? (
+          <HomeSheet brain={brain} s={s} onBack={() => setView({ kind: "wardrobe" })} />
         ) : (
           <Main brain={brain} backend={backend} s={s} focusAdd={request.focusAdd} seq={request.seq} onSplit={(task) => setView({ kind: "split", task })} />
         )}
@@ -378,6 +397,7 @@ function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; bac
   const [note, setNote] = useState<Note | null>(null);
   return (
     <>
+      {s.trip && <TripBanner brain={brain} s={s} />}
       {s.focus && <FocusCard brain={brain} s={s} />}
 
       <AddTask brain={brain} focusAdd={focusAdd} seq={seq} note={note} setNote={setNote} />
@@ -740,9 +760,51 @@ function FocusCard({ brain, s }: { brain: Brain; s: BrainState }) {
         {f.isBreak ? "☕" : "🍅"} {String(Math.floor(left / 60)).padStart(2, "0")}:{String(left % 60).padStart(2, "0")}
       </span>
       <span className="what">{f.isBreak ? L("Đang nghỉ", "On a break") : f.task ? taskTitle(f.task) : L("Đang tập trung", "Focusing")}</span>
+      {s.craft !== null && <Yarn value={s.craft} />}
       <button className="btn small" onClick={() => brain.stopFocus()}>
         {L("Dừng", "Stop")}
       </button>
+    </div>
+  );
+}
+
+/** Knitting progress while focusing: a yarn ball inside a ring that fills up, and the percent. */
+function Yarn({ value }: { value: number }) {
+  const { pct, title } = yarnText(value);
+  const r = 12;
+  const c = 2 * Math.PI * r;
+  return (
+    <span className="yarn" title={title} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={L("Đan đồ cho góc nhà", "Knitting for the home corner")} aria-valuetext={title}>
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true" focusable="false">
+        <circle className="yarn-track" cx="15" cy="15" r={r} />
+        <circle className="yarn-ring" cx="15" cy="15" r={r} strokeDasharray={`${(c * pct) / 100} ${c}`} transform="rotate(-90 15 15)" />
+        <circle className="yarn-ball" cx="15" cy="15" r="7.5" />
+        <path className="yarn-lines" d="M9.4 12.6c2.7-.2 5.7 1.6 7.2 6M11.7 8.6c2.4 1.3 4.5 3.7 5.1 7.2M8.2 16.6c1.9-.2 4.3.9 5.5 4" />
+        <path className="yarn-tail" d="M20.6 19.4c1.4 1 1.6 2.4.6 3.4" />
+      </svg>
+      <b className="yarn-pct">{pct}%</b>
+    </span>
+  );
+}
+
+/** While the pet is away: where it went, when it's back, and a button to call it home early. */
+function TripBanner({ brain, s }: { brain: Brain; s: BrainState }) {
+  const b = tripBanner(s.trip!, Date.now());
+  const hint = useId();
+  return (
+    <div className="trip-banner" role="status">
+      <span className="trip-icon" aria-hidden>
+        <Icon name="luggage" size={16} />
+      </span>
+      <span className="trip-text">
+        <b>{b.title}</b> · {b.back}
+      </span>
+      <button type="button" className="btn small" title={b.hint} aria-describedby={hint} onClick={() => brain.callBack()}>
+        {L("Gọi về", "Call back")}
+      </button>
+      <span id={hint} className="sr-only">
+        {b.hint}
+      </span>
     </div>
   );
 }
@@ -920,44 +982,29 @@ function SplitSheet({ brain, s, task, onDone }: { brain: Brain; s: BrainState; t
   );
 }
 
-function Wardrobe({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: () => void }) {
+function Wardrobe({ brain, s, onBack, onHome }: { brain: Brain; s: BrainState; onBack: () => void; onHome: () => void }) {
   const today = new Date();
   const days = Array.from({ length: 30 }, (_, i) => dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29 + i)));
   const perfect = new Set(s.life.perfectDays);
   const locked = SPECIES_IDS.map(speciesInfo).filter((x) => x.unlock);
-  const progress = (a: (typeof ACCESSORIES)[number]) => {
-    const p = life.accessoryProgress(a, s.life);
-    return `${p.have}/${p.need}`;
-  };
   return (
     <div className="sheet">
-      <div>
+      <div className="sheet-nav">
         <button className="btn ghost small" onClick={onBack}>
           <Icon name="arrowLeft" size={14} /> {L("Quay lại", "Back")}
+        </button>
+        <button className="btn small" onClick={onHome}>
+          <Icon name="home" size={14} /> {L("Góc nhà", "Home")}
         </button>
       </div>
       <h2>
         <Icon name="hanger" size={18} /> {L("Tủ đồ", "Wardrobe")}
       </h2>
-      <div className="wardrobe">
-        {ACCESSORIES.map((a) => {
-          const has = s.life.unlocked.includes(a);
-          const wearing = s.life.wearing.includes(a);
-          return (
-            <button
-              key={a}
-              className={`item${wearing ? " wearing" : ""}${has ? "" : " locked"}`}
-              disabled={!has}
-              aria-pressed={wearing}
-              onClick={() => brain.toggleAccessory(a)}
-            >
-              <span className="emoji">{life.accessoryEmoji(a)}</span>
-              {life.accessoryName(a)}
-              <small>{has ? (wearing ? L("Đang đeo", "Wearing") : L("Bấm để đeo", "Tap to wear")) : `${life.accessoryRequirement(a)} (${progress(a)})`}</small>
-            </button>
-          );
-        })}
-      </div>
+      <ChestStrip s={s} />
+      {WARDROBE_GROUPS.map((g) => (
+        <AccessoryGroup key={g.id} id={g.id} items={g.items} brain={brain} s={s} />
+      ))}
+      <SouvenirShelf s={s} />
       <h2>
         <Icon name="paw" size={18} /> {L("Bạn mới", "New friends")}
       </h2>
@@ -989,6 +1036,255 @@ function Wardrobe({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: (
         {L(
           `Tổng ${s.life.totalDone} việc · ${s.life.goldens} bánh vàng · combo cao nhất ×${s.life.bestCombo} · chuỗi dài nhất ${s.life.bestStreak} ngày`,
           `${plural(s.life.totalDone, "", "task", "tasks").trim()} in total · ${plural(s.life.goldens, "", "golden treat", "golden treats").trim()} · best combo ×${s.life.bestCombo} · best streak ${plural(s.life.bestStreak, "", "day", "days").trim()}`,
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A small heading inside a sheet: title, an owned/total count, and an optional note on the right. */
+function GroupHead({ id, title, count, aside }: { id: string; title: string; count: string; aside?: string }) {
+  return (
+    <div className="w-group-head">
+      <h3 id={id}>{title}</h3>
+      <span className="count">{count}</span>
+      {aside && (
+        <span className="w-aside" title={aside}>
+          {aside}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Chests held, today's count and the next one, the season in progress, and the published odds. */
+function ChestStrip({ s }: { s: BrainState }) {
+  const [open, setOpen] = useState(false);
+  const odds = useId();
+  const c = s.chests;
+  const progress = chestProgress(c);
+  const season = s.season?.season ?? null;
+  return (
+    <section className="chests" aria-label={L("Rương quà", "Chests")}>
+      <div className="chest-row">
+        <span className={`chest-held${c.held > 0 ? " has" : ""}`} title={L("Xong một việc là mở một rương", "Finish a task to open one")}>
+          <span aria-hidden>🎁</span>
+          <b>×{c.held}</b>
+          <span className="sr-only">{L(`${c.held} rương chờ mở. Xong một việc là mở một rương.`, `${plural(c.held, "", "chest", "chests").trim()} to open. Finish a task to open one.`)}</span>
+        </span>
+        <span className="chest-next">
+          <span className="chest-next-text">{progress.text}</span>
+          {progress.meter !== null && (
+            <span className="chest-meter" aria-hidden>
+              <i style={{ width: `${progress.meter * 100}%` }} />
+            </span>
+          )}
+        </span>
+        <span className="chest-today" title={L("Mỗi ngày nhận tối đa 3 rương", "Up to 3 chests a day")}>
+          {L("hôm nay", "today")} <b>{c.today}/3</b>
+        </span>
+      </div>
+      <div className="chest-row">
+        <span className={`season-chip${s.season ? " on" : ""}`}>{seasonLine(s.season, new Date(), localeTag(getLang()))}</span>
+        <button type="button" className="odds-toggle" aria-expanded={open} aria-controls={odds} onClick={() => setOpen(!open)}>
+          {L("Tỉ lệ quà", "Odds")}
+          <Icon name="chevronDown" size={13} className="chev" />
+        </button>
+      </div>
+      {open && (
+        <div className="odds" id={odds}>
+          <div className="odds-bar" aria-hidden>
+            {TIERS.map((t) => (
+              <i key={t} className={`tier-${t}`} style={{ flexGrow: oddsPercent(t) }} />
+            ))}
+          </div>
+          <ul>
+            {TIERS.map((t) => (
+              <li key={t} className={`tier-${t}`}>
+                <span className="tier-name">
+                  <i aria-hidden />
+                  {tierName(t)}
+                </span>
+                <b className="tier-pct">{oddsPercent(t)}%</b>
+                <span className="tier-gives">{tierGives(t, season)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="odds-note">
+            {L(
+              "Cứ 30 phút làm việc chăm chỉ là có một rương, tối đa 3 rương mỗi ngày. Xong một việc là mở một rương. Quà chỉ để vui thôi, không bán gì cả.",
+              "A chest for every 30 minutes of active work, up to 3 a day. Finishing a task opens one. It's all just for fun: nothing is ever sold.",
+            )}
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** One group of accessories: milestones show what unlocks them, chest finds and seasonal ones where they come from. */
+function AccessoryGroup({ id, items, brain, s }: { id: WardrobeGroupId; items: readonly Accessory[]; brain: Brain; s: BrainState }) {
+  const head = useId();
+  const owned = items.filter((a) => s.life.unlocked.includes(a)).length;
+  const status = (a: Accessory, has: boolean, wearing: boolean): string => {
+    if (has) return wearing ? L("Đang đeo", "Wearing") : L("Bấm để đeo", "Tap to wear");
+    if (id === "milestone") {
+      const p = life.accessoryProgress(a, s.life);
+      return `${life.accessoryRequirement(a)} (${p.have}/${p.need})`;
+    }
+    if (id === "chest") return L("Có trong rương quà", "Found in chests");
+    const season = life.SEASONAL_ACCESSORIES[a]!;
+    return s.season?.season === season ? L(`${seasonLabel(season)} · đang có trong rương!`, `${seasonLabel(season)} · in chests now!`) : seasonLabel(season);
+  };
+  return (
+    <section className="w-group" aria-labelledby={head}>
+      <GroupHead id={head} title={groupTitle(id)} count={`${owned}/${items.length}`} />
+      <div className={`wardrobe${id === "chest" ? " cols-4" : ""}`}>
+        {items.map((a) => {
+          const has = s.life.unlocked.includes(a);
+          const wearing = s.life.wearing.includes(a);
+          const inSeason = id === "seasonal" && !has && s.season?.season === life.SEASONAL_ACCESSORIES[a];
+          return (
+            <button
+              key={a}
+              className={`item${wearing ? " wearing" : ""}${has ? "" : " locked"}${inSeason ? " in-season" : ""}`}
+              disabled={!has}
+              aria-pressed={wearing}
+              onClick={() => brain.toggleAccessory(a)}
+            >
+              <span className="emoji">{life.accessoryEmoji(a)}</span>
+              {life.accessoryName(a)}
+              <small>{status(a, has, wearing)}</small>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/** The 16 souvenirs from trips: the ones brought home on a shelf, the rest as silhouettes. */
+function SouvenirShelf({ s }: { s: BrainState }) {
+  const head = useId();
+  const owned = new Set(s.life.souvenirs);
+  return (
+    <section className="w-group" aria-labelledby={head}>
+      <GroupHead
+        id={head}
+        title={L("Quà lưu niệm", "Souvenirs")}
+        count={`${owned.size}/${SOUVENIRS.length}`}
+        aside={L("Xong hết kế hoạch là pet rủ đi chơi", "Finish the day's plan and the pet goes on a trip")}
+      />
+      <ul className="shelf">
+        {SOUVENIRS.map((x) => {
+          const has = owned.has(x.id);
+          const label = has ? `${itemName(x.id)} · ${L("từ", "from")} ${placeName(x.id)}` : L("Chưa có · đi chơi sẽ mang về", "Not found yet · trips bring these home");
+          return (
+            <li key={x.id} className={`souvenir${has ? "" : " missing"}`} title={label} aria-label={label}>
+              <span aria-hidden>{x.emoji}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** Decorations as SVG strings, drawn once per id and size. */
+const decorCache = new Map<string, string>();
+function decorSvg(id: DecorId, size: number): string {
+  const key = `${id}-${size}`;
+  let svg = decorCache.get(key);
+  if (!svg) {
+    svg = renderDecor(id, { size, idPrefix: `board-${key}` });
+    decorCache.set(key, svg);
+  }
+  return svg;
+}
+
+/** Board → Wardrobe → Home: the decorations the pet knitted, up to 3 of them set out beside it on the taskbar. */
+function HomeSheet({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: () => void }) {
+  const owned = s.life.decor;
+  const shown = homeDecor(s.prefs.homeItems, owned);
+  const [note, setNote] = useState<string | null>(null);
+  const head = useId();
+  const knit = Math.round(s.life.craft * 100);
+  const pick = (d: DecorId) => {
+    const next = toggleHomeItem(s.prefs.homeItems, owned, d);
+    if (!next) {
+      setNote(L("Góc nhà chỉ vừa 3 món thôi. Cất bớt một món rồi chọn tiếp nhé.", "The corner fits 3. Put one away first, then pick another."));
+      return;
+    }
+    setNote(null);
+    void brain.updatePrefs({ homeItems: next });
+  };
+  const aside =
+    owned.length === 0
+      ? undefined
+      : s.prefs.homeItems.length === 0
+        ? L("Đang bày 3 món mới nhất", "Showing your 3 newest")
+        : L(`Đã chọn ${shown.length}/${MAX_HOME_ITEMS}`, `${shown.length}/${MAX_HOME_ITEMS} chosen`);
+  return (
+    <div className="sheet">
+      <div className="sheet-nav">
+        <button className="btn ghost small" onClick={onBack}>
+          <Icon name="arrowLeft" size={14} /> {L("Tủ đồ", "Wardrobe")}
+        </button>
+      </div>
+      <h2>
+        <Icon name="home" size={18} /> {L("Góc nhà", "Home")}
+      </h2>
+      <p className="sheet-lead">
+        {L("Pet đan mấy món này trong lúc bạn tập trung. Chọn tối đa 3 món để bày cạnh pet trên thanh tác vụ.", "Your pet knits these while you focus. Pick up to 3 to set out beside it on the taskbar.")}
+      </p>
+      <div className={`home-preview${s.prefs.showHome ? "" : " off"}`} aria-hidden>
+        {Array.from({ length: MAX_HOME_ITEMS }, (_, i) =>
+          shown[i] ? <span key={shown[i]} className="home-spot" dangerouslySetInnerHTML={{ __html: decorSvg(shown[i], 52) }} /> : <span key={`empty-${i}`} className="home-spot empty" />,
+        )}
+        {!s.prefs.showHome && <span className="home-off">{L("Đang ẩn", "Hidden")}</span>}
+      </div>
+      <label className="home-toggle">
+        <input type="checkbox" role="switch" className="switch" checked={s.prefs.showHome} onChange={(e) => void brain.updatePrefs({ showHome: e.target.checked })} />
+        {L("Bày góc nhà trên thanh tác vụ", "Show home on the taskbar")}
+      </label>
+      <section className="w-group" aria-labelledby={head}>
+        <GroupHead id={head} title={L("Đồ trang trí", "Decorations")} count={`${owned.length}/${DECOR_IDS.length}`} aside={aside} />
+        <div className="decor-grid">
+          {DECOR_IDS.map((d) => {
+            if (!owned.includes(d)) {
+              return (
+                <div key={d} className="decor missing" title={L("Chưa đan", "Not knitted yet")}>
+                  <span className="decor-art" aria-hidden dangerouslySetInnerHTML={{ __html: decorSvg(d, 40) }} />
+                  <span className="decor-name">{decorName(d)}</span>
+                  <span className="sr-only">{L(", chưa đan", ", not knitted yet")}</span>
+                </div>
+              );
+            }
+            const on = shown.includes(d);
+            return (
+              <button key={d} type="button" className={`decor${on ? " on" : ""}`} aria-pressed={on} onClick={() => pick(d)}>
+                <span className="decor-art" aria-hidden dangerouslySetInnerHTML={{ __html: decorSvg(d, 40) }} />
+                <span className="decor-name">{decorName(d)}</span>
+                {on && (
+                  <span className="decor-check" aria-hidden>
+                    <Icon name="check" size={10} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+      <div className={`home-note${note ? " warn" : ""}`} role="status">
+        {note ?? (
+          <>
+            <Icon name="yarn" size={15} />
+            <span>
+              {owned.length < DECOR_IDS.length
+                ? L(`Đan thêm trong những phiên tập trung nhé · món đang đan được ${knit}%`, `Knit them during focus sessions · the next one is ${knit}% done`)
+                : L("Đủ cả 12 món rồi! Giờ mỗi món đan xong được +30 XP", "All 12 made! Each one knitted now gives +30 XP")}
+            </span>
+          </>
         )}
       </div>
     </div>

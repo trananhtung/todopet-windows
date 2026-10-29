@@ -1,6 +1,7 @@
 // The Diary window: what the pet did each day and why. Read-only; written by the Brain in the overlay.
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Backend } from "../backend/types";
+import { weekKey } from "../core/chapters";
 import { nextDayKey, timeString } from "../core/dates";
 import { type DiaryEntry, asText, kindIcon, parseEntries, summarize, summaryLine } from "../core/diary";
 import { L, setLang } from "../core/l10n";
@@ -10,7 +11,24 @@ import { localeTag, resolveLang } from "../ui/lang";
 import { PetStill } from "../ui/PetArt";
 import { useBackend, useBus, useWindowFocus } from "../ui/useBackend";
 import { copyText } from "./clipboard";
-import { FILTER_IDS, type FilterId, countByFilter, dayLabel, filterEntries, filterLabel, kindName, longDate, todayKey, withToday } from "./model";
+import { withDemoDiary } from "./demo";
+import {
+  FILTER_IDS,
+  type FilterId,
+  type Postcard,
+  chaptersByWeek,
+  countByFilter,
+  dayLabel,
+  filterEntries,
+  filterLabel,
+  kindName,
+  longDate,
+  postcardParts,
+  todayKey,
+  weekTitle,
+  withToday,
+  withWeekHeads,
+} from "./model";
 
 interface Boot {
   prefs: Prefs;
@@ -54,6 +72,10 @@ function Diary({ backend, boot }: { backend: Backend; boot: Boot }) {
   const [days, setDays] = useState<string[]>(() => [todayKey()]);
   const [day, setDay] = useState(() => todayKey());
   const [entries, setEntries] = useState<DiaryEntry[] | null>(null);
+  // Every kept day's entries, for the weekly chapters.
+  const [byDay, setByDay] = useState<ReadonlyMap<string, DiaryEntry[]>>(() => new Map());
+  // The browser demo shows a couple of sample weeks; a real diary is read as it is.
+  const diary = useMemo(() => ("demo" in backend ? withDemoDiary(backend.diary) : backend.diary), [backend]);
   const [active, setActive] = useState<ReadonlySet<FilterId>>(() => new Set());
   const [copied, setCopied] = useState<"ok" | "error" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -68,13 +90,18 @@ function Diary({ backend, boot }: { backend: Backend; boot: Boot }) {
     async (which: string) => {
       const ticket = ++request.current;
       const now = todayKey();
-      const [list, lines] = await Promise.all([backend.diary.days().catch(() => [] as string[]), backend.diary.read(which).catch(() => [] as string[])]);
+      const list = withToday(await diary.days().catch(() => [] as string[]), now);
+      // At most 14 small files: read them all, so each week's chapter can be recapped.
+      const read = list.includes(which) ? list : [...list, which];
+      const lines = await Promise.all(read.map((d) => diary.read(d).catch(() => [] as string[])));
       if (ticket !== request.current) return;
+      const all = new Map(read.map((d, i) => [d, parseEntries(lines[i]).sort((a, b) => a.at - b.at)]));
       setToday(now);
-      setDays(withToday(list, now));
-      setEntries(parseEntries(lines).sort((a, b) => a.at - b.at));
+      setDays(list);
+      setByDay(all);
+      setEntries(all.get(which) ?? []);
     },
-    [backend],
+    [diary],
   );
 
   const reloadPrefs = useCallback(async () => {
@@ -146,6 +173,9 @@ function Diary({ backend, boot }: { backend: Backend; boot: Boot }) {
     });
 
   const counts = useMemo(() => countByFilter(entries ?? []), [entries]);
+  const chapters = useMemo(() => chaptersByWeek(byDay), [byDay]);
+  const rows = useMemo(() => withWeekHeads(days), [days]);
+  const chapter = chapters.get(weekKey(day));
   const shown = useMemo(() => filterEntries(entries ?? [], active), [entries, active]);
   const head = dayLabel(day, today, lang);
 
@@ -160,23 +190,51 @@ function Diary({ backend, boot }: { backend: Backend; boot: Boot }) {
           </div>
         </div>
         <div className="days" role="tablist" aria-orientation="vertical" aria-label={L("Các ngày", "Days")} onKeyDown={onDaysKey}>
-          {days.map((d) => {
+          {rows.map(({ day: d, week, first }) => {
             const label = dayLabel(d, today, lang);
+            const recap = chapters.get(week)?.recap;
+            const postcard = byDay.get(d)?.some((e) => e.tag === "postcard");
             return (
-              <button
-                key={d}
-                id={`day-${d}`}
-                type="button"
-                role="tab"
-                className={`nav-item day-item${d === today ? " is-today" : ""}`}
-                aria-selected={d === day}
-                aria-controls="diary-panel"
-                tabIndex={d === day ? 0 : -1}
-                onClick={() => pick(d)}
-              >
-                <span className="day-title">{label.title}</span>
-                <span className="day-date">{label.date}</span>
-              </button>
+              <Fragment key={d}>
+                {/* The chapter is read out at the top of the page; here it only groups the days. */}
+                {first && (
+                  <div className="week-head" aria-hidden="true">
+                    <span className="week-title">{weekTitle(week, lang)}</span>
+                    {recap && (
+                      <span className="week-recap">
+                        {/* Wrap between the parts, never inside "2 trips". */}
+                        {recap.split(" · ").map((part, i) => (
+                          <Fragment key={part}>
+                            {i > 0 && " · "}
+                            <span>{part}</span>
+                          </Fragment>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <button
+                  id={`day-${d}`}
+                  type="button"
+                  role="tab"
+                  className={`nav-item day-item${d === today ? " is-today" : ""}`}
+                  aria-selected={d === day}
+                  aria-controls="diary-panel"
+                  tabIndex={d === day ? 0 : -1}
+                  onClick={() => pick(d)}
+                >
+                  <span className="day-title">{label.title}</span>
+                  <span className="day-date">
+                    {label.date}
+                    {postcard && (
+                      <span className="day-mark" title={L("Có bưu thiếp", "A postcard")}>
+                        <span aria-hidden="true"> · 💌</span>
+                        <span className="sr-only">{L(", có bưu thiếp", ", a postcard")}</span>
+                      </span>
+                    )}
+                  </span>
+                </button>
+              </Fragment>
             );
           })}
         </div>
@@ -187,6 +245,10 @@ function Diary({ backend, boot }: { backend: Backend; boot: Boot }) {
         <div className="page" key={day}>
           <header className="diary-head">
             <div className="diary-head-text">
+              <p className="chapter-line">
+                <span className="chapter-title">{weekTitle(weekKey(day), lang)}</span>
+                {chapter && <span className="chapter-recap">{chapter.recap}</span>}
+              </p>
               <h1>{head.title}</h1>
               <p className="diary-date">{longDate(day, lang, day === today || nextDayKey(day) === today)}</p>
             </div>
@@ -252,20 +314,27 @@ function Diary({ backend, boot }: { backend: Backend; boot: Boot }) {
                 </div>
               ) : (
                 <ol className="timeline" aria-label={L("Các mục nhật ký", "Diary entries")}>
-                  {shown.map((e, i) => (
-                    <li key={`${e.at}-${i}`} className="entry" data-kind={e.kind}>
-                      <time className="entry-time" dateTime={new Date(e.at).toISOString()}>
-                        {timeString(new Date(e.at))}
-                      </time>
-                      <span className="entry-icon" aria-hidden="true">
-                        {kindIcon[e.kind] ?? "•"}
-                      </span>
-                      <p className="entry-text">
-                        <span className="sr-only">{kindName(e.kind)}: </span>
-                        {e.text}
-                      </p>
-                    </li>
-                  ))}
+                  {shown.map((e, i) => {
+                    const card = e.tag === "postcard" ? postcardParts(e.text) : null;
+                    return (
+                      <li key={`${e.at}-${i}`} className={`entry${card ? " has-postcard" : ""}`} data-kind={e.kind}>
+                        <time className="entry-time" dateTime={new Date(e.at).toISOString()}>
+                          {timeString(new Date(e.at))}
+                        </time>
+                        <span className="entry-icon" aria-hidden="true">
+                          {card ? "💌" : (kindIcon[e.kind] ?? "•")}
+                        </span>
+                        {card ? (
+                          <PostcardView card={card} petName={prefs.petName.trim() || "Mochi"} />
+                        ) : (
+                          <p className="entry-text">
+                            <span className="sr-only">{kindName(e.kind)}: </span>
+                            {e.text}
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </>
@@ -273,6 +342,28 @@ function Diary({ backend, boot }: { backend: Backend; boot: Boot }) {
         </div>
       </main>
     </div>
+  );
+}
+
+/** A trip's postcard: the message on the left, the stamp and a postmark on the right, airmail stripes around. */
+function PostcardView({ card, petName }: { card: Postcard; petName: string }) {
+  return (
+    <figure className="postcard">
+      <div className="postcard-message">
+        <figcaption className="postcard-head">{card.head}</figcaption>
+        <p className="postcard-text">{card.body}</p>
+        <p className="postcard-sign">— {petName}</p>
+      </div>
+      <div className="postcard-side" aria-hidden="true">
+        <span className="postcard-stamp">{card.souvenir?.emoji ?? "💌"}</span>
+        <span className="postcard-mark">{card.souvenir ? L(card.souvenir.place.vi, card.souvenir.place.en) : "TodoPet"}</span>
+        <span className="postcard-lines">
+          <i />
+          <i />
+          <i />
+        </span>
+      </div>
+    </figure>
   );
 }
 

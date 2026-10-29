@@ -747,3 +747,25 @@
 .inline-form.stack .btn {
   align-self: flex-end;
 }
+
+/* Pet → Home corner: the decorations on show, small, under the help text. */
+.home-mini {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.home-mini-item {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--paper-2);
+}
+.home-mini-item svg {
+  display: block;
+}
+.home-mini.off .home-mini-item {
+  opacity: 0.45;
+  filter: grayscale(0.7);
+}

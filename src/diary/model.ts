@@ -1,7 +1,10 @@
-// Pure helpers behind the Diary window: filter groups, day labels. Unit-tested in model.test.ts.
+// Pure helpers behind the Diary window: filter groups, day labels, week chapters and postcards. Unit-tested in
+// model.test.ts.
+import { weekChapters, weekKey, type WeekChapter } from "../core/chapters";
 import { dayKey, nextDayKey, parseDate } from "../core/dates";
 import type { DiaryEntry, DiaryKind } from "../core/diary";
 import { L } from "../core/l10n";
+import { SOUVENIRS, type Souvenir } from "../core/trips";
 import type { Lang } from "../core/types";
 import { localeTag } from "../ui/lang";
 
@@ -116,4 +119,43 @@ export function kindName(kind: DiaryKind): string {
     case "system":
       return L("Hệ thống", "System");
   }
+}
+
+/** "Week of Oct 26" / "Tuần từ 26 thg 10" for a week's Monday key. */
+export function weekTitle(key: string, lang: Lang): string {
+  const date = parseDate(key);
+  if (!date) return key;
+  const short = date.toLocaleDateString(localeTag(lang), { day: "numeric", month: "short" });
+  return L(`Tuần từ ${short}`, `Week of ${short}`);
+}
+
+/** Every day's entries, grouped into weekly chapters and looked up by the week's Monday. */
+export function chaptersByWeek(byDay: ReadonlyMap<string, readonly DiaryEntry[]>): Map<string, WeekChapter> {
+  return new Map(weekChapters([...byDay.values()].flat()).map((c) => [c.key, c]));
+}
+
+/** The day list with a chapter heading before the first day of each week (days come newest first). */
+export function withWeekHeads(days: readonly string[]): { day: string; week: string; first: boolean }[] {
+  return days.map((day, i) => {
+    const week = weekKey(day);
+    return { day, week, first: i === 0 || weekKey(days[i - 1]) !== week };
+  });
+}
+
+export interface Postcard {
+  /** "A postcard from Hội An". */
+  head: string;
+  /** What the pet wrote. */
+  body: string;
+  /** The place it came from, when it is one of the 16 (for the stamp). */
+  souvenir: Souvenir | null;
+}
+
+/** Splits a postcard entry ("💌 A postcard from Hội An: …") into its heading and message; null if it isn't one. */
+export function postcardParts(text: string): Postcard | null {
+  const m = /^💌\s*([^:]+?):\s+([\s\S]+)$/u.exec(text.trim());
+  if (!m) return null;
+  const head = m[1].trim();
+  const souvenir = SOUVENIRS.find((x) => head.endsWith(x.place.en) || head.endsWith(x.place.vi)) ?? null;
+  return { head, body: m[2].trim(), souvenir };
 }
