@@ -7,6 +7,7 @@ import { L, langFromLocale, pick, setLang } from "./l10n";
 import * as life from "./life";
 import { actionable, buildDay, dueTime, nextTask, planned, ranked, statsFromRaw, taskFromRaw, uiPriority, type TodoTask } from "./models";
 import * as lines from "./lines";
+import * as friends from "./friends";
 import { defaultMoodInputs, evaluateMood, moodEmoji, moodLabel } from "./mood";
 import { addRestDays, dayRange, defaultPrefs, isWorkday, MAX_REST_DAYS, MAX_REST_RANGE, prefsFromJson } from "./prefs";
 import { appRules, currentDistraction, hostOf, matchSite, siteRules } from "./sites";
@@ -381,6 +382,47 @@ describe("kind lines", () => {
         }
       }
     }
+  });
+
+  // v0.6 "Friends": the words around cards, friends and the blob live in friends.ts. They never scold either (a refused card is
+  // "that's one of your own older cards", never "you did it wrong"), and none of them repeats what a pasted card says.
+  it("never scolds in the Friends words: every refusal, help line and win, in both languages", () => {
+    const card: friends.PetCard = { pk: "A".repeat(43), name: "Mai", species: "shiba", accessories: [], stage: 2, week: "2026-W44", weekDone: 5, history: "G".repeat(28), date: "2026-10-29" };
+    const friend: friends.Friend = { ...card, lastVisit: null };
+    const errors: friends.CardError[] = ["empty", "tooLong", "prefix", "encoding", "json", "shape", "version", "key", "name", "species", "accessory", "number", "history", "week", "date", "future", "signature", "unchecked"];
+    const refusals = (): string[] => {
+      const out: string[] = [];
+      // Your own card, an older card of yours, a friend's older card, a full list.
+      for (const r of [
+        friends.addFriend([], card, card.pk),
+        friends.addFriend([], card, null, [card.pk]),
+        friends.addFriend([friend], { ...card, date: "2026-10-20", week: "2026-W43" }, null),
+        friends.addFriend(Array.from({ length: friends.MAX_FRIENDS }, (_, i) => ({ ...friend, pk: `${i}`.padEnd(43, "B") })), card, null),
+      ]) {
+        if (!r.ok) out.push(r.message);
+      }
+      return out;
+    };
+    const kind: [string, () => string[]][] = [
+      ["a card that can't be added", refusals],
+      ["a card that can't be read", () => errors.map((e) => friends.cardErrorText(e))],
+      ["the blob's help line", () => [friends.bossHelpText()]],
+      ["the blob, alone", () => [friends.bossAloneText()]],
+      ["the blob, beaten", () => [friends.bossWinText(true), friends.bossWinText(false)]],
+      ["the visit's label", () => [friends.visitLabel("Mai", 0), friends.visitLabel("Mai", 4), friends.visitLabel("Mai · #a3f", 12)]],
+    ];
+    for (const [what, make] of kind) {
+      for (const text of variants(() => make().join("\n"))) {
+        expect(text, `${what}: ${text}`).not.toMatch(scolding);
+        expect(text, `${what}: ${text}`).not.toMatch(shouting);
+        // Nothing a card says comes back in an error.
+        if (what.startsWith("a card")) expect(text, `${what}: ${text}`).not.toMatch(/\bMai\b|<|>/);
+      }
+    }
+    setLang("en");
+    // The older-card words are the ones the sheet promises.
+    expect(refusals()[1]).toContain("That's one of your own older cards");
+    expect(friends.bossHelpText()).toContain("(each person counts up to 15)");
   });
 
   it("speaks kindly: the voice lines are invitations, never orders", () => {

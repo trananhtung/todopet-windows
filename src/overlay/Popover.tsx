@@ -6,7 +6,8 @@ import { placePopover } from "./placement";
  * A small menu or confirmation anchored to a button. It is portaled to <body> with `position: fixed`,
  * so the board's scroll area can never clip it, and flips above the button when there is no room below.
  * Escape closes only the popover (not the board) and returns focus to the button; so do a click
- * outside, scrolling, and resizing.
+ * outside, scrolling, and resizing. A confirmation (`alertdialog`) is the exception for scrolling: it holds a
+ * sentence that is being read, so it stays and follows its button (within the board) instead of vanishing.
  */
 export function Popover({
   anchor,
@@ -28,6 +29,8 @@ export function Popover({
   const [pos, setPos] = useState<{ left: number; top: number; up: boolean } | null>(null);
   const close = useRef(onClose);
   close.current = onClose;
+  // Puts the popover next to its button; set by the layout effect below, so that a scroll can do it again.
+  const placeAgain = useRef<() => void>(() => undefined);
 
   useLayoutEffect(() => {
     const place = () => {
@@ -44,10 +47,11 @@ export function Popover({
         placePopover(
           { left: r.left, top: r.top, width: r.width, height: r.height },
           { width: el.offsetWidth, height: el.offsetHeight },
-          board && board.width > 0 ? { ...bounds, bounds: { left: board.left, width: board.width } } : bounds,
+          board && board.width > 0 ? { ...bounds, bounds: { left: board.left, width: board.width, top: board.top, height: board.height } } : bounds,
         ),
       );
     };
+    placeAgain.current = place;
     place();
   }, [anchor]);
 
@@ -85,7 +89,10 @@ export function Popover({
       }
     };
     const onScroll = (e: Event) => {
-      if (!(e.target instanceof Node && ref.current?.contains(e.target))) close.current(false);
+      if (e.target instanceof Node && ref.current?.contains(e.target)) return;
+      // A question stays until it is answered; the others are about where their button was.
+      if (role === "alertdialog") placeAgain.current();
+      else close.current(false);
     };
     const onResize = () => close.current(false);
     document.addEventListener("pointerdown", onDown, true);

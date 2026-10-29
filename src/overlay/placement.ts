@@ -130,22 +130,28 @@ export function placeBoard(input: PlacementInput): BoardPlacement {
 
 /**
  * Where a popover goes next to `anchor`: below it, or above when there is more room there. `viewport.bounds` is the
- * board it was opened from (its left edge and width): the popover stays inside it when it can.
+ * board it was opened from: the popover stays inside it when it can, across (`left`, `width`) and, when the board's `top`
+ * and `height` are given, down (a question under the lowest button flips above it instead of hanging over the footer).
  */
 export function placePopover(
   anchor: Rect,
   size: { width: number; height: number },
-  viewport: { width: number; height: number; bounds?: { left: number; width: number } },
+  viewport: { width: number; height: number; bounds?: { left: number; width: number; top?: number; height?: number } },
   gap = 4,
   margin = 8,
 ) {
-  const below = viewport.height - (anchor.top + anchor.height) - gap - margin;
-  const above = anchor.top - gap - margin;
+  const b = viewport.bounds;
+  const boxed = b !== undefined && b.top !== undefined && b.height !== undefined && b.height > 0;
+  // The room the popover may use, top to bottom: the board's, or the screen's.
+  const highest = boxed ? Math.max(0, b.top!) : 0;
+  const lowest = boxed ? Math.min(viewport.height, b.top! + b.height!) : viewport.height;
+  const below = lowest - (anchor.top + anchor.height) - gap - margin;
+  const above = anchor.top - gap - margin - highest;
   const up = size.height > below && above > below;
   let top = up ? anchor.top - gap - size.height : anchor.top + anchor.height + gap;
-  top = Math.max(margin, Math.min(top, viewport.height - size.height - margin));
-  const lo = Math.max(margin, (viewport.bounds?.left ?? 0) + margin);
-  const hi = Math.min(viewport.width, viewport.bounds ? viewport.bounds.left + viewport.bounds.width : viewport.width) - size.width - margin;
+  top = Math.max(highest + margin, Math.min(top, lowest - size.height - margin));
+  const lo = Math.max(margin, (b?.left ?? 0) + margin);
+  const hi = Math.min(viewport.width, b ? b.left + b.width : viewport.width) - size.width - margin;
   let left = anchor.left + anchor.width - size.width;
   // A board narrower than the popover can't hold it: keep it on screen at least.
   left = hi < lo ? Math.max(margin, Math.min(left, viewport.width - size.width - margin, lo)) : Math.max(lo, Math.min(left, hi));

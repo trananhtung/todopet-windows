@@ -75,3 +75,22 @@ describe("demo backend: the sample day", () => {
     }
   });
 });
+
+describe("demo backend: the card identity (v0.6 evaluation, issue 10)", () => {
+  it("gives each load of the demo an identity of its own, so one load's card is a friend's card in another", async () => {
+    const a = createDemoBackend();
+    const b = createDemoBackend();
+    expect(await a.cards.publicKey()).not.toBe(await b.cards.publicKey());
+    const sig = await a.cards.sign("payload");
+    expect(await b.cards.verify(await a.cards.publicKey(), "payload", sig)).toBe(true);
+  });
+
+  it("keeps the fixed one for tests that don't ask for more, and takes a seed", async () => {
+    const x = await createDemoBackend({ persist: false }).cards.publicKey();
+    expect(await createDemoBackend({ persist: false }).cards.publicKey()).toBe(x);
+    const seeded = await createDemoBackend({ persist: false, cardSeed: "launch-1" }).cards.publicKey();
+    expect(seeded).not.toBe(x);
+    expect(await createDemoBackend({ persist: false, cardSeed: "launch-1" }).cards.publicKey()).toBe(seeded);
+    expect(await createDemoBackend({ persist: false, cardSeed: "launch-2" }).cards.publicKey()).not.toBe(seeded);
+  });
+});

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { Backend } from "../backend/types";
 import type { Brain, BrainState, CelebrationEvent } from "../core/brain";
 import { currentEvent } from "../core/calendar";
+import { sameNameTags } from "../core/friends";
 import { getLang, L } from "../core/l10n";
 import { stageOf } from "../core/life";
 import type { TodoTask } from "../core/models";
@@ -575,6 +576,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
             anchor={anchor}
             hideLabel={!!showBubble}
             petName={s.prefs.petName}
+            tag={sameNameTags(s.friends)[s.visitor.friend.pk] ?? null}
             onOpen={() => {
               brain.endVisit();
               openBoard(false, { friends: true });

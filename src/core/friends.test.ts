@@ -7,6 +7,7 @@ import {
   MAX_CARD_CHARS,
   MAX_FRIENDS,
   MAX_NAME_MARKS,
+  MAX_OLD_KEYS,
   BOSS_HP_PER_MEMBER,
   MAX_VISITS_PER_DAY,
   VISIT_GAP_MS,
@@ -30,7 +31,11 @@ import {
   normalizeHistory,
   parseCard,
   pickVisitor,
+  pkTag,
   recordVisit,
+  retireKey,
+  sameNameTags,
+  withTag,
   sampleCards,
   visitDelayMs,
   removeFriend,
@@ -599,6 +604,31 @@ describe("the friend list", () => {
     expect(addFriend(removeFriend(twelve, keyOf(3)), card({ pk: keyOf("extra") }), ME)).toMatchObject({ ok: true });
   });
 
+  it("refuses one of my own older cards, from before a new card identity, kindly (v0.6 evaluation, issue 5)", () => {
+    setLang("en");
+    const OLD = keyOf("my-old-key");
+    const list = [friend({ pk: A })];
+    const out = addFriend(list, card({ pk: OLD, name: "Mochi" }), ME, [OLD]);
+    expect(out).toMatchObject({ ok: false, error: "former" });
+    if (!out.ok) {
+      expect(out.message).toContain("That's one of your own older cards");
+      expect(out.message).not.toContain("Mochi");
+    }
+    expect(list).toHaveLength(1);
+    setLang("vi");
+    const vi = addFriend(list, card({ pk: OLD }), ME, [OLD]);
+    setLang("en");
+    expect(vi.ok ? "" : vi.message).toMatch(/thẻ cũ/);
+    // Anyone else is still a friend, and with no older keys nothing is refused.
+    expect(addFriend(list, card({ pk: B }), ME, [OLD])).toMatchObject({ ok: true });
+    expect(addFriend(list, card({ pk: OLD }), ME, [])).toMatchObject({ ok: true });
+    expect(addFriend(list, card({ pk: OLD }), ME)).toMatchObject({ ok: true });
+    // It is refused even when this PC's current key can't be read.
+    expect(addFriend(list, card({ pk: OLD }), null, [OLD])).toMatchObject({ ok: false, error: "former" });
+    // My current key is still "your own card".
+    expect(addFriend(list, card({ pk: ME }), ME, [OLD])).toMatchObject({ ok: false, error: "self" });
+  });
+
   it("never changes the list it was given", () => {
     const list = Object.freeze([Object.freeze(friend())]);
     expect(() => addFriend(list, card({ pk: B }), ME)).not.toThrow();
@@ -620,7 +650,7 @@ describe("the stored friends document", () => {
 
   it("starts empty when there is nothing, or nothing usable", () => {
     for (const nothing of [null, undefined, "x", 5, [], {}]) {
-      expect(read(nothing)).toEqual({ friends: [], visits: { day: "", count: 0, lastAt: null } });
+      expect(read(nothing)).toEqual({ friends: [], visits: { day: "", count: 0, lastAt: null }, oldKeys: [] });
     }
   });
 
@@ -631,8 +661,41 @@ describe("the stored friends document", () => {
   });
 
   it("round-trips what it saved", () => {
-    const doc = { friends: [friend({ lastVisit: 99 }), friend({ pk: keyOf("b"), name: "Bin" })], visits: { day: TODAY, count: 1, lastAt: 1234 } };
+    const doc = { friends: [friend({ lastVisit: 99 }), friend({ pk: keyOf("b"), name: "Bin" })], visits: { day: TODAY, count: 1, lastAt: 1234 }, oldKeys: [keyOf("old-1"), keyOf("old-2")] };
     expect(read(JSON.parse(JSON.stringify(docToJson(doc))))).toEqual(doc);
+  });
+
+  it("remembers my older card identities, at most 10, newest last, and only real keys (v0.6 evaluation, issue 5)", () => {
+    const OLDER = Array.from({ length: 14 }, (_, i) => keyOf(`old-${i}`));
+    expect(MAX_OLD_KEYS).toBe(10);
+    // Read back: junk and repeats are dropped, and the newest 10 stay.
+    const doc = read({ friends: [], oldKeys: [...OLDER, OLDER[13], "short", 5, null, { pk: OLDER[0] }] });
+    expect(doc.oldKeys).toEqual(OLDER.slice(4));
+    expect(doc.oldKeys).toHaveLength(10);
+    expect(read({ friends: [], oldKeys: "nope" }).oldKeys).toEqual([]);
+    expect(read({ friends: [] }).oldKeys).toEqual([]);
+    // Written out as plain JSON.
+    expect(docToJson(doc)).toMatchObject({ oldKeys: OLDER.slice(4) });
+    expect(read(JSON.parse(JSON.stringify(docToJson(doc))))).toEqual(doc);
+  });
+
+  it("retires a key into the document: newest last, no repeats, never more than 10, the document it was given untouched", () => {
+    let doc = read({ friends: [] });
+    const first = doc;
+    for (let i = 0; i < 12; i++) doc = retireKey(doc, keyOf(`k-${i}`));
+    expect(doc.oldKeys).toEqual(Array.from({ length: 10 }, (_, i) => keyOf(`k-${i + 2}`)));
+    expect(first.oldKeys).toEqual([]);
+    // The same key again moves to the end instead of repeating.
+    expect(retireKey(doc, keyOf("k-5")).oldKeys.at(-1)).toBe(keyOf("k-5"));
+    expect(retireKey(doc, keyOf("k-5")).oldKeys).toHaveLength(10);
+    // Something that isn't a key is not remembered.
+    expect(retireKey(doc, "nope")).toBe(doc);
+  });
+
+  it("drops a stored friend whose key is one of my older ones", () => {
+    const OLD = keyOf("my-old");
+    const doc = read({ friends: [friend({ pk: OLD, name: "Mochi" }), friend({ pk: keyOf("b"), name: "Bin" })], oldKeys: [OLD] });
+    expect(doc.friends.map((f) => f.name)).toEqual(["Bin"]);
   });
 
   it("drops stored friends that no longer hold up: damaged, repeated or ourselves", () => {
@@ -936,17 +999,39 @@ describe("the weekly boss", () => {
   });
 
   it("is beaten when the damage reaches the HP, together, and never goes below 0", () => {
-    // Two members: 30 HP.
-    expect(boss(10, [friend({ weekDone: 19 })]).defeated).toBe(false);
-    expect(boss(10, [friend({ weekDone: 19 })]).hp).toBe(1);
-    const won = boss(10, [friend({ weekDone: 20 })]);
+    // Two members: 30 HP, 15 each at most.
+    expect(boss(14, [friend({ weekDone: 15 })]).defeated).toBe(false);
+    expect(boss(14, [friend({ weekDone: 15 })]).hp).toBe(1);
+    const won = boss(15, [friend({ weekDone: 15 })]);
     expect(won).toMatchObject({ hp: 0, defeated: true, damage: 30 });
     const over = boss(40, [friend({ weekDone: 100 })]);
-    expect(over).toMatchObject({ hp: 0, defeated: true });
-    expect(over.damage).toBe(140);
+    expect(over).toMatchObject({ hp: 0, defeated: true, damage: 30 });
     // Alone it is 15.
     expect(boss(15, []).defeated).toBe(true);
     expect(boss(14, []).defeated).toBe(false);
+  });
+
+  // v0.6 evaluation, issue 4: a card that says 999 tasks beat the blob on its own and paid the receiver +50 XP and a 🏅.
+  it("counts each person for their share at most, 15: one big number can't win alone (v0.6 evaluation, issue 4)", () => {
+    expect(boss(0, [friend({ weekDone: 999 })])).toMatchObject({ damage: 15, hp: 15, maxHp: 30, defeated: false });
+    // Three members, one huge card: 15 of 45.
+    const three = boss(0, [friend({ weekDone: 999 }), friend({ pk: keyOf("b"), weekDone: 0 })]);
+    expect(three).toMatchObject({ damage: 15, hp: 30, defeated: false });
+    // Everyone has to bring their share.
+    expect(boss(15, [friend({ weekDone: 999 }), friend({ pk: keyOf("b"), weekDone: 14 })]).defeated).toBe(false);
+    expect(boss(15, [friend({ weekDone: 999 }), friend({ pk: keyOf("b"), weekDone: 15 })])).toMatchObject({ defeated: true, hp: 0, damage: 45 });
+    // Your own live count is capped the same way: 99 of your own tasks don't pay for a friend who did nothing.
+    expect(boss(99, [friend({ weekDone: 0 })])).toMatchObject({ damage: 15, hp: 15, defeated: false });
+    expect(boss(99, [])).toMatchObject({ damage: 15, hp: 0, defeated: true });
+  });
+
+  it("still shows the real count of each person, and what it counted for", () => {
+    const b = boss(40, [friend({ weekDone: 999 }), friend({ pk: keyOf("b"), weekDone: 3 })]);
+    expect(b.members.map((m) => [m.done, m.counted])).toEqual([
+      [40, 15],
+      [999, 15],
+      [3, 3],
+    ]);
   });
 
   it("gets bigger when a friend joins, and a friend leaving takes their share with them", () => {
@@ -961,7 +1046,8 @@ describe("the weekly boss", () => {
     const monday = "2026-11-02";
     const friends = [friend({ date: "2026-11-01", week: "2026-W44", weekDone: 30 })];
     // On Sunday it is still W44, on Monday it is a new blob.
-    expect(boss(0, friends, "2026-11-01")).toMatchObject({ week: "2026-W44", maxHp: 30, damage: 30, hp: 0, defeated: true });
+    expect(boss(0, friends, "2026-11-01")).toMatchObject({ week: "2026-W44", maxHp: 30, damage: 15, hp: 15, defeated: false });
+    expect(boss(15, friends, "2026-11-01")).toMatchObject({ week: "2026-W44", maxHp: 30, damage: 30, hp: 0, defeated: true });
     expect(boss(0, friends, monday)).toMatchObject({ week: "2026-W45", maxHp: 15, damage: 0, hp: 15, defeated: false, waiting: 1 });
   });
 
@@ -976,6 +1062,88 @@ describe("the weekly boss", () => {
     setLang("en");
     expect(vi).toBe("Bạn");
     expect(boss(1, []).members[0].name).toBe("You");
+  });
+});
+
+
+describe("friends who share a name (v0.6 evaluation, issue 3)", () => {
+  const f = (pk: string, name: string): Pick<Friend, "pk" | "name"> => ({ pk, name });
+
+  it("gives a short tag from the public key: '#' and 3 letters or digits, the same every time", () => {
+    expect(pkTag(MAI)).toMatch(/^#[0-9a-f]{3}$/);
+    expect(pkTag(MAI)).toBe(pkTag(MAI));
+    expect(pkTag(MAI, 5)).toMatch(/^#[0-9a-f]{5}$/);
+    expect(pkTag(MAI, 5).startsWith(pkTag(MAI))).toBe(true);
+    // Spread out, not one value.
+    expect(new Set(Array.from({ length: 200 }, (_, i) => pkTag(keyOf(i)))).size).toBeGreaterThan(150);
+  });
+
+  it("tags nobody whose name is the only one", () => {
+    expect(sameNameTags([])).toEqual({});
+    expect(sameNameTags([f(keyOf(1), "Mai")])).toEqual({});
+    expect(sameNameTags([f(keyOf(1), "Mai"), f(keyOf(2), "Bin"), f(keyOf(3), "Cát")])).toEqual({});
+  });
+
+  it("tags every friend of a name that two or more share, each differently, and no one else", () => {
+    const tags = sameNameTags([f(keyOf(1), "Mai"), f(keyOf(2), "Bin"), f(keyOf(3), "Mai"), f(keyOf(4), "Mai")]);
+    expect(Object.keys(tags).sort()).toEqual([keyOf(1), keyOf(3), keyOf(4)].sort());
+    expect(tags[keyOf(1)]).toBe(pkTag(keyOf(1)));
+    expect(new Set(Object.values(tags)).size).toBe(3);
+    expect(tags[keyOf(2)]).toBeUndefined();
+  });
+
+  it("is stable: the same friend keeps the tag in any order, and whoever else joins a different name", () => {
+    const a = sameNameTags([f(keyOf(1), "Mai"), f(keyOf(2), "Mai")]);
+    const b = sameNameTags([f(keyOf(2), "Mai"), f(keyOf(9), "Zed"), f(keyOf(1), "Mai")]);
+    expect(b).toEqual(a);
+    expect(sameNameTags([f(keyOf(1), "Mai"), f(keyOf(2), "Mai"), f(keyOf(5), "Mai")])[keyOf(1)]).toBe(a[keyOf(1)]);
+  });
+
+  it("compares names the way 'passes for mine' does: case, fullwidth letters, accents and joiners aside", () => {
+    expect(looksLikeMe("Ｍａｉ", "mai")).toBe(true);
+    const tags = sameNameTags([f(keyOf(1), "Mai"), f(keyOf(2), "MAI"), f(keyOf(3), "Ｍａｉ"), f(keyOf(4), "Mài"), f(keyOf(5), "Bin")]);
+    expect(Object.keys(tags)).toHaveLength(4);
+    expect(tags[keyOf(5)]).toBeUndefined();
+    // A name that folds to nothing is not "the same" as another that does.
+    expect(sameNameTags([f(keyOf(1), "\u0301"), f(keyOf(2), "\u0301\u0302")])).toEqual({});
+  });
+
+  it("tells apart two tags that would be equal by making them longer, for that name only", () => {
+    const seen = new Map<string, string>();
+    let pair: [string, string] | null = null;
+    for (let i = 0; i < 20_000 && !pair; i++) {
+      const pk = keyOf(`c-${i}`);
+      const tag = pkTag(pk);
+      const other = seen.get(tag);
+      if (other) pair = [other, pk];
+      else seen.set(tag, pk);
+    }
+    expect(pair).not.toBeNull();
+    const [p, q] = pair!;
+    const tags = sameNameTags([f(p, "Mai"), f(q, "Mai"), f(keyOf(1), "Bin"), f(keyOf(2), "Bin")]);
+    expect(tags[p]).not.toBe(tags[q]);
+    expect(tags[p].length).toBeGreaterThan(4);
+    expect(tags[p]).toBe(pkTag(p, tags[p].length - 1));
+    // The other name keeps its short tags.
+    expect(tags[keyOf(1)]).toHaveLength(4);
+  });
+
+  it("writes the name with its tag: 'Mai · #a3f'", () => {
+    expect(withTag("Mai", pkTag(MAI))).toBe(`Mai · ${pkTag(MAI)}`);
+    expect(withTag("Mai", undefined)).toBe("Mai");
+    expect(withTag("Mai", null)).toBe("Mai");
+  });
+
+  it("puts the tag on the boss's helpers too, for friends who share a name, even one whose card is waiting", () => {
+    const g = (pk: string, patch: Partial<Friend> = {}): Friend => ({ ...card(), pk, lastVisit: null, ...patch });
+    const waiting = g(keyOf("w"), { date: "2026-10-10", week: "2026-W42" });
+    const b = bossOf({ today: TODAY, myDone: 1, friends: [g(keyOf("x"), { weekDone: 3 }), g(keyOf("y"), { weekDone: 7 }), waiting, g(keyOf("z"), { name: "Bin", weekDone: 1 })] });
+    expect(b.members.map((m) => [m.name, m.tag])).toEqual([
+      ["You", null],
+      ["Mai", pkTag(keyOf("y"))],
+      ["Mai", pkTag(keyOf("x"))],
+      ["Bin", null],
+    ]);
   });
 });
 
@@ -1068,7 +1236,7 @@ describe("visits", () => {
   });
 
   it("is a visit that counts for today and remembers who came", () => {
-    const doc = { friends: [friend({ pk: keyOf("a") }), friend({ pk: keyOf("b") })], visits: { day: "", count: 0, lastAt: null } };
+    const doc = { friends: [friend({ pk: keyOf("a") }), friend({ pk: keyOf("b") })], visits: { day: "", count: 0, lastAt: null }, oldKeys: [] };
     const one = recordVisit(doc, keyOf("b"), NOW, TODAY);
     expect(one.visits).toEqual({ day: TODAY, count: 1, lastAt: NOW });
     expect(one.friends.map((f) => f.lastVisit)).toEqual([null, NOW]);

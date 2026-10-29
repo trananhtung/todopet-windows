@@ -307,7 +307,7 @@ export interface BrainState {
 /** What adding a friend's card came to: the friend, or the kind words for why not (which never repeat what the card says). */
 export type FriendAdd =
   | { ok: true; friend: fr.Friend; replaced: boolean }
-  | { ok: false; error: fr.CardError | "self" | "older" | "full"; message: string };
+  | { ok: false; error: fr.CardError | "self" | "former" | "older" | "full"; message: string };
 
 /** What `wrapUp` did: the pet only goes to sleep when every move you chose went through. */
 export interface WrapResult {
@@ -514,7 +514,7 @@ export class Brain {
   /** v0.5: the bubble that offers today's trip (a check-in, so it has no kind): closing it is a "Stay". */
   private tripOfferId: number | null = null;
   /** v0.6: the friends' cards and today's visits (the `friends` storage key). */
-  private friendsDoc: fr.FriendsDoc = { friends: [], visits: { day: "", count: 0, lastAt: null } };
+  private friendsDoc: fr.FriendsDoc = { friends: [], visits: { day: "", count: 0, lastAt: null }, oldKeys: [] };
   /** v0.6: this install's public key (from the backend; the secret half never leaves Rust), null until it could be read. */
   private myKey: string | null = null;
   /** False after a failed read at startup: never overwrite what's on disk. */
@@ -3696,15 +3696,22 @@ export class Brain {
 
   /**
    * Makes a new card identity: a new key pair, so the cards you send from now on carry a new public key and friends see a
-   * new person (they can remove the old entry). The friends you have stay; the first visit waits again. The old key is gone
-   * once the new one is stored.
+   * new person (they can remove the old entry). The friends you have stay; the first visit waits again. The old secret key
+   * is gone once the new one is stored; its public half is remembered (up to 10 of them, in the friends document), so that
+   * an old card of mine pasted back in later is refused as mine rather than added as a friend.
    */
   async resetCardKey(): Promise<{ ok: true } | { ok: false; message: string }> {
     const sorry = { ok: false as const, message: L("Chưa tạo được danh tính thẻ mới. Danh tính cũ vẫn như cũ, bạn thử lại sau nhé.", "Couldn't make a new card identity just now. Nothing changed; please try again in a moment.") };
+    // The key I have now becomes an "older" one, once the replacement is really made.
+    const before = await this.ensureKey();
     try {
       await this.backend.cards.resetKey();
     } catch {
       return sorry;
+    }
+    if (before !== null) {
+      this.friendsDoc = fr.retireKey(this.friendsDoc, before);
+      this.saveFriends();
     }
     let key: unknown = null;
     try {
@@ -3766,7 +3773,7 @@ export class Brain {
     }
     await this.ensureKey();
     // From here to the end nothing waits: another card added meanwhile is already in the list.
-    const out = fr.addFriend(this.friendsDoc.friends, parsed.card, this.myKey);
+    const out = fr.addFriend(this.friendsDoc.friends, parsed.card, this.myKey, this.friendsDoc.oldKeys);
     if (!out.ok) return out;
     this.friendsDoc = { ...this.friendsDoc, friends: out.friends };
     this.saveFriends();

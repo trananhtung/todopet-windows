@@ -98,7 +98,7 @@ export function cardErrorText(error: CardError): string {
     case "name":
       return L("Tên thú cưng trong thẻ mình không hiển thị được (tối đa 20 ký tự thường).", "I can't show the pet's name on that card (up to 20 plain characters).");
     case "date":
-      return L("Ngày trên thẻ này nghe chưa đúng. Bạn nhờ bạn ấy chép lại thẻ giúp nhé.", "The date on that card doesn't look right. Could your friend copy it again?");
+      return L("Ngày trên thẻ này nghe chưa đúng. Bạn nhờ bạn ấy chép lại thẻ giúp nhé.", "The date on that card doesn't look right. Could your friend copy it once more?");
     case "future":
       return L("Thẻ này đề ngày ở tương lai. Bạn kiểm tra giúp đồng hồ máy (của bạn hoặc của bạn ấy) nhé.", "That card is dated in the future. Could you check the clock (yours or your friend's)?");
     case "signature":
@@ -106,7 +106,7 @@ export function cardErrorText(error: CardError): string {
     case "unchecked":
       return L("Mình chưa kiểm tra được thẻ này lúc này. Bạn thử lại sau một chút nhé.", "I couldn't check that card just now. Please try again in a moment.");
     default:
-      return L("Thẻ này có vẻ bị hỏng hoặc thiếu mất một đoạn. Bạn nhờ bạn ấy chép lại thẻ giúp nhé.", "That card looks damaged, or part of it is missing. Could your friend copy it again?");
+      return L("Thẻ này có vẻ bị hỏng hoặc thiếu mất một đoạn. Bạn nhờ bạn ấy chép lại thẻ giúp nhé.", "That card looks damaged, or part of it is missing. Could your friend copy it once more?");
   }
 }
 
@@ -186,7 +186,7 @@ export function isCardName(x: unknown): x is string {
 }
 
 /** Folds a name the way a reader compares: NFKC (fullwidth to plain, ligatures apart), no combining marks or joiners, one case. */
-const foldName = (s: string) => s.normalize("NFKD").replace(/[\p{M}‍]/gu, "").normalize("NFKC").toUpperCase().toLowerCase().trim();
+export const foldName = (s: string) => s.normalize("NFKD").replace(/[\p{M}‍]/gu, "").normalize("NFKC").toUpperCase().toLowerCase().trim();
 
 /**
  * Does a friend's name pass for mine? The same as my pet's name, or "You" or "Bạn" (what the Friends sheet calls me), once
@@ -197,6 +197,51 @@ export function looksLikeMe(friendName: string, myPetName: string): boolean {
   const theirs = foldName(friendName);
   if (theirs === "") return false;
   return [myPetName, "You", "Bạn"].some((mine) => foldName(mine) === theirs);
+}
+
+// ---------- Friends who share a name ----------
+
+/** 16 hex characters from a public key, spread over every character of it (FNV-1a twice, with two seeds). Not secret, not a security check: it only tells two names apart on screen. */
+function pkDigest(pk: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ pk.length;
+  for (let i = 0; i < pk.length; i++) {
+    const c = pk.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ (c + i), 0x85ebca6b) >>> 0;
+    b ^= b >>> 13;
+  }
+  return a.toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+}
+
+/** The short tag of a friend's public key, "#a3f": `length` hex characters of a hash of it (3 by default; the same every time). */
+export const pkTag = (pk: string, length = 3): string => `#${pkDigest(pk).slice(0, Math.min(16, Math.max(1, length)))}`;
+
+/** "Mai · #a3f", or just the name when it has no tag. */
+export const withTag = (name: string, tag: string | null | undefined): string => (tag ? `${name} · ${tag}` : name);
+
+/**
+ * A short tag for every friend whose name another friend shares (folded the way "passes for mine" folds: case, fullwidth
+ * letters, accents and joiners aside), keyed by public key, so that two "Mai" can be told apart in the list, the boss's
+ * helpers, Remove and the visitor's label. A friend with a name of their own has none. The tag comes from the key, so it
+ * is the same wherever it shows and whoever else is in the list; only if two tags of one name would be equal does that
+ * name's group get longer tags.
+ */
+export function sameNameTags(friends: readonly Pick<Friend, "pk" | "name">[]): Record<string, string> {
+  const groups = new Map<string, string[]>();
+  for (const f of friends) {
+    const folded = foldName(f.name);
+    if (folded === "") continue;
+    groups.set(folded, [...(groups.get(folded) ?? []), f.pk]);
+  }
+  const out: Record<string, string> = {};
+  for (const keys of groups.values()) {
+    if (new Set(keys).size < 2) continue;
+    let length = 3;
+    while (length < 16 && new Set(keys.map((k) => pkTag(k, length))).size < new Set(keys).size) length++;
+    for (const k of keys) out[k] = pkTag(k, length);
+  }
+  return out;
 }
 
 const isInt = (x: unknown, max: number): x is number => typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= max;
@@ -392,17 +437,25 @@ export interface Friend extends PetCard {
 
 export type AddOutcome =
   | { ok: true; friends: Friend[]; friend: Friend; replaced: boolean }
-  | { ok: false; error: "self" | "older" | "full"; message: string };
+  | { ok: false; error: "self" | "former" | "older" | "full"; message: string };
 
 /**
  * Adds a friend's card, already checked with the backend, to the list (a new list: the one given is never changed). A friend
  * is their public key, so a card with a key you have can only be from the same install: it replaces theirs in place when
  * it is from the same day or later (the friend's last visit is kept), and an older one is refused kindly. Your own card
- * (`myPk`; null when this PC's key can't be read) is refused. A new friend past the 12th is refused. No message repeats a name.
+ * (`myPk`; null when this PC's key can't be read) is refused, and so is one of your own older cards, made before a new
+ * card identity (`formerKeys`). A new friend past the 12th is refused. No message repeats a name.
  */
-export function addFriend(list: readonly Friend[], card: PetCard, myPk: string | null): AddOutcome {
+export function addFriend(list: readonly Friend[], card: PetCard, myPk: string | null, formerKeys: readonly string[] = []): AddOutcome {
   if (myPk !== null && card.pk === myPk) {
     return { ok: false, error: "self", message: L("Đây là thẻ của chính bạn! Gửi nó cho một người bạn nhé 💌", "That's your own card! Send it to a friend instead 💌") };
+  }
+  if (formerKeys.includes(card.pk)) {
+    return {
+      ok: false,
+      error: "former",
+      message: L("Đây là một thẻ cũ của chính bạn, từ trước khi đổi danh tính thẻ. Gửi thẻ hiện tại cho một người bạn nhé 💌", "That's one of your own older cards. Send your current card to a friend instead 💌"),
+    };
   }
   const at = list.findIndex((f) => f.pk === card.pk);
   if (at >= 0) {
@@ -439,13 +492,39 @@ export interface VisitLog {
   lastAt: number | null;
 }
 
-/** The friends and the day's visits. (The key that signs my cards is not here: it lives in Credential Manager.) */
+/** How many of my older card identities are remembered (see `retireKey`). */
+export const MAX_OLD_KEYS = 10;
+
+/**
+ * The friends and the day's visits, and the public keys of my earlier card identities (so that an old card of mine,
+ * pasted back from a chat, is not taken for a friend). The key that signs my cards is not here: it lives in Credential Manager.
+ */
 export interface FriendsDoc {
   friends: Friend[];
   visits: VisitLog;
+  /** Public keys I used before a "new card identity", oldest first, at most `MAX_OLD_KEYS`. Only public keys: nothing that can sign. */
+  oldKeys: string[];
 }
 
 const noVisits = (): VisitLog => ({ day: "", count: 0, lastAt: null });
+
+/** My earlier public keys as stored: real keys only, each once (the later place wins), the newest `MAX_OLD_KEYS`. */
+function oldKeysFromJson(x: unknown): string[] {
+  const keys: string[] = [];
+  for (const k of Array.isArray(x) ? x.slice(-MAX_OLD_KEYS * 4) : []) {
+    if (!isPublicKey(k)) continue;
+    const at = keys.indexOf(k);
+    if (at >= 0) keys.splice(at, 1);
+    keys.push(k);
+  }
+  return keys.slice(-MAX_OLD_KEYS);
+}
+
+/** The document after I made a new card identity: `pk`, the key I had, is remembered (newest last, no repeats, at most 10). Something that isn't a public key changes nothing. */
+export function retireKey(doc: FriendsDoc, pk: string): FriendsDoc {
+  if (!isPublicKey(pk)) return doc;
+  return { ...doc, oldKeys: oldKeysFromJson([...doc.oldKeys, pk]) };
+}
 
 /** A stored time: a finite number, never later than `now` (a clock set back, or a hand-edited file, can't lock visits out) and never below 0. */
 const timeNotAfter = (x: unknown, now: number): number | null => (typeof x === "number" && Number.isFinite(x) ? Math.min(Math.max(0, x), now) : null);
@@ -479,20 +558,22 @@ function friendFromJson(x: unknown, now: number): Friend | null {
 export function docFromJson(raw: unknown, myPk: string | null, now: number): FriendsDoc {
   const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const friends: Friend[] = [];
+  const oldKeys = oldKeysFromJson(r.oldKeys);
   for (const x of (Array.isArray(r.friends) ? r.friends : []).slice(0, MAX_FRIENDS)) {
     const f = friendFromJson(x, now);
-    if (!f || (myPk !== null && f.pk === myPk)) continue;
+    if (!f || (myPk !== null && f.pk === myPk) || oldKeys.includes(f.pk)) continue;
     const at = friends.findIndex((g) => g.pk === f.pk);
     if (at < 0) friends.push(f);
     else if (f.date > friends[at].date) friends[at] = f;
   }
-  return { friends, visits: visitsFromJson(r.visits, now) };
+  return { friends, visits: visitsFromJson(r.visits, now), oldKeys };
 }
 
 /** The document as plain JSON for the `friends` storage key. */
 export const docToJson = (doc: FriendsDoc): unknown => ({
   friends: doc.friends.map((f) => ({ ...f, accessories: [...f.accessories] })),
   visits: { ...doc.visits },
+  oldKeys: [...doc.oldKeys],
 });
 
 // ---------- The record of days ----------
@@ -568,8 +649,12 @@ export interface BossMember {
   name: string;
   /** The friend's species (shown beside a name that could pass for mine); null for you. */
   species: SpeciesId | null;
-  /** Tasks finished this week. */
+  /** The tag that tells this friend from another with the same name ("#a3f"), or null (see `sameNameTags`). */
+  tag: string | null;
+  /** Tasks finished this week, as they are (a card can say up to 999). */
   done: number;
+  /** What those tasks do to the blob: `done`, up to a share (15). */
+  counted: number;
   me: boolean;
 }
 
@@ -589,19 +674,24 @@ export interface Boss {
 
 /**
  * This week's co-op boss: 15 HP per member (you, and each friend whose latest card is from this ISO week). The damage
- * is your tasks of the week, counted live, plus each friend's `weekDone` from their latest card. There is no losing and
+ * is your tasks of the week, counted live, plus each friend's `weekDone` from their latest card, **each person up to
+ * their share (15)**: the blob needs everyone, and one card that says 999 can't win it alone. There is no losing and
  * no penalty: it is just beaten, or not yet.
  */
 export function bossOf(input: { today: string; myDone: number; friends: readonly Friend[] }): Boss {
   const week = isoWeekKey(input.today);
-  const mine: BossMember = { id: "me", name: L("Bạn", "You"), species: null, done: whole(input.myDone, Number.MAX_SAFE_INTEGER), me: true };
+  const share = (done: number) => Math.min(BOSS_HP_PER_MEMBER, done);
+  const done = whole(input.myDone, Number.MAX_SAFE_INTEGER);
+  const mine: BossMember = { id: "me", name: L("Bạn", "You"), species: null, tag: null, done, counted: share(done), me: true };
+  // Tags are for the whole list, a waiting friend included: the same name looks the same on every screen.
+  const tags = sameNameTags(input.friends);
   const theirs = input.friends
     .filter((f) => f.week === week)
-    .map((f): BossMember => ({ id: f.pk, name: f.name, species: f.species, done: f.weekDone, me: false }))
+    .map((f): BossMember => ({ id: f.pk, name: f.name, species: f.species, tag: tags[f.pk] ?? null, done: f.weekDone, counted: share(f.weekDone), me: false }))
     .sort((a, b) => b.done - a.done);
   const members = [mine, ...theirs];
   const maxHp = members.length * BOSS_HP_PER_MEMBER;
-  const damage = members.reduce((sum, m) => sum + m.done, 0);
+  const damage = members.reduce((sum, m) => sum + m.counted, 0);
   return {
     week,
     members,
@@ -747,6 +837,20 @@ export const VISIT_WALK_MS = 3500;
 // ---------- The boss, in words ----------
 
 export const bossName = () => L("Quái Vật Trì Hoãn", "The Procrastination Blob");
+
+/** The line under the blob while it is not beaten: every task hurts it, up to a share each, and nothing is lost. */
+export const bossHelpText = (): string =>
+  L(
+    `Mỗi việc bạn và bạn bè xong trong tuần đều làm nó đau (mỗi người tính tối đa ${BOSS_HP_PER_MEMBER} việc). Không thua, không phạt; thứ Hai nó lại hồi sinh.`,
+    `Every task you and your friends finish this week hurts it (each person counts up to ${BOSS_HP_PER_MEMBER}). No losing, no penalties; it's back on Monday.`,
+  );
+
+/** The line for a blob you face alone: its size, and that a friend makes it a team effort. */
+export const bossAloneText = (): string =>
+  L(
+    `Một mình thì nó có ${BOSS_HP_PER_MEMBER} HP; mỗi bạn thêm vào, nó thêm ${BOSS_HP_PER_MEMBER} HP và cả nhóm cùng đánh.`,
+    `Alone it has ${BOSS_HP_PER_MEMBER} HP; each friend adds ${BOSS_HP_PER_MEMBER} more, and you fight it together.`,
+  );
 
 /** What the pet says when the blob is beaten: together with friends, or alone. */
 export function bossWinText(together: boolean): string {

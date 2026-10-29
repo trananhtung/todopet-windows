@@ -41,6 +41,7 @@ export function Visitor({
   anchor,
   hideLabel,
   petName,
+  tag: nameTag = null,
   onOpen,
 }: {
   brain: Brain;
@@ -51,6 +52,8 @@ export function Visitor({
   hideLabel: boolean;
   /** My pet's name: a friend's name that could pass for it is shown with the friend's species beside it. */
   petName: string;
+  /** The tag that tells this friend from another with the same name ("#a3f"), or null. */
+  tag?: string | null;
   /** Opens the Friends sheet. */
   onOpen: () => void;
 }) {
@@ -159,7 +162,7 @@ export function Visitor({
   }, [brain, anchor, visit.id]);
 
   const f = visit.friend;
-  const text = visitLabel(shownName(f.name, f.species, petName), visit.streak);
+  const text = visitLabel(shownName(f.name, f.species, petName, nameTag), visit.streak);
   return (
     <div className="visitor" ref={wrap}>
       <div className="visitor-art" ref={art} data-hit="" onClick={onOpen} aria-hidden />
@@ -173,8 +176,11 @@ export function Visitor({
           title={text}
           aria-label={`${text}. ${L("Mở danh sách bạn bè", "Open Friends")}`}
         >
-          <FriendName name={f.name} species={f.species} myPetName={petName} />
-          {visitTail(visit.streak)}
+          {/* The name is on a line of its own and is the only thing that gives way when it is long; the streak is never cut. */}
+          <span className="vl-who">
+            <FriendName name={f.name} species={f.species} myPetName={petName} tag={nameTag} />
+          </span>
+          <span className="vl-tail">{visitTail(visit.streak)}</span>
         </button>
       )}
     </div>

@@ -3046,15 +3046,66 @@ textarea.friends-card-text {
 }
 .friends-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   min-height: 28px;
 }
 .friends-identity {
   justify-content: flex-start;
 }
+/* My card and Add a friend are two compact rows; the text and the paste box open under them on a click. */
+.friends-mine,
+.friends-add {
+  gap: 4px;
+}
+.friends-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: note-in 0.2s var(--ease-out);
+}
+.friends-toggle .chev,
+.friends-add-toggle .chev,
+.friends-privacy summary .chev {
+  transition: transform 0.2s var(--ease-out);
+}
+.friends-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 28px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-text);
+  font: 600 12px var(--font);
+  cursor: pointer;
+}
+.friends-toggle:hover {
+  background: var(--paper-2);
+}
+.friends-toggle:focus-visible,
+.friends-privacy summary:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+.friends-toggle[aria-expanded="true"] .chev,
+.friends-add-toggle[aria-expanded="true"] .chev,
+.friends-privacy[open] summary .chev {
+  transform: rotate(180deg);
+}
+.friends-add-toggle {
+  gap: 6px;
+}
+.friends-add-toggle .chev {
+  margin-left: 2px;
+}
 .friends-note {
   min-width: 0;
+  flex: 1 1 auto;
   font-size: 12px;
   color: var(--ink-2);
 }
@@ -3119,20 +3170,39 @@ textarea.friends-card-text {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13.5px;
+  line-height: 1.3;
+}
+.friends-help {
+  font-size: 11.5px;
 }
 /* A name that could pass for mine (or for "You") has the friend's species beside it, wherever the name is. */
 .friend-lookalike,
+.friend-tag,
 .boss-who li .friend-lookalike,
-.visitor-label .friend-lookalike {
+.boss-who li .friend-tag {
   font-weight: 500;
   font-variant-numeric: normal;
   color: var(--muted);
+}
+/* The pet's kind and the card's date share a line when they fit, and the date drops to its own line whole when they don't
+   (no orphan "ago"): four lines a row were too many. */
+.friend-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .friend-kind,
 .friend-date {
   font-size: 11.5px;
   color: var(--muted);
-  overflow-wrap: anywhere;
+}
+.friend-kind,
+.friend-date:not(.stale) {
+  white-space: nowrap;
 }
 .friend-date.stale {
   color: var(--warn-ink);
@@ -3165,8 +3235,28 @@ textarea.friends-card-text {
   height: 48px;
   border-radius: 50%;
   background: var(--accent-soft);
-  font-size: 28px;
-  line-height: 1;
+  line-height: 0;
+}
+.boss-art {
+  display: block;
+  overflow: visible;
+}
+/* Alive, it breathes (a slow squash from the ground up); beaten, it lies still. */
+@media (prefers-reduced-motion: no-preference) {
+  .boss-art .blob-alive {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: blob-breathe 3.2s ease-in-out infinite;
+  }
+}
+@keyframes blob-breathe {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+  50% {
+    transform: scale(1.04, 0.95);
+  }
 }
 .boss.beaten .boss-blob {
   background: var(--good-soft);
@@ -3238,17 +3328,52 @@ textarea.friends-card-text {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
+/* What a card holds: one quiet row that opens on a click. */
 .friends-privacy {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
   margin: 2px 0 0;
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--muted);
 }
-.friends-privacy .icon {
+.friends-privacy summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  border-radius: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.friends-privacy summary::-webkit-details-marker {
+  display: none;
+}
+.friends-privacy summary:hover {
+  color: var(--ink);
+}
+.friends-privacy summary .icon {
   flex: none;
+}
+.friends-privacy summary .chev {
+  margin-left: auto;
+}
+.friends-privacy-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 2px 4px 20px;
+  animation: note-in 0.2s var(--ease-out);
+}
+.friends-privacy-body p {
+  margin: 0;
+}
+.friends-privacy-body ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.friends-privacy-body li + li {
   margin-top: 2px;
 }
 .sticker-page .slot.medal {

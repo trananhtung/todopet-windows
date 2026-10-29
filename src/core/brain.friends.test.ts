@@ -162,7 +162,7 @@ describe("the friends document and my key", () => {
     await r.brain.addFriendCard(text());
     await vi.waitFor(async () => expect((await r.backend.storage.load("friends")) as object).toHaveProperty("friends"));
     const saved = (await r.backend.storage.load("friends")) as Record<string, unknown>;
-    expect(Object.keys(saved).sort()).toEqual(["friends", "visits"]);
+    expect(Object.keys(saved).sort()).toEqual(["friends", "oldKeys", "visits"]);
     expect(JSON.stringify(saved)).not.toContain(await r.backend.cards.publicKey());
     r.brain.stop();
   });
@@ -499,8 +499,66 @@ describe("a new card identity (SECURITY M2)", () => {
     expect(after).not.toBe(before);
     expect(parseCard(await r.brain.myCard(), "2026-10-28")).toMatchObject({ ok: true, card: { pk: after } });
     expect(r.s().friends.map((f) => f.name)).toEqual(["Mai"]);
-    // The old card is just another friend's card now: its key is no longer mine.
-    expect(await r.brain.addFriendCard(oldCard)).toMatchObject({ ok: true, replaced: false });
+    // The old card is still mine (v0.6 evaluation, issue 5): it is refused, kindly, and it is not a person in the blob.
+    const boss = r.s().boss;
+    const refused = await r.brain.addFriendCard(oldCard);
+    expect(refused).toMatchObject({ ok: false, error: "former" });
+    if (!refused.ok) expect(refused.message).toContain("That's one of your own older cards");
+    expect(r.s().friends.map((f) => f.name)).toEqual(["Mai"]);
+    expect(r.s().boss.maxHp).toBe(boss.maxHp);
+    r.brain.stop();
+  });
+
+  it("remembers the keys of earlier identities, in the friends document and across a restart (v0.6 evaluation, issue 5)", async () => {
+    const r = await rig();
+    const first = r.s().myKey!;
+    const firstCard = await r.brain.myCard();
+    await r.brain.resetCardKey();
+    const second = r.s().myKey!;
+    const secondCard = await r.brain.myCard();
+    await r.brain.resetCardKey();
+    const third = r.s().myKey!;
+    await vi.waitFor(async () => expect((await stored(r.backend)).oldKeys).toEqual([first, second]));
+    // The current key is not an old one, and nothing secret is kept: only public keys.
+    expect((await stored(r.backend)).oldKeys).not.toContain(third);
+    r.brain.stop();
+    const again = await rig({ backend: r.backend, clock: r.clock });
+    expect(again.s().myKey).toBe(third);
+    expect(await again.brain.addFriendCard(firstCard)).toMatchObject({ ok: false, error: "former" });
+    expect(await again.brain.addFriendCard(secondCard)).toMatchObject({ ok: false, error: "former" });
+    expect(await again.brain.addFriendCard(await again.brain.myCard())).toMatchObject({ ok: false, error: "self" });
+    expect(again.s().friends).toEqual([]);
+    again.brain.stop();
+  });
+
+  it("remembers the last 10 identities and no more", async () => {
+    const r = await rig();
+    const keys = [r.s().myKey!];
+    const cards = [await r.brain.myCard()];
+    for (let i = 0; i < 11; i++) {
+      await r.brain.resetCardKey();
+      keys.push(r.s().myKey!);
+      cards.push(await r.brain.myCard());
+    }
+    await vi.waitFor(async () => expect((await stored(r.backend)).oldKeys).toEqual(keys.slice(1, 11)));
+    expect((await stored(r.backend)).oldKeys).toHaveLength(fr.MAX_OLD_KEYS);
+    // The nine newest older cards are refused; the very oldest has been forgotten and reads as anyone's.
+    expect(await r.brain.addFriendCard(cards[10])).toMatchObject({ ok: false, error: "former" });
+    expect(await r.brain.addFriendCard(cards[1])).toMatchObject({ ok: false, error: "former" });
+    expect(await r.brain.addFriendCard(cards[0])).toMatchObject({ ok: true });
+    r.brain.stop();
+  });
+
+  it("remembers nothing when the new key could not be made", async () => {
+    const r = await rig();
+    const mine = r.s().myKey!;
+    vi.spyOn(r.backend.cards, "resetKey").mockRejectedValueOnce(new BackendError({ kind: "internal", message: "locked" }));
+    expect(await r.brain.resetCardKey()).toMatchObject({ ok: false });
+    expect(r.s().myKey).toBe(mine);
+    await new Promise((res) => setTimeout(res, 10));
+    expect((await stored(r.backend)).oldKeys).toEqual([]);
+    // Still mine, and still "your own card" rather than an old one.
+    expect(await r.brain.addFriendCard(await r.brain.myCard())).toMatchObject({ ok: false, error: "self" });
     r.brain.stop();
   });
 
@@ -596,11 +654,12 @@ describe("the weekly boss", () => {
   });
 
   it("is beaten together: +50 XP and a 🏅, once", async () => {
-    const r = await rig({ life: { ...myWeek(5), xp: 200, pageFilled: 4, pageMedals: 0 } });
-    await r.brain.addFriendCard(text({ weekDone: 10 }));
-    expect(r.s().boss.defeated).toBe(false);
+    // I have done my 15; Mai has done 10 of hers (25 of 30).
+    const r = await withFriend({ weekDone: 10 }, { life: { ...myWeek(15), xp: 200, pageFilled: 4, pageMedals: 0 } });
+    expect(r.s().boss).toMatchObject({ maxHp: 30, damage: 25, defeated: false });
+    expect(r.s().life.bossWins).toEqual([]);
     await r.brain.addFriendCard(text({ weekDone: 25 }));
-    expect(r.s().boss).toMatchObject({ defeated: true, hp: 0 });
+    expect(r.s().boss).toMatchObject({ defeated: true, hp: 0, damage: 30 });
     expect(r.s().life).toMatchObject({ xp: 250, bossWins: ["2026-W44"], pageFilled: 5, pageMedals: 1 });
     // More damage, more friends, another card: still the one reward.
     await r.brain.addFriendCard(text({ pk: BIN, name: "Bin", weekDone: 30 }));
@@ -609,8 +668,34 @@ describe("the weekly boss", () => {
     r.brain.stop();
   });
 
+  // v0.6 evaluation, issue 4: a card that says 999 beat the blob on its own and paid +50 XP and a 🏅 to someone else.
+  it("is not beaten by one friend's card that says 999 tasks, and pays nothing for it (v0.6 evaluation, issue 4)", async () => {
+    const r = await rig({ life: { ...myWeek(2), xp: 200, pageFilled: 4, pageMedals: 0 } });
+    await r.brain.addFriendCard(text({ weekDone: 999 }));
+    expect(r.s().boss).toMatchObject({ maxHp: 30, damage: 17, hp: 13, defeated: false });
+    expect(r.s().life).toMatchObject({ xp: 200, bossWins: [], pageFilled: 4, pageMedals: 0 });
+    // The real number is still there to read.
+    expect(r.s().boss.members.map((m) => [m.done, m.counted])).toEqual([
+      [2, 2],
+      [999, 15],
+    ]);
+    // Everyone has to bring their share: a second friend with nothing makes it harder, not easier.
+    await r.brain.addFriendCard(text({ pk: BIN, name: "Bin", weekDone: 0 }));
+    expect(r.s().boss).toMatchObject({ maxHp: 45, damage: 17, defeated: false });
+    expect(r.s().life.bossWins).toEqual([]);
+    r.brain.stop();
+  });
+
+  it("counts my own tasks up to 15 as well: 40 done don't beat a blob that a friend has not hurt", async () => {
+    const r = await withFriend({ weekDone: 0 }, { life: { ...myWeek(40), xp: 200, pageFilled: 4, pageMedals: 0 } });
+    expect(r.s().boss).toMatchObject({ maxHp: 30, damage: 15, hp: 15, defeated: false });
+    expect(r.s().life).toMatchObject({ xp: 200, bossWins: [], pageMedals: 0 });
+    r.brain.stop();
+  });
+
   it("is saved with the pet's life", async () => {
-    const r = await rig({ life: myWeek(14) });
+    const r = await withFriend({ weekDone: 14 }, { life: myWeek(15) });
+    expect(r.s().life.bossWins).toEqual([]);
     await r.brain.addFriendCard(text({ weekDone: 16 }));
     await vi.waitFor(async () => expect(((await r.backend.storage.load("life")) as LifeState).bossWins).toEqual(["2026-W44"]));
     r.brain.stop();
@@ -624,7 +709,7 @@ describe("the weekly boss", () => {
   });
 
   it("says it once, in a bubble that is a reply and not a reminder", async () => {
-    const r = await rig({ life: myWeek(5) });
+    const r = await withFriend({ weekDone: 1 }, { life: myWeek(15) });
     const chime = vi.fn();
     r.brain.effects.chime = chime;
     await r.brain.addFriendCard(text({ weekDone: 40 }));
@@ -673,20 +758,30 @@ describe("the weekly boss", () => {
   });
 
   it("starts over on Monday: last week's cards and tasks no longer count, and the next week can be won too", async () => {
-    // Sunday 1 November.
-    const r = await rig({ start: at(11, 1, 9), life: { week: { key: "2026-10-26", done: 3, stickers: 0, trips: 0 } } });
+    // Sunday 1 November: I have done my 15, Mai's card says 30 (15 count).
+    const r = await withFriend({ date: "2026-11-01", weekDone: 14 }, { start: at(11, 1, 9), life: { week: { key: "2026-10-26", done: 15, stickers: 0, trips: 0 } } });
+    expect(r.s().life.bossWins).toEqual([]);
     await r.brain.addFriendCard(text({ date: "2026-11-01", weekDone: 30 }));
-    expect(r.s().boss).toMatchObject({ week: "2026-W44", defeated: true });
+    expect(r.s().boss).toMatchObject({ week: "2026-W44", defeated: true, damage: 30 });
     expect(r.s().life.bossWins).toEqual(["2026-W44"]);
+    await vi.waitFor(async () => expect(((await r.backend.storage.load("life")) as LifeState).bossWins).toEqual(["2026-W44"]));
     // Monday 2 November.
     r.clock.t = at(11, 2, 9);
     r.tick();
     expect(r.s().boss).toMatchObject({ week: "2026-W45", maxHp: 15, damage: 0, hp: 15, defeated: false, waiting: 1 });
-    await r.brain.addFriendCard(text({ date: "2026-11-02", weekDone: 40 }));
-    expect(r.s().boss).toMatchObject({ week: "2026-W45", defeated: true });
-    expect(r.s().life.bossWins).toEqual(["2026-W44", "2026-W45"]);
-    expect(r.s().life.pageMedals).toBe(2);
     r.brain.stop();
+    // I did 14 on Monday (and the week turned in my pet's life): a fresh card from Mai, who says 40, is her 15 and makes 29 of 30.
+    const life = (await r.backend.storage.load("life")) as LifeState;
+    await r.backend.storage.save("life", { ...life, week: { key: "2026-11-02", done: 14, stickers: 0, trips: 0 } });
+    const next = await rig({ backend: r.backend, clock: r.clock, prefs: { useCalendar: false } });
+    await next.brain.addFriendCard(text({ date: "2026-11-02", weekDone: 40 }));
+    expect(next.s().boss).toMatchObject({ week: "2026-W45", maxHp: 30, damage: 29, defeated: false });
+    expect(next.s().life.bossWins).toEqual(["2026-W44"]);
+    // My 15th task is the one that beats it.
+    await next.brain.complete(next.s().next!);
+    await vi.waitFor(() => expect(next.s().life.bossWins).toEqual(["2026-W44", "2026-W45"]));
+    expect(next.s().life.pageMedals).toBe(2);
+    next.brain.stop();
   });
 });
 
@@ -1194,11 +1289,12 @@ describe("a win while a close is in flight (review MEDIUM 4)", () => {
     expect(r.s().life.bossWins).toEqual(["2026-W53"]);
     expect(r.s().life.pageMedals).toBe(1);
     expect(r.s().life.xp).toBeGreaterThanOrEqual(xp + 50);
-    // The new week's blob is a blob of its own: still there to fight, and it can be won too.
+    // The new week's blob is a blob of its own: still there to fight, and a friend's card alone does not win it.
     expect(r.s().boss).toMatchObject({ week: "2027-W01", maxHp: 15, hp: 15, defeated: false });
     await r.brain.addFriendCard(text({ date: "2027-01-04", week: "2027-W01", weekDone: 40 }));
-    expect(r.s().life.bossWins).toEqual(["2026-W53", "2027-W01"]);
-    expect(r.s().life.pageMedals).toBe(2);
+    expect(r.s().boss).toMatchObject({ week: "2027-W01", maxHp: 30, damage: 15, defeated: false });
+    expect(r.s().life.bossWins).toEqual(["2026-W53"]);
+    expect(r.s().life.pageMedals).toBe(1);
     r.brain.stop();
   }, 30_000);
 

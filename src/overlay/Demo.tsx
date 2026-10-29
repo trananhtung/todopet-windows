@@ -241,7 +241,7 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
               title={s.friends.length === 0 ? L("Thêm bạn trước đã", "Add friends first") : L("Pet của một người bạn ghé chơi ngay bây giờ", "A friend's pet drops by right now")}
               onClick={() => brain.demoVisit()}
             >
-              👋 {L("Bạn ghé chơi", "Friend drops by")}
+              👋 {L("Ghé chơi", "Visit")}
             </button>
             <button className="btn" onClick={() => brain.tick()}>
               ⏱ {L("Chạy luật", "Run rules")}

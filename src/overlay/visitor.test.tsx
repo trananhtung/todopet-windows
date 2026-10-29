@@ -58,11 +58,12 @@ interface Props {
   visit?: Visit;
   hideLabel?: boolean;
   petName?: string;
+  tag?: string | null;
   onOpen?: () => void;
 }
 const render = (p: Props = {}) =>
   act(async () => {
-    root.render(<Visitor key={(p.visit ?? visit()).id} brain={brain} visit={p.visit ?? visit()} anchor={anchor} hideLabel={p.hideLabel ?? false} petName={p.petName ?? "Mochi"} onOpen={p.onOpen ?? (() => undefined)} />);
+    root.render(<Visitor key={(p.visit ?? visit()).id} brain={brain} visit={p.visit ?? visit()} anchor={anchor} hideLabel={p.hideLabel ?? false} petName={p.petName ?? "Mochi"} tag={p.tag ?? null} onOpen={p.onOpen ?? (() => undefined)} />);
   });
 
 const wrap = () => container.querySelector<HTMLElement>(".visitor")!;
@@ -155,6 +156,63 @@ describe("the visitor's label", () => {
     expect(label()!.getAttribute("aria-label")).toMatch(/MOCHI \(.*Fox\)/);
     await render({ visit: visit({ friend: friend({ name: "Mai" }) }), petName: "Mochi" });
     expect(label()!.querySelector(".friend-lookalike")).toBeNull();
+    // A pet that kept the name of its species doesn't say it twice.
+    await render({ visit: visit({ friend: friend({ name: "Mochi", species: "mochi" }) }), petName: "Mochi" });
+    expect(label()!.querySelector(".friend-lookalike")?.textContent).toBe(" (🍡)");
+    expect(label()!.getAttribute("aria-label")).toMatch(/^Mochi \(🍡\) dropped by!/);
+  });
+});
+
+// v0.6 evaluation, issue 2: the label was one nowrap line cut with an ellipsis, so "Sir Fluffington dropped by! 🔥 buddy stre…" lost the
+// streak it exists to show. Now the name is on one line (it alone gives way) and "dropped by! 🔥 buddy streak N" on the next, never cut.
+describe("the visitor's label keeps the streak (v0.6 evaluation, issue 2)", () => {
+  const NAMES = ["Bánh Bao Nhỏ", "Sir Fluffington", "Cục Bông Nhỏ Xíu", "Captain Whiskers III", "Princess Marshmallow", "WWWWWWWWWWWWWWWWWWWW"];
+
+  it("puts the name and the streak in parts of their own, whatever the name: only the name can be cut", async () => {
+    for (const lang of ["en", "vi"] as const) {
+      setLang(lang);
+      for (const name of NAMES) {
+        await render({ visit: visit({ friend: friend({ name }), streak: 3 }) });
+        const tag = label()!;
+        const who = tag.querySelector(".vl-who")!;
+        const tail = tag.querySelector(".vl-tail")!;
+        expect(who.querySelector("bdi")?.textContent, name).toBe(name);
+        expect(who.textContent, name).toBe(name);
+        // The streak is whole, in its own part, with none of the name in it.
+        expect(tail.textContent, name).toBe(lang === "en" ? " dropped by! 🔥 buddy streak 3" : " ghé chơi! 🔥 chuỗi bạn 3 ngày");
+        expect(tail.querySelector("bdi")).toBeNull();
+        // And the whole thing still reads as one sentence.
+        expect(tag.textContent, name).toBe(name + tail.textContent);
+        expect(tag.getAttribute("aria-label")).toContain(name);
+      }
+    }
+    setLang("en");
+  });
+
+  it("has a tail with no streak to show for a friend with none, and still never cuts it", async () => {
+    await render({ visit: visit({ streak: 0 }) });
+    expect(label()!.querySelector(".vl-tail")?.textContent).toBe(" dropped by! 👋");
+  });
+
+  it("tells two friends of one name apart in the label, the tooltip and the screen reader's name", async () => {
+    await render({ visit: visit({ friend: friend({ name: "Mai" }), streak: 2 }), tag: "#a3f" });
+    const tag = label()!;
+    expect(tag.querySelector(".vl-who")?.textContent).toBe("Mai · #a3f");
+    expect(tag.querySelector(".vl-who .friend-tag")?.textContent).toBe(" · #a3f");
+    expect(tag.querySelector(".vl-tail")?.textContent).toBe(" dropped by! 🔥 buddy streak 2");
+    expect(tag.getAttribute("title")).toBe("Mai · #a3f dropped by! 🔥 buddy streak 2");
+    expect(tag.getAttribute("aria-label")).toBe("Mai · #a3f dropped by! 🔥 buddy streak 2. Open Friends");
+    // A name that is alone has no tag.
+    await render({ visit: visit({ friend: friend({ name: "Mai" }), streak: 2 }), tag: null });
+    expect(label()!.querySelector(".friend-tag")).toBeNull();
+    expect(label()!.getAttribute("title")).toBe("Mai dropped by! 🔥 buddy streak 2");
+  });
+
+  it("keeps the tag and the look-alike species beside a name that is cut", async () => {
+    await render({ visit: visit({ friend: friend({ name: "MOCHI", species: "fox" }) }), petName: "Mochi", tag: "#0b2" });
+    const marks = [...label()!.querySelectorAll(".vl-who > span")].map((e) => e.textContent);
+    expect(marks[0]).toMatch(/Fox/);
+    expect(marks[1]).toBe(" · #0b2");
   });
 });
 

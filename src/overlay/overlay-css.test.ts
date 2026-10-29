@@ -3,15 +3,17 @@ import { beforeAll, describe, expect, it } from "vitest";
 // Read the stylesheet from disk (Vitest stubs CSS imports, `?raw` included). The project has no Node
 // typings, so the module is typed by hand.
 let css = "";
+let petLifeCss = "";
 beforeAll(async () => {
   const fs = (await import(/* @vite-ignore */ `node:${"fs"}`)) as { readFileSync(path: URL, encoding: "utf8"): string };
   css = fs.readFileSync(new URL("./overlay.css", import.meta.url), "utf8");
+  petLifeCss = fs.readFileSync(new URL("./pet-life.css", import.meta.url), "utf8");
 });
 
-/** The declarations of the first rule whose selector is exactly `selector`. */
-function rule(selector: string): Record<string, string> {
+/** The declarations of the first rule whose selector is exactly `selector` (in `source`, the overlay's stylesheet unless told otherwise). */
+function rule(selector: string, source: () => string = () => css): Record<string, string> {
   const re = new RegExp(`(^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`);
-  const m = css.match(re);
+  const m = source().match(re);
   if (!m) throw new Error(`no rule for ${selector}`);
   return Object.fromEntries(
     m[2]
@@ -90,4 +92,26 @@ describe("overlay.css", () => {
     expect(parseInt(rule(".demo-panel").width, 10)).toBeGreaterThanOrEqual(252);
   });
 
+  // v0.6 evaluation, issue 2: the visitor's label was one line with `overflow: hidden; text-overflow: ellipsis` over all of it, so a name of 12
+  // characters or more pushed "dropped by! 🔥 buddy streak 3" out of sight. Only the name may give way now.
+  it("lets only the visitor's name give way, never its streak", () => {
+    const label = rule(".visitor-label", () => petLifeCss);
+    expect(label.overflow ?? "visible").toBe("visible");
+    expect(label["text-overflow"]).toBeUndefined();
+    expect(label.display).toBe("flex");
+    expect(label["flex-direction"]).toBe("column");
+    expect(parseInt(label["max-width"], 10)).toBeLessThanOrEqual(280);
+    const name = rule(".visitor-label .vl-who bdi", () => petLifeCss);
+    expect(name.overflow).toBe("hidden");
+    expect(name["text-overflow"]).toBe("ellipsis");
+    expect(name["white-space"]).toBe("nowrap");
+    expect(name["min-width"]).toBe("0");
+    const tail = rule(".visitor-label .vl-tail", () => petLifeCss);
+    expect(tail.flex).toBe("none");
+    expect(tail["white-space"]).toBe("nowrap");
+    expect(tail.overflow ?? "visible").toBe("visible");
+    // The tag and the look-alike species keep their place beside a name that is cut.
+    const marks = rule(".visitor-label .vl-who .friend-lookalike,\n.visitor-label .vl-who .friend-tag", () => petLifeCss);
+    expect(marks.flex).toBe("none");
+  });
 });

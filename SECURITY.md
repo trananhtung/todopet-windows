@@ -62,22 +62,25 @@ Please don't open a public issue for them. You'll get a reply within a week.
     the species and every accessory come from the app's own fixed lists (at most 3, one per slot); numbers are whole and in
     range (stage 0–4, tasks of the week up to 999); the record is exactly 28 characters of `G R -`; the date is a real day and
     not more than a day ahead of the clock; and the week is the ISO week of that date. Only then is the signature checked
-    through the backend. Anything else is refused with a kind message. Your own card is refused, an older card than the one
-    you have is refused, and the list holds 12 friends at most.
+    through the backend. Anything else is refused with a kind message. Your own card is refused (and so is one of your own
+    older cards: the public keys of your last 10 earlier identities are kept in the friends document, public halves only),
+    an older card than the one you have is refused, and the list holds 12 friends at most.
   - *Where it goes.* A friend's name is only ever shown as React text, inside a `<bdi>` so that a right-to-left name can't
     reorder the words around it (never as HTML, never in the SVG art, never in the diary: the diary only says that a friend
     was added or visited). A name that could pass for your pet's name, or for "You" or "Bạn" (compared after NFKC, case,
-    accents and joiners), is shown with the friend's species beside it, everywhere. The pet drawn for a visit comes from the
+    accents and joiners), is shown with the friend's species beside it, everywhere; two friends who share a name are told apart
+    by a short tag from a hash of their public key. The pet drawn for a visit comes from the
     species, accessories and stage after the checks above, and the renderer only accepts an id prefix of letters, digits,
     `-` and `_`, so no card text reaches the renderer's markup. Cards on disk are checked again, as strictly, when they are
     read back (only the first 12 entries are looked at, and a stored time later than now is brought back to now).
-  - *Who may read it.* The `friends` key (cards and the day's visits) is readable and writable by the overlay window alone;
+  - *Who may read it.* The `friends` key (cards, the day's visits and my earlier public keys) is readable and writable by the overlay window alone;
     Settings, the Diary and the gallery are refused by Rust. The document is capped at 64 KB, read and written: a bigger file is
     renamed to `friends.json.bad` and treated as missing. So is a file that is not valid JSON (the app starts with no friends and
     the bad copy stays on disk); a file that cannot be read at all (a scanner has it locked) is not a missing file: it is kept in
     memory for the session and never written over.
-  - *Cards work on trust.* A friend can write any task count on their card (the weekly boss is cosmetic: a 🏅 sticker and 50 XP,
-    with no rankings and no penalties, so there is nothing worth cheating for).
+  - *Cards work on trust.* A friend can write any task count on their card, so the weekly boss counts each person for 15 at most (their
+    share of its HP): one card, from a typo or a cheat, can't win the blob alone and pay you a 🏅 sticker and 50 XP. There are no
+    rankings and no penalties, so there is nothing more to cheat for.
 - **Links** — "Join" buttons only open known meeting services (Google Meet, Teams, Zoom, Webex, Whereby);
   `open_url` accepts `https`, `http`, and real Teams / Zoom meeting links only, and refuses `http(s)` links with a user
   name in front of the host (`https://google.com@evil.example/`).

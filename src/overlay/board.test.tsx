@@ -8,10 +8,13 @@ import { demoCardSignature, demoPublicKey, demoSignedCard } from "../backend/dem
 import { BackendError } from "../backend/types";
 import { Brain } from "../core/brain";
 import { dayKey } from "../core/dates";
-import { cardPayload, isoWeekKey, type PetCard } from "../core/friends";
+import { weekKey as mondayOf } from "../core/chapters";
+import { cardPayload, isoWeekKey, pkTag, type PetCard } from "../core/friends";
+import { demoLife } from "../core/life";
 import { setLang } from "../core/l10n";
 import type { BoardRequest } from "./App";
 import { Board } from "./Board";
+import { DemoPanel } from "./Demo";
 import type { BoardPlacement } from "./placement";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -1226,6 +1229,36 @@ describe("the wardrobe and its Home sheet (v0.5)", () => {
   });
 });
 
+describe("a popover when the board scrolls under it (v0.6 evaluation, issue 11)", () => {
+  const scrollBoard = () => act(async () => void document.querySelector(".board-body")!.dispatchEvent(new Event("scroll")));
+
+  it("closes a menu, which is about where its button was", async () => {
+    await mount();
+    await click(byLabel(MORE));
+    expect(popover("menu")).not.toBeNull();
+    await scrollBoard();
+    expect(popover("menu")).toBeNull();
+  });
+
+  it("keeps a question that is being read: a confirmation stays open, and still answers to Cancel and Escape", async () => {
+    await mount(request({ friends: true }));
+    await act(async () => void (await brain.addFriendCard(demoSignedCard({ pk: demoPublicKey("scroll"), name: "Mai", species: "shiba", accessories: [], stage: 2, week: isoWeekKey(dayKey(new Date(brain.clockNow()))), weekDone: 5, history: "G".repeat(28), date: dayKey(new Date(brain.clockNow())) }))));
+    const remove = document.querySelector<HTMLButtonElement>("[data-friend-remove]")!;
+    await click(remove);
+    const ask = popover("alertdialog")!;
+    expect(ask).not.toBeNull();
+    await scrollBoard();
+    await scrollBoard();
+    expect(popover("alertdialog")).toBe(ask);
+    expect(ask.textContent).toContain("Remove Mai?");
+    expect(brain.getSnapshot().friends).toHaveLength(1);
+    // Escape closes it, as before, and gives the focus back.
+    await key(document.activeElement!, "Escape");
+    expect(popover("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(remove);
+  });
+});
+
 describe("the Friends sheet (v0.6)", () => {
   const MAI = demoPublicKey("mai");
   const friendsButton = () => document.querySelector<HTMLButtonElement>(".board-head button[data-friends]")!;
@@ -1259,14 +1292,27 @@ describe("the Friends sheet (v0.6)", () => {
     };
   };
   const cardText = (patch: Partial<PetCard> = {}) => demoSignedCard(cardOf(patch));
+  /** The paste box: null while it is folded away behind "Add a friend". */
   const addBox = () => document.querySelector<HTMLTextAreaElement>("textarea[placeholder^='TODOPET1']")!;
   const addButton = () => sheetButton("Add");
+  const addToggle = () => sheetButton("Add a friend");
+  /** My card's text box: null while it is folded away behind "Show". */
+  const cardBox = () => document.querySelector<HTMLTextAreaElement>("textarea[readonly]")!;
   const openFriends = async () => {
     friendsButton().focus();
     await click(friendsButton());
     await settle();
   };
+  /** Opens the paste box if it is folded away. */
+  const openAdd = async () => {
+    if (!addBox()) await click(addToggle());
+  };
+  /** Shows my card's text if it is folded away. */
+  const showCard = async () => {
+    if (!cardBox()) await click(sheetButton("Show"));
+  };
   const addCard = async (text: string) => {
+    await openAdd();
     await typeInto(addBox(), text);
     await clickAndSettle(addButton());
   };
@@ -1303,6 +1349,7 @@ describe("the Friends sheet (v0.6)", () => {
   it("shows my card as read-only text, signed by the backend: the one the brain would copy", async () => {
     await mount();
     await openFriends();
+    await showCard();
     const mine = areaOf("textarea[readonly]");
     expect(mine.value).toBe(await brain.myCard());
     expect(mine.value).toMatch(/^TODOPET1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{86}$/);
@@ -1316,6 +1363,7 @@ describe("the Friends sheet (v0.6)", () => {
   it("keeps my card up to date while the sheet is open, and says so when the key can't be read", async () => {
     await mount();
     await openFriends();
+    await showCard();
     const before = areaOf("textarea[readonly]").value;
     await act(async () => void (await brain.updatePrefs({ petName: "Kem" })));
     await settle();
@@ -1336,6 +1384,7 @@ describe("the Friends sheet (v0.6)", () => {
       },
     });
     await settle();
+    await showCard();
     expect(areaOf("textarea[readonly]").value).toBe("");
     expect(document.querySelector(".friends-mine .friends-error")?.textContent).toMatch(/card key/i);
     expect(sheetButton("Copy my card").disabled).toBe(true);
@@ -1377,8 +1426,9 @@ describe("the Friends sheet (v0.6)", () => {
   it("adds a friend: Add waits for text, then shows their pet, buddy streak and card date, and clears the box", async () => {
     await mount();
     await openFriends();
-    expect(addButton().disabled).toBe(true);
     expect(document.querySelector(".friends-empty")?.textContent).toMatch(/No friends yet/);
+    await openAdd();
+    expect(addButton().disabled).toBe(true);
     await typeInto(addBox(), cardText());
     expect(addButton().disabled).toBe(false);
     await clickAndSettle(addButton());
@@ -1396,6 +1446,7 @@ describe("the Friends sheet (v0.6)", () => {
   it("puts the keyboard back in the paste box after an Add, so the next card can go straight in (review LOW 8)", async () => {
     await mount();
     await openFriends();
+    await openAdd();
     await typeInto(addBox(), cardText());
     addButton().focus();
     await clickAndSettle(addButton());
@@ -1457,6 +1508,7 @@ describe("the Friends sheet (v0.6)", () => {
   it("adds with Ctrl+Enter too, and not twice when pressed twice", async () => {
     await mount();
     await openFriends();
+    await openAdd();
     await typeInto(addBox(), cardText());
     await key(addBox(), "Enter", { ctrlKey: true });
     await key(addBox(), "Enter", { ctrlKey: true });
@@ -1510,6 +1562,22 @@ describe("the Friends sheet (v0.6)", () => {
     expect(rows[2].querySelector("[data-friend-remove]")?.getAttribute("aria-label")).toMatch(/Remove You \(.*Panda\)/);
   });
 
+  // v0.6 evaluation, issue 5 (second part): a friend who kept the default name was "Mochi (🍡 Mochi)": the same word twice.
+  it("does not say the species twice for a pet that kept the name of its species: 'Mochi (🍡)', not 'Mochi (🍡 Mochi)'", async () => {
+    await mount();
+    await openFriends();
+    const mine = brain.getSnapshot().prefs.petName;
+    await addCard(cardText({ pk: demoPublicKey("m1"), name: mine, species: "mochi" }));
+    await addCard(cardText({ pk: demoPublicKey("m2"), name: "You", species: "fox" }));
+    const tags = [...document.querySelectorAll(".friend-name .friend-lookalike")].map((e) => e.textContent);
+    expect(tags[0]).toBe(" (🍡)");
+    // A different species is still named: that is what tells it from mine.
+    expect(tags[1]).toMatch(/Fox/);
+    const removes = [...document.querySelectorAll("[data-friend-remove]")].map((b) => b.getAttribute("aria-label"));
+    expect(removes[0]).toBe(`Remove ${mine} (🍡)`);
+    expect(removes[1]).toMatch(/^Remove You \(.*Fox\)$/);
+  });
+
   it("removes a friend only after a confirmation, and puts the keyboard somewhere sensible", async () => {
     await mount();
     await openFriends();
@@ -1559,16 +1627,20 @@ describe("the Friends sheet (v0.6)", () => {
   it("keeps what was pasted when Escape takes you back to the board, and gives it back when you return (review LOW 8)", async () => {
     await mount();
     await openFriends();
+    await openAdd();
     await typeInto(addBox(), "TODOPET1.half-pasted");
     await key(addBox(), "Escape");
     expect(document.querySelector(".sheet")).toBeNull();
     await openFriends();
+    // The box is open again with the text in it: a draft is never folded away.
     expect(addBox().value).toBe("TODOPET1.half-pasted");
     // Added, it is gone for good.
     await addCard(cardText());
     expect(addBox().value).toBe("");
     await key(addBox(), "Escape");
     await openFriends();
+    expect(addBox()).toBeNull();
+    await openAdd();
     expect(addBox().value).toBe("");
   });
 
@@ -1590,8 +1662,32 @@ describe("the Friends sheet (v0.6)", () => {
     expect(document.querySelector(".friends-boss")?.textContent).toContain("Procrastination Blob");
   });
 
-  it("says the blob is beaten, and the sticker page gets the 🏅", async () => {
+  // v0.6 evaluation (Pet craft): the blob was an emoji in a circle, among hand-drawn vector pets.
+  it("draws the blob as a picture of its own, in the pets' style rather than an emoji, and a different one once it is beaten", async () => {
     await mount();
+    await openFriends();
+    const blob = () => document.querySelector(".boss-blob")!;
+    expect(blob().querySelector("svg")).not.toBeNull();
+    expect(blob().getAttribute("aria-hidden")).toBe("true");
+    expect(blob().textContent).toBe("");
+    expect(blob().querySelector("svg")?.getAttribute("role")).toBeNull();
+    const alive = blob().innerHTML;
+    expect(blob().querySelector("[data-blob=alive]")).not.toBeNull();
+    // Ids in the picture are its own (two copies of a picture on a page never share one).
+    expect(blob().querySelectorAll("[id]")).toHaveLength(0);
+    brain.stop();
+    await act(async () => root.unmount());
+    document.body.replaceChildren();
+    await mount(request({ friends: true }), { setup: (b) => void b.storage.save("life", { ...demoLife(), week: { key: mondayOf(dayKey(new Date())), done: 15, stickers: 0, trips: 0 } }) });
+    expect(document.querySelector(".boss.beaten")).not.toBeNull();
+    expect(blob().querySelector("[data-blob=beaten]")).not.toBeNull();
+    expect(blob().innerHTML).not.toBe(alive);
+    expect(blob().textContent).toBe("");
+  });
+
+  it("says the blob is beaten, and the sticker page gets the 🏅", async () => {
+    // My 15 are done; a friend's card brings her 15 (each of us counts for up to 15, however many the card says).
+    await mount(request(), { setup: (b) => void b.storage.save("life", { ...demoLife(), week: { key: mondayOf(dayKey(new Date())), done: 15, stickers: 0, trips: 0 } }) });
     await openFriends();
     await addCard(cardText({ weekDone: 60 }));
     expect(document.querySelector(".boss.beaten")).not.toBeNull();
@@ -1640,6 +1736,286 @@ describe("the Friends sheet (v0.6)", () => {
     expect(note).not.toMatch(/install id|random id/i);
   });
 
+  describe("the first screen (v0.6 evaluation, issue 1)", () => {
+    /** The sheet's parts, in the order they are on the page. */
+    const parts = () =>
+      [...document.querySelectorAll(".sheet > section, .sheet > details")].map((e) => {
+        for (const c of ["friends-list", "friends-boss", "friends-mine", "friends-add", "friends-privacy"]) if (e.classList.contains(c)) return c;
+        return e.className;
+      });
+
+    it("puts the friends and the blob first, then My card and Add a friend as two compact rows, then what a card holds", async () => {
+      await mount();
+      await openFriends();
+      await addCard(cardText());
+      expect(parts()).toEqual(["friends-list", "friends-boss", "friends-mine", "friends-add", "friends-privacy"]);
+      // With no friends yet the order is the same: the empty state first.
+      await click(document.querySelector("[data-friend-remove]")!);
+      await click([...popover("alertdialog")!.querySelectorAll("button")].find((b) => b.textContent?.includes("Remove"))!);
+      expect(parts()).toEqual(["friends-list", "friends-boss", "friends-mine", "friends-add", "friends-privacy"]);
+    });
+
+    it("opens with the card's text, the paste box and the privacy note folded away behind small controls", async () => {
+      await mount();
+      await openFriends();
+      await settle();
+      expect(cardBox()).toBeNull();
+      expect(addBox()).toBeNull();
+      expect(document.querySelector(".friends-privacy")?.hasAttribute("open")).toBe(false);
+      expect(sheetButton("Copy my card").disabled).toBe(false);
+      for (const label of ["Show", "Add a friend"]) expect(sheetButton(label).getAttribute("aria-expanded"), label).toBe("false");
+      // Two rows of controls, and the long things are not in the page to be tabbed through.
+      expect(document.querySelectorAll(".friends-mine textarea, .friends-add textarea")).toHaveLength(0);
+      expect(document.querySelector(".friends-mine [data-reset-identity]")).toBeNull();
+    });
+
+    it("shows my card's text, and the new identity button with it, on 'Show', and folds them again on 'Hide'", async () => {
+      await mount();
+      await openFriends();
+      await click(sheetButton("Show"));
+      const mine = cardBox();
+      expect(mine.value).toBe(await brain.myCard());
+      expect(mine.getAttribute("aria-label")).toMatch(/My pet card/);
+      const toggle = sheetButton("Hide");
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      const panel = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+      expect(panel.contains(mine)).toBe(true);
+      expect(panel.querySelector("[data-reset-identity]")).not.toBeNull();
+      await click(toggle);
+      expect(cardBox()).toBeNull();
+      expect(sheetButton("Show").getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("opens the paste box on 'Add a friend' and puts the keyboard in it; a second press folds it", async () => {
+      await mount();
+      await openFriends();
+      await click(addToggle());
+      expect(addBox()).not.toBeNull();
+      expect(document.activeElement).toBe(addBox());
+      expect(addToggle().getAttribute("aria-expanded")).toBe("true");
+      expect(document.getElementById(addToggle().getAttribute("aria-controls")!)?.contains(addBox())).toBe(true);
+      expect(addBox().labels?.[0]?.textContent).toMatch(/Paste your friend's card here/);
+      await click(addToggle());
+      expect(addBox()).toBeNull();
+    });
+
+    it("keeps the paste box open once a card has been added, ready for the next one", async () => {
+      await mount();
+      await openFriends();
+      await addCard(cardText());
+      expect(addBox()).not.toBeNull();
+      expect(document.activeElement).toBe(addBox());
+    });
+
+    it("keeps what a card holds in a row of its own that opens on a click, with the sentence in a list", async () => {
+      await mount();
+      await openFriends();
+      const note = document.querySelector<HTMLDetailsElement>("details.friends-privacy")!;
+      expect(note.querySelector("summary")?.textContent).toMatch(/What's on a card\?/);
+      expect(note.querySelectorAll("li").length).toBeGreaterThanOrEqual(5);
+      expect(note.open).toBe(false);
+    });
+  });
+
+  describe("the Vietnamese privacy note (v0.6 evaluation, issue 7)", () => {
+    it("has no stray dash and comma, and no dash aside inside a bracket, in either language", async () => {
+      await mount(request({ friends: true }));
+      for (const [lang, seq] of [["vi", 2], ["en", 3]] as const) {
+        setLang(lang);
+        await render(request({ seq, friends: true }));
+        const text = document.querySelector(".friends-privacy")!.textContent!;
+        expect(text.length, lang).toBeGreaterThan(100);
+        expect(text, lang).not.toMatch(/—,|—\.|, —|\([^)]*—[^)]*\)/);
+        expect(text, lang).not.toMatch(/\s{2,}/);
+      }
+      setLang("en");
+    });
+
+    it("says it in Vietnamese as a list: name and look, tasks, 28 days, date, public key, and never the rest", async () => {
+      await mount(request({ friends: true }));
+      setLang("vi");
+      await render(request({ seq: 2, friends: true }));
+      const items = [...document.querySelectorAll(".friends-privacy li")].map((li) => li.textContent);
+      expect(items.length).toBeGreaterThanOrEqual(5);
+      expect(items.join("\n")).toMatch(/Tên, loài/);
+      expect(items.join("\n")).toMatch(/khoá công khai/i);
+      expect(document.querySelector(".friends-privacy")?.textContent).toMatch(/Không bao giờ có tên việc/);
+      expect(document.querySelector(".friends-privacy summary")?.textContent).toMatch(/Trên thẻ có gì/);
+      setLang("en");
+    });
+  });
+
+  describe("friends who share a name (v0.6 evaluation, issue 3)", () => {
+    const A = demoPublicKey("same-a");
+    const B = demoPublicKey("same-b");
+    const C = demoPublicKey("same-c");
+    const names = () => [...document.querySelectorAll(".friend-name")].map((e) => e.textContent);
+    const removeLabels = () => [...document.querySelectorAll("[data-friend-remove]")].map((b) => b.getAttribute("aria-label"));
+    const noteOf = (sel: string) => document.querySelector(sel)?.textContent;
+    /** Each helper of the blob as [name, tasks]. */
+    const chips = () => [...document.querySelectorAll(".boss-who li")].map((li) => [li.querySelector("b")!.textContent, li.lastElementChild!.firstChild!.textContent]);
+
+    it("tells them apart by a tag from their key in the list, the helpers, Remove, its question and the statuses", async () => {
+      await mount();
+      await openFriends();
+      await addCard(cardText({ pk: A, name: "Mai", weekDone: 5 }));
+      // A name that is alone has no tag.
+      expect(names()).toEqual(["Mai"]);
+      expect(noteOf(".friends-add [role=status]")).toContain("Added Mai!");
+      await addCard(cardText({ pk: B, name: "Mai", weekDone: 3 }));
+      const [ta, tb] = [pkTag(A), pkTag(B)];
+      expect(ta).not.toBe(tb);
+      expect(names()).toEqual([`Mai · ${ta}`, `Mai · ${tb}`]);
+      expect(noteOf(".friends-add [role=status]")).toContain(`Added Mai · ${tb}! 🎉`);
+      expect(removeLabels()).toEqual([`Remove Mai · ${ta}`, `Remove Mai · ${tb}`]);
+      expect(chips()).toEqual([["You", expect.any(String)], [`Mai · ${ta}`, "5"], [`Mai · ${tb}`, "3"]]);
+      // Adding B's newer card again says whose it is.
+      await addCard(cardText({ pk: B, name: "Mai", weekDone: 4 }));
+      expect(noteOf(".friends-add [role=status]")).toContain(`Updated Mai · ${tb}'s card.`);
+      // The question names the one that will go.
+      await click(document.querySelectorAll("[data-friend-remove]")[1]);
+      expect(popover("alertdialog")!.textContent).toContain(`Remove Mai · ${tb}?`);
+      expect(popover("alertdialog")!.querySelector(".friend-tag")?.textContent).toBe(` · ${tb}`);
+      await click([...popover("alertdialog")!.querySelectorAll("button")].find((b) => b.textContent?.includes("Remove"))!);
+      expect(document.body.textContent).toContain(`Removed Mai · ${tb}.`);
+      // The one that is left has a name of its own again.
+      expect(names()).toEqual(["Mai"]);
+      expect(removeLabels()).toEqual(["Remove Mai"]);
+    });
+
+    it("tags names that are the same once folded (case, fullwidth letters, accents), and only those", async () => {
+      await mount();
+      await openFriends();
+      await addCard(cardText({ pk: A, name: "Mai" }));
+      await addCard(cardText({ pk: B, name: "ＭＡＩ" }));
+      await addCard(cardText({ pk: C, name: "Bin" }));
+      expect(names()).toEqual([`Mai · ${pkTag(A)}`, `ＭＡＩ · ${pkTag(B)}`, "Bin"]);
+    });
+
+    it("keeps the tag after the species of a name that passes for mine, and in the aria label", async () => {
+      await mount();
+      await openFriends();
+      const mine = brain.getSnapshot().prefs.petName;
+      await addCard(cardText({ pk: A, name: mine, species: "fox" }));
+      await addCard(cardText({ pk: B, name: mine.toUpperCase(), species: "panda" }));
+      const [ta, tb] = [pkTag(A), pkTag(B)];
+      const first = document.querySelector(".friend-name")!;
+      expect(first.textContent).toMatch(new RegExp(`\\(.*Fox\\) · ${ta}$`));
+      expect(removeLabels()[1]).toMatch(new RegExp(`^Remove ${mine.toUpperCase()} \\(.*Panda\\) · ${tb}$`));
+    });
+  });
+
+  describe("copying my card (v0.6 evaluation, issue 6)", () => {
+    const noteText = () => document.querySelector(".friends-mine .friends-note")?.textContent?.trim();
+
+    it("takes 'Copied' away when the card changes, and the next Copy puts the new card on the clipboard", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      setClipboard({ writeText });
+      await mount();
+      await openFriends();
+      await clickAndSettle(sheetButton("Copy my card"));
+      expect(noteText()).toMatch(/Copied/);
+      const first = writeText.mock.calls[0][0] as string;
+      // The card changes (the pet is renamed): what was copied is stale, and the sheet stops saying it is on the clipboard.
+      await act(async () => void (await brain.updatePrefs({ petName: "Kem" })));
+      await settle();
+      expect(noteText()).toBe("");
+      await clickAndSettle(sheetButton("Copy my card"));
+      const second = writeText.mock.calls[1][0] as string;
+      expect(second).not.toBe(first);
+      expect(second).toBe(await brain.myCard());
+      expect(noteText()).toMatch(/Copied/);
+    });
+
+    it("keeps the note when the card did not change, and a fresh 'new identity' note when the key does", async () => {
+      setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });
+      await mount();
+      await openFriends();
+      await clickAndSettle(sheetButton("Copy my card"));
+      await act(async () => void (await new Promise((r) => setTimeout(r, 50))));
+      expect(noteText()).toMatch(/Copied/);
+      await showCard();
+      await click(document.querySelector("[data-reset-identity]")!);
+      await clickAndSettle([...popover("alertdialog")!.querySelectorAll("button")].find((b) => /Make a new identity/.test(b.textContent ?? ""))!);
+      expect(noteText()).toMatch(/new (card )?identity/i);
+    });
+
+    it("does not copy the old card while the new one is still being signed", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      setClipboard({ writeText });
+      await mount();
+      await openFriends();
+      await settle();
+      const real = backend.cards.sign.bind(backend.cards);
+      let release!: () => void;
+      const gate = new Promise<void>((res) => (release = res));
+      vi.spyOn(backend.cards, "sign").mockImplementation(async (p) => {
+        await gate;
+        return real(p);
+      });
+      await act(async () => void (await brain.updatePrefs({ petName: "Kem" })));
+      expect(sheetButton("Copy my card").disabled).toBe(true);
+      await act(async () => release());
+      await settle();
+      expect(sheetButton("Copy my card").disabled).toBe(false);
+      await clickAndSettle(sheetButton("Copy my card"));
+      expect(writeText).toHaveBeenCalledWith(await brain.myCard());
+    });
+  });
+
+  describe("the buddy-streak rule (v0.6 evaluation, issue 9)", () => {
+    it("is said once, under the Friends heading, for everybody and the list refers to it; none of the rows repeats it", async () => {
+      await mount();
+      await openFriends();
+      expect(document.querySelector(".friends-help")).toBeNull();
+      for (const [n, name] of [["a", "Ann"], ["b", "Bao"], ["c", "Cát"]]) await addCard(cardText({ pk: demoPublicKey(n), name }));
+      const help = document.querySelector<HTMLElement>(".friends-help")!;
+      expect(help.textContent).toMatch(/days in a row you both reached your goal\. A day off doesn't break it\./i);
+      expect(document.querySelector("ul.friend-list")?.getAttribute("aria-describedby")).toBe(help.id);
+      expect(document.body.textContent!.split("A day off doesn't break it").length - 1).toBe(1);
+      for (const streak of document.querySelectorAll(".friend-streak")) {
+        expect(streak.hasAttribute("title")).toBe(false);
+        expect(streak.querySelector(".sr-only")).toBeNull();
+        expect(streak.textContent).not.toMatch(/day off/);
+      }
+    });
+  });
+
+  describe("the blob counts each person up to 15 (v0.6 evaluation, issue 4)", () => {
+    it("says so in the help line, shows the real number, and one card that says 999 does not beat it", async () => {
+      await mount();
+      await openFriends();
+      await addCard(cardText({ weekDone: 999 }));
+      expect(document.querySelector(".boss.beaten")).toBeNull();
+      expect(document.querySelector(".friends-boss")?.textContent).toMatch(/\(each person counts up to 15\)/);
+      const who = [...document.querySelectorAll(".boss-who li")].map((li) => [li.querySelector("b")!.textContent, li.lastElementChild!.firstChild!.textContent]);
+      expect(who[1]).toEqual(["Mai", "999"]);
+      expect(brain.getSnapshot().life.pageMedals).toBe(0);
+      expect(brain.getSnapshot().boss).toMatchObject({ defeated: false, maxHp: 30 });
+      expect(document.querySelector(".boss-hp")?.textContent).toBe(`HP ${brain.getSnapshot().boss.hp}/30`);
+    });
+
+    it("says the same in Vietnamese", async () => {
+      await mount(request({ friends: true }));
+      setLang("vi");
+      await render(request({ seq: 2, friends: true }));
+      expect(document.querySelector(".friends-boss")?.textContent).toMatch(/tối đa 15/);
+      setLang("en");
+    });
+  });
+
+  it("refuses one of my own older cards after a new identity, kindly (v0.6 evaluation, issue 5)", async () => {
+    await mount();
+    await openFriends();
+    const old = await brain.myCard();
+    await brain.resetCardKey();
+    await settle();
+    await addCard(old);
+    expect(document.querySelector(".friends-error[role=alert]")?.textContent).toContain("That's one of your own older cards");
+    expect(brain.getSnapshot().friends).toEqual([]);
+    expect(document.querySelector(".friend-list")).toBeNull();
+  });
+
   describe("a new card identity (SECURITY M2)", () => {
     const resetButton = () => document.querySelector<HTMLButtonElement>("[data-reset-identity]")!;
     const confirmButton = () => [...popover("alertdialog")!.querySelectorAll("button")].find((b) => /Make a new identity/.test(b.textContent ?? ""))!;
@@ -1647,6 +2023,7 @@ describe("the Friends sheet (v0.6)", () => {
     it("asks first, in kind words, and says what it does", async () => {
       await mount();
       await openFriends();
+      await showCard();
       expect(resetButton().textContent).toMatch(/Make a new card identity/);
       expect(resetButton().getAttribute("aria-haspopup")).toBe("dialog");
       const before = brain.getSnapshot().myKey;
@@ -1672,6 +2049,7 @@ describe("the Friends sheet (v0.6)", () => {
     it("makes a new key, shows the new card, keeps the friends and tells the user", async () => {
       await mount();
       await openFriends();
+      await showCard();
       await addCard(cardText());
       const before = brain.getSnapshot().myKey;
       const card = areaOf("textarea[readonly]").value;
@@ -1690,6 +2068,7 @@ describe("the Friends sheet (v0.6)", () => {
     it("says so, and changes nothing, when the new key can't be made", async () => {
       await mount();
       await openFriends();
+      await showCard();
       const before = brain.getSnapshot().myKey;
       vi.spyOn(backend.cards, "resetKey").mockRejectedValueOnce(new BackendError({ kind: "internal", message: "Windows Credential Manager: access denied" }));
       await click(resetButton());
@@ -1699,5 +2078,26 @@ describe("the Friends sheet (v0.6)", () => {
       expect(alert.textContent).toMatch(/try again/i);
       expect(alert.textContent).not.toMatch(/Credential|denied/);
     });
+  });
+});
+
+describe("the demo panel's friend buttons (v0.6 evaluation, issue 10)", () => {
+  it("has a visit button short enough to stay on one line, in both languages", async () => {
+    await mount();
+    for (const lang of ["en", "vi"] as const) {
+      setLang(lang);
+      const host = document.createElement("div");
+      document.body.append(host);
+      const demoRoot = createRoot(host);
+      await act(async () => demoRoot.render(<DemoPanel brain={brain} backend={backend} />));
+      const labels = [...host.querySelectorAll("button")].map((b) => b.textContent?.trim() ?? "");
+      const visit = labels.find((t) => t.startsWith("👋"))!;
+      expect(visit, lang).toBeTruthy();
+      expect(visit.length, `${lang}: ${visit}`).toBeLessThanOrEqual(12);
+      expect(visit).not.toMatch(/by|chơi.*chơi/);
+      await act(async () => demoRoot.unmount());
+    }
+    setLang("en");
+    expect(Brain).toBeTruthy();
   });
 });

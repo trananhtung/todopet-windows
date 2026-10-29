@@ -14,7 +14,7 @@ import type {
 } from "./types";
 import { getLang } from "../core/l10n";
 import { demoLife } from "../core/life";
-import { createDemoCards } from "./demoCards";
+import { createDemoCards, rememberedDemoCards } from "./demoCards";
 import { BackendError } from "./types";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -132,7 +132,7 @@ const pause = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 /** Minutes for today's tasks on the demo's "heavy day": more than a work day, even before the meetings. */
 const HEAVY_MINUTES: Readonly<Record<string, number>> = { "1": 240, "2": 180, "4": 240 };
 
-export function createDemoBackend(opts: { now?: () => number; persist?: boolean } = {}): DemoBackend {
+export function createDemoBackend(opts: { now?: () => number; persist?: boolean; cardSeed?: string } = {}): DemoBackend {
   // The demo panel can move the clock (opts.now, from tests, stays as it is): the next morning, a Friday.
   let clockShift = 0;
   const now = opts.now ?? (() => Date.now() + clockShift);
@@ -411,7 +411,9 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
       },
     },
     // DEMO ONLY (not cryptography): a stand-in for the card key, so the sample friends' cards can be added through the same path as real ones.
-    cards: createDemoCards(),
+    // Each demo load has an identity of its own (remembered across reloads), so a card copied in one load is a friend's card in another.
+    // Tests that don't ask (`persist: false`, no seed) get the plain, fixed one.
+    cards: opts.cardSeed ? createDemoCards({ seed: opts.cardSeed }) : opts.persist === false ? createDemoCards() : rememberedDemoCards(storageAvailable ? localStorage : null),
     bus: {
       async emit(e) {
         busLocal.emit(e);

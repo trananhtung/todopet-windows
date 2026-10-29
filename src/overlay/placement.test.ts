@@ -115,4 +115,44 @@ describe("placePopover", () => {
     const tight = placePopover({ left: 300, top: 200, width: 26, height: 26 }, { width: 288, height: 110 }, { ...vp, bounds: { left: 280, width: 200 } });
     expect(tight.left).toBe(38); // where it would have gone without a board
   });
+  // v0.6 evaluation, issue 8: in the "above" placement the board ends at y=521 on a 700 px screen, and the question under the lowest
+  // button hung out over the footer and the pet's head, because only the stage's edge was the limit.
+  describe("inside the board it was opened from, from top to bottom (v0.6 evaluation, issue 8)", () => {
+    const board = { left: 497, width: 402, top: 16, height: 505 };
+    const size = { width: 264, height: 181 };
+    const inBoard = (p: { top: number }) => {
+      expect(p.top).toBeGreaterThanOrEqual(board.top + 8);
+      expect(p.top + size.height).toBeLessThanOrEqual(board.top + board.height - 8);
+    };
+
+    it("goes above a button near the bottom of the board, not below it over the footer", () => {
+      const p = placePopover({ left: 636, top: 440, width: 160, height: 26 }, size, { ...vp, bounds: board });
+      expect(p.up).toBe(true);
+      inBoard(p);
+      // The old limit was the screen: there was room for it below the board.
+      const old = placePopover({ left: 636, top: 440, width: 160, height: 26 }, size, { ...vp, bounds: { left: board.left, width: board.width } });
+      expect(old.up).toBe(false);
+      expect(old.top + size.height).toBeGreaterThan(board.top + board.height);
+    });
+
+    it("drops below a button near the top of the board, and below one with room", () => {
+      const high = placePopover({ left: 636, top: 60, width: 160, height: 26 }, size, { ...vp, bounds: board });
+      expect(high.up).toBe(false);
+      inBoard(high);
+      expect(high.top).toBe(90);
+    });
+
+    it("stays inside even when the button has scrolled out of the board, or the board is shorter than the popover", () => {
+      inBoard(placePopover({ left: 636, top: 5, width: 160, height: 26 }, size, { ...vp, bounds: board }));
+      inBoard(placePopover({ left: 636, top: 900, width: 160, height: 26 }, size, { ...vp, bounds: board }));
+      const short = placePopover({ left: 636, top: 100, width: 160, height: 26 }, size, { ...vp, bounds: { ...board, height: 120 } });
+      expect(short.top).toBe(board.top + 8);
+    });
+
+    it("is the same as before for a board with no vertical size given", () => {
+      const a = placePopover({ left: 636, top: 200, width: 160, height: 26 }, size, { ...vp, bounds: { left: board.left, width: board.width } });
+      const b = placePopover({ left: 636, top: 200, width: 160, height: 26 }, size, vp);
+      expect(a.top).toBe(b.top);
+    });
+  });
 });

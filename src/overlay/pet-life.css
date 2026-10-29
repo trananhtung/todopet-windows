@@ -312,23 +312,50 @@
   display: block;
   overflow: visible;
 }
-/* A small label above its head: a card, not a bubble (no tail, no buttons, quiet colors). */
+/* A small label above its head: a card, not a bubble (no tail, no buttons, quiet colors). Two short lines: the name (the only
+   thing that gives way when it is long) and "dropped by! 🔥 buddy streak N", which is never cut (v0.6 evaluation, issue 2). */
 .visitor-label {
   position: absolute;
   bottom: 86%;
   left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: max-content;
   max-width: 280px;
+  padding: 3px 10px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font: 600 12px/1.35 var(--font);
+  text-align: left;
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+}
+.visitor-label .vl-who {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+}
+.visitor-label .vl-who bdi {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 3px 10px 4px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--ink);
-  font: 600 12px/1.4 var(--font);
-  box-shadow: var(--shadow-1);
-  cursor: pointer;
+}
+.visitor-label .vl-who .friend-lookalike,
+.visitor-label .vl-who .friend-tag {
+  flex: none;
+  white-space: pre;
+  font-weight: 500;
+  color: var(--muted);
+}
+.visitor-label .vl-tail {
+  flex: none;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--ink-2);
 }
 .visitor-label:hover {
   background: var(--surface-2);

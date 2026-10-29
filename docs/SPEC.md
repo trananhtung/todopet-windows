@@ -384,7 +384,8 @@ collaboration plus a little competition beats competition alone. The plan left t
 any chat app. That means nothing to host or pay for, and no data leaves the PC unless you send your card yourself.
 Cards are **signed** (Ed25519, one key pair per install, the secret half in Credential Manager and never in JavaScript),
 so a friend's card can't be forged or changed on the way, and a newer card from a friend can only come from their install.
-A friend can still write any task count on their own card; with no rankings and no penalties there is nothing worth cheating for.
+A friend can still write any task count on their own card, so what one card can do to the blob is capped at their share (15; §3): a
+typo or a cheat can't pay the receiver a 🏅 on its own, and with no rankings and no penalties there is nothing more to cheat for.
 
 ### 1. Pet cards (`src/core/friends.ts`, `src-tauri/crates/todopet-core/src/card.rs`)
 - **Format:** `TODOPET1.<payload>.<signature>`, at most 1630 characters (a real card is about 550).
@@ -407,12 +408,15 @@ A friend can still write any task count on their own card; with no rankings and 
   - Parsing is strict: size cap, schema check, known species and accessories only, numbers range-checked, dates validated.
   - The signature is then verified through the backend with the card's own `pk`: only a card that checks out is added. A
     card that doesn't gets "This card doesn't check out; ask your friend to copy it again." (never repeating what it says).
-  - Your own card (`pk` is yours) can't be added.
+  - Your own card (`pk` is yours) can't be added, and neither can one of your own *older* cards: the public keys of your earlier
+    identities are kept in the friends document (the last 10, public halves only), and a card with one of them is refused as
+    "That's one of your own older cards".
   - A newer card with the same `pk` replaces the older one, quietly: only that key could have signed it.
   - At most 12 friends.
 - **Make a new card identity** (Friends sheet, after a confirmation) replaces the key: your next cards carry a new `pk`,
-  friends see a new person and can remove the old entry, and the first visit of the day waits again. Your friends list stays.
-- Friends and the day's visits are stored under a new key `friends` (overlay window only, at most 64 KB).
+  friends see a new person and can remove the old entry, and the first visit of the day waits again. Your friends list stays,
+  and the key you had is remembered (public half, the last 10) so that an old card of yours, pasted back from a chat, is not added as a friend.
+- Friends, the day's visits and your older public keys are stored under a new key `friends` (overlay window only, at most 64 KB).
 
 ### 2. Buddy streak
 - For each friend, count back from the latest day both histories cover.
@@ -423,7 +427,9 @@ A friend can still write any task count on their own card; with no rankings and 
 
 ### 3. Weekly co-op boss
 - **"The Procrastination Blob" 👾:** its HP is 15 per member (you + friends with a card from this ISO week).
-- **Damage:** your tasks finished this week, counted live, plus each friend's `weekDone` from their latest card that week.
+- **Damage:** your tasks finished this week, counted live, plus each friend's `weekDone` from their latest card that week,
+  **each person counting up to their share, 15**. The blob needs everyone, and one card that says 999 can't beat it alone. The
+  sheet shows each person's real number and says "(each person counts up to 15)" in its help line.
 - **Win:** when HP reaches 0 everyone wins: +50 XP and a 🏅 in the sticker book, once a week.
 - **No losing, no penalties.** The blob resets on Monday.
 
@@ -435,12 +441,21 @@ A friend can still write any task count on their own card; with no rankings and 
 - A visit is ambient, not a bubble, so it doesn't count against the nudge budget.
 
 ### 5. Friends sheet (board)
-- **My card:** your card (signed) with Copy, and **Make a new card identity** (asks first).
-- **Add:** paste a friend's card, then Add.
-- **Friends list:** each friend with their pet, buddy streak, their card's date and Remove.
-- **This week:** the blob with an HP bar and who contributed.
-- **Privacy:** a note on exactly what a card contains: the pet's looks, this week's task count, the 28-day goal/rest record
-  (and that a rest can be a packed day), the date, and the public key that links your cards until you make a new identity.
+Top to bottom (v0.6 evaluation, issue 1: the friends are the point, so they are the first thing, not 8 lines of base64):
+- **Friends list:** each friend with their pet, buddy streak, the pet's kind and their card's date, and Remove (after a
+  confirmation). The rule of the buddy streak is said once, in a small line under the heading that the list refers to
+  (`aria-describedby`), not on every row.
+- **This week:** the blob (a small drawing in the pets' style: a smug violet jelly that breathes, and a dizzy grey one with
+  stars once beaten) with an HP bar and who contributed (each person's real count; up to 15 of it hurts the blob).
+- **My card:** one compact row, **Copy my card**, with a small **Show** that opens the card's text (read-only) and
+  **Make a new card identity** (asks first).
+- **Add a friend:** one compact row; the button opens the paste box (and puts the keyboard in it), then **Add**. A draft already
+  in the box keeps it open.
+- **What's on a card?:** a folded row that opens a short list of exactly what a card contains: the pet's looks, this week's task
+  count, the 28-day goal/rest record (and that a rest can be a packed day), the date, and the public key that links your cards until
+  you make a new identity; and that it never holds task titles, times, app names or your name.
+- At 1024×700, in every board placement (the "above" one has a 365 px body), at least one friend is visible when it opens;
+  the board is 404 px wide at most.
 
 ### 6. As built (interpretations)
 
@@ -474,13 +489,22 @@ Where the sections above left room, this is what v0.6 does. Tests are in `src/co
 - **Names.** A friend's name is shown in a `<bdi>` everywhere (a right-to-left name can't reorder the words around it). A
   name that, folded (NFKC, case, accents and joiners aside), equals my pet's name, "You" or "Bạn" is shown with the friend's
   species beside it everywhere (the list, the boss's helpers, the visitor's label, the Remove question and the statuses).
+  - A name that passes for mine and already is the name of its pet's species (a pet that kept its default name) shows only the
+    species' emoji beside it, "Mochi (🍡)", not the same word twice.
+  - **Friends who share a name** (folded the same way) also get a short tag from their public key, "Mai · #a3f" (`#` and the
+    first 3 characters of a hash of the key; longer only for a name whose tags would collide), in the same places and in the
+    aria labels, so two "Mai" can be told apart and the right one removed. A friend with a name of their own has none. The
+    tag is the same wherever it shows and does not change when other friends join or leave.
 - **The record of days** is `LifeState.history` (day key → mark, the last 28 days), written by `closeDay`: `G` goal met
   (even on a day off), `K` a task done, `R` a day off with nothing done or a busy day that was excused, `-` otherwise
   (a missed workday, frozen or broken, or a day the app never saw). Days nobody settled (the PC was off) are `R` on a
   day off and `-` on a workday when the card is made, and today is marked live. Older saves get their perfect days as `G`.
 - **Buddy streak.** The day a card was made is still open on that card (the pet may not have had its day yet): it counts
   only if both hit the goal and never ends the streak. Closed days follow §2 exactly. At most 28.
-- **Boss.** Weeks are ISO weeks (Monday to Sunday, like the pet's own weeks). Alone you can beat it (15 HP). The win is
+- **Boss.** Weeks are ISO weeks (Monday to Sunday, like the pet's own weeks). Alone you can beat it (15 HP). **Each person
+  counts for 15 at most**, you (your live count) as much as a friend (their card): the blob has 15 HP per member, so it takes
+  every one of you, and a card that says 999 (a typo, or someone's idea of a joke) is 15 and no more. Tested in
+  `friends.test.ts` and `brain.friends.test.ts`. The win is
   paid once per ISO week (`LifeState.bossWins`), as +50 XP and a 🏅 that takes a slot on the sticker page after the
   🌟 (`pageMedals`; a full page pays its own +50 XP and 🍪) and counts as a sticker in the week's recap. It is not paid
   while a finished task is still being closed in Todoist (if Todoist refuses, the task comes back), and it is said in
@@ -501,12 +525,20 @@ Where the sections above left room, this is what v0.6 does. Tests are in `src/co
   or a bubble: it keeps still, and hides its label while a bubble shows), when the board opens, or when its friend is
   removed; one that only just walked in is gone at once. Your pet stands still while it is there. The diary says a friend
   dropped by, never whose.
-- **Storage.** The `friends` document: `friends` (the cards and each friend's last visit) and the day's `visits`; at most
+  - **The label** is two short lines: the friend's name (with the species or tag beside it when it has one) and, below it,
+    "dropped by! 🔥 buddy streak N". Only the name can be cut with an ellipsis, so a name of 12 to 20 characters never takes the
+    streak with it. The same text is its tooltip and screen-reader name.
+- **Storage.** The `friends` document: `friends` (the cards and each friend's last visit), the day's `visits` and `oldKeys` (my
+  earlier public keys, newest last, at most 10, real keys only); at most
   64 KB, read or written (a bigger file is renamed `.bad` and treated as missing, like a malformed one). A failed read at
   startup (the file can't be opened) is kept in memory only, never written over what is on disk. The Friends sheet is
   also reachable by clicking a visitor or its label (`BoardRequest.friends`).
-- **Friends sheet.** The paste box keeps its text in the brain (Escape back to the board and return, and it is still there),
-  is focused again after an Add, and "Added Mai!" goes away when typing starts. My card is signed when the sheet opens and again
-  when what is on it changes.
+- **Friends sheet.** The paste box keeps its text in the brain (Escape back to the board and return, and it is still there, and
+  open), is focused again after an Add, and "Added Mai!" goes away when typing starts. My card is signed when the sheet opens and
+  again when what is on it changes; the "Copied" note goes when the card changes (it is not on the clipboard any more) and Copy
+  waits for the new signature. The popover for a new card identity, like Remove's, stays inside the board, above its button when
+  there is no room below.
 - **Demo.** *Add 2 friends* adds Mai (a card from today) and Bin (two days old), made from sample data and "signed" by the demo's
-  stand-in key, through the same path as a pasted card; *Friend drops by* starts a visit now without using up the day's two.
+  stand-in key, through the same path as a pasted card; *Visit* starts a visit now without using up the day's two. Each fresh demo
+  load has an identity of its own (a random seed kept in the page's storage, so a reload keeps it), so a card copied in one load is a
+  friend's card in another and a real exchange can be tried between two tabs.

@@ -62,9 +62,27 @@ function checkText(text: string, chars: number, bytes: number, what: string): vo
   if (decoded === null || decoded.length !== bytes) throw invalid(`The ${what} is not base64url`);
 }
 
-export function createDemoCards(): CardsApi {
-  let generation = 0;
-  const key = () => demoPublicKey(generation === 0 ? "me" : `me-${generation}`);
+/** A random seed for one demo load: 12 characters of a-z and 0-9 (from the browser's random source when it has one). Demo only. */
+export function freshDemoSeed(): string {
+  const bytes = new Uint8Array(12);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, (b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
+}
+
+export interface DemoCardsOptions {
+  /** Which demo identity this is. Without one it is the plain "me" of the tests; every demo load gets a seed of its own (see `rememberedDemoCards`). */
+  seed?: string;
+  /** How many times the identity has been renewed already ("Make a new card identity"). */
+  generation?: number;
+  /** Told after each renewal with the new count, so that a page can keep it. */
+  onReset?: (generation: number) => void;
+}
+
+export function createDemoCards(opts: DemoCardsOptions = {}): CardsApi {
+  let generation = Math.max(0, Math.trunc(opts.generation ?? 0));
+  const base = opts.seed ? `me-${opts.seed}` : "me";
+  const key = () => demoPublicKey(generation === 0 ? base : `${base}-${generation}`);
   return {
     async publicKey() {
       return key();
@@ -81,6 +99,49 @@ export function createDemoCards(): CardsApi {
     },
     async resetKey() {
       generation += 1;
+      opts.onReset?.(generation);
     },
   };
+}
+
+/** Where the demo page keeps which identity it is. */
+const IDENTITY_KEY = "todopet:demo-card-id";
+
+/** The seed and the renewals as stored, or null for anything that isn't exactly that. */
+function readIdentity(raw: string | null): { seed: string; generation: number } | null {
+  if (!raw) return null;
+  try {
+    const x: unknown = JSON.parse(raw);
+    if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+    const { seed, generation } = x as Record<string, unknown>;
+    if (typeof seed !== "string" || !/^[a-z0-9]{8,32}$/.test(seed)) return null;
+    if (typeof generation !== "number" || !Number.isInteger(generation) || generation < 0 || generation > 100_000) return null;
+    return { seed, generation };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The demo's card key for a page: every fresh load (a browser with nothing stored) gets an identity of its own, from a random
+ * seed, so a card copied in one load is a *friend's* card in another; a reload keeps its identity (the seed and the number of
+ * renewals are kept in `storage`, which may be missing or refuse: then the identity lasts as long as the page). Demo only.
+ */
+export function rememberedDemoCards(storage: Pick<Storage, "getItem" | "setItem"> | null): CardsApi {
+  let known: { seed: string; generation: number } | null = null;
+  try {
+    known = readIdentity(storage?.getItem(IDENTITY_KEY) ?? null);
+  } catch {
+    // Not allowed to read: a fresh identity for this page.
+  }
+  const seed = known?.seed ?? freshDemoSeed();
+  const keep = (generation: number) => {
+    try {
+      storage?.setItem(IDENTITY_KEY, JSON.stringify({ seed, generation }));
+    } catch {
+      // Not allowed to write: the identity lasts as long as the page.
+    }
+  };
+  if (!known) keep(0);
+  return createDemoCards({ seed, generation: known?.generation ?? 0, onReset: keep });
 }
