@@ -1,7 +1,7 @@
 // User preferences (Prefs.swift). Stored as JSON through the Backend; the Todoist token lives in Credential Manager.
 import { addDays, dayKey, isDayKey } from "./dates";
-import type { Lang, SpeciesId } from "./types";
-import { SPECIES_IDS } from "./types";
+import type { DecorId, Lang, SpeciesId } from "./types";
+import { DECOR_IDS, SPECIES_IDS } from "./types";
 
 export type SoundMode = "off" | "important" | "all";
 
@@ -58,6 +58,10 @@ export interface Prefs {
   firstLaunch: number;
   /** Days off ("yyyy-MM-dd", sorted): no workday, so no reminders and no streak change. */
   restDays: string[];
+  /** Show the pet's home corner (its decorations) beside the taskbar strip. */
+  showHome: boolean;
+  /** The decorations picked for the home corner (at most 3); none picked shows the newest ones. */
+  homeItems: DecorId[];
 }
 
 export const DEFAULT_FILTER = "today | overdue";
@@ -99,10 +103,21 @@ export function defaultPrefs(now = Date.now()): Prefs {
     hideInFullscreen: true,
     firstLaunch: now,
     restDays: [],
+    showHome: true,
+    homeItems: [],
   };
 }
 
 export const MAX_REST_DAYS = 60;
+/** The home corner holds this many decorations. */
+export const MAX_HOME_ITEMS = 3;
+
+/** Known decorations, once each, at most 3. */
+export function tidyHomeItems(raw: unknown): DecorId[] {
+  if (!Array.isArray(raw)) return [];
+  const known = raw.filter((x): x is DecorId => (DECOR_IDS as readonly unknown[]).includes(x));
+  return [...new Set(known)].slice(0, MAX_HOME_ITEMS);
+}
 /** The longest range Settings adds in one go. */
 export const MAX_REST_RANGE = 30;
 
@@ -173,6 +188,8 @@ export function prefsFromJson(raw: unknown, now = Date.now(), today = now): Pref
     hideInFullscreen: bool("hideInFullscreen"),
     firstLaunch: typeof r.firstLaunch === "number" ? r.firstLaunch : d.firstLaunch,
     restDays: tidyRestDays(r.restDays, today),
+    showHome: bool("showHome"),
+    homeItems: tidyHomeItems(r.homeItems),
   };
 }
 

@@ -26,6 +26,10 @@ export interface DiaryEntry {
   /** Machine-readable detail for the summary ("picked", "closed", "ignored", "flowStart"…). */
   tag?: string;
   minutes?: number;
+  /** How many things it counts ("done": tasks finished at once). */
+  count?: number;
+  /** The day it is about ("yyyy-MM-dd") when that isn't the day it was written (a day settled the next morning). */
+  day?: string;
 }
 
 export const kindIcon: Record<DiaryKind, string> = {
@@ -124,7 +128,7 @@ export class Diary {
   }
 
   /** `throttle` + `every` (minutes): skip if the same key was written less than `every` minutes ago. */
-  add(kind: DiaryKind, text: string, opts: { tag?: string; minutes?: number; throttle?: string; every?: number } = {}): void {
+  add(kind: DiaryKind, text: string, opts: { tag?: string; minutes?: number; count?: number; day?: string; throttle?: string; every?: number } = {}): void {
     if (!this.enabled) return;
     const at = this.now();
     if (opts.throttle) {
@@ -135,6 +139,8 @@ export class Diary {
     const entry: DiaryEntry = { at, kind, text: text.replace(/\s*\n\s*/g, " ") };
     if (opts.tag) entry.tag = opts.tag;
     if (opts.minutes !== undefined) entry.minutes = opts.minutes;
+    if (opts.count !== undefined) entry.count = opts.count;
+    if (opts.day !== undefined) entry.day = opts.day;
     this.api
       .append(dayKey(new Date(at)), JSON.stringify(entry))
       .then(() => this.notifySoon())

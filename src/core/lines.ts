@@ -8,6 +8,8 @@ const n = (count: number, noun: string, nouns = `${noun}s`) => `${count} ${count
 import { accessoryEmoji, accessoryName, stageName } from "./life";
 import { isRecurring, taskTitle, type TodoTask } from "./models";
 import type { StuckTask } from "./stuck";
+import { emojiOf, itemName, placeName, type TripReturn } from "./trips";
+import { weekRecap, type WeekStats } from "./chapters";
 import type { Accessory, Mood, StageIndex } from "./types";
 
 const q = (t: TodoTask) => `“${shortText(taskTitle(t))}”`;
@@ -323,3 +325,48 @@ export const tip = () =>
     ["Mẹo: mỗi lần bị gián đoạn cần khá lâu để tập trung lại — tắt thông báo khi tập trung nhé.", "Tip: every interruption costs a long refocus — mute notifications while focusing."],
     ["Mẹo: uống nước & đứng dậy vươn vai sau mỗi phiên tập trung 💧", "Tip: drink water and stretch after each focus session 💧"],
   ]);
+
+// v0.5 Game: trips and the Monday fresh start (chest and craft lines live with their rules in chests.ts and craft.ts).
+
+export const tripOffer = (back: Date) =>
+  L(
+    `Xong hết kế hoạch hôm nay rồi! 🎉 Cho mình đi chơi một chuyến nhé? ${timeString(back)} mình về 🎒`,
+    `Today's plan is all done! 🎉 Can I go on a little trip? Back at ${timeString(back)} 🎒`,
+  );
+export const tripGo = () => L("Đi đi!", "Go!");
+export const tripStay = () => L("Ở lại nha", "Stay");
+export const tripStayed = () => L("Vậy mình ở lại chơi với bạn 🥰", "Then I'll stay right here with you 🥰");
+
+export const tripStart = (place: string, back: Date) =>
+  L(
+    `Mình đi ${place} đây! 🎒 ${timeString(back)} mình về. Cần mình thì bấm vào tấm biển nhé.`,
+    `Off to ${place}! 🎒 Back at ${timeString(back)}. Click my sign if you need me.`,
+  );
+
+export function tripBack(r: TripReturn): string {
+  const place = placeName(r.place);
+  if (r.souvenir) {
+    const gift = `${emojiOf(r.souvenir)} ${itemName(r.souvenir)}`;
+    return L(
+      `Mình về rồi nè! 🥰 Quà từ ${place} cho bạn: ${gift}. Có bưu thiếp trong nhật ký đó 💌`,
+      `I'm back from ${place}! 🥰 Here's your souvenir: ${gift}. There's a postcard waiting in the diary 💌`,
+    );
+  }
+  if (r.xp > 0) {
+    return L(
+      `Mình đi ${place} về rồi! 🥰 Quà ở đó mình có rồi, nên mang về toàn chuyện vui: +${r.xp} XP 💌`,
+      `I'm back from ${place}! 🥰 I already had its souvenir, so I brought back stories instead: +${r.xp} XP 💌`,
+    );
+  }
+  return L("Mình về sớm nè! Chưa đi được xa, nhưng mà nhớ bạn quá 🥰", "Back already! I didn't get far, but I missed you 🥰");
+}
+
+export const postcard = (place: string, text: string) => L(`💌 Bưu thiếp từ ${place}: ${text}`, `💌 A postcard from ${place}: ${text}`);
+
+/** The first greeting of a week: a fresh start, with last week's wins when there were any. Never a telling-off. */
+export function newWeek(last: WeekStats | null): string {
+  const recap = weekRecap(last);
+  return recap
+    ? L(`🌱 Tuần mới, khởi đầu mới! Tuần trước: ${recap}.`, `🌱 New week, fresh start! Last week: ${recap}.`)
+    : L("🌱 Tuần mới, khởi đầu mới! Tuần này mới tinh, mình cùng bắt đầu nhẹ nhàng nhé.", "🌱 New week, fresh start! A brand-new week; let's ease in together.");
+}

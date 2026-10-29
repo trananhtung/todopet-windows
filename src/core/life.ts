@@ -1,8 +1,10 @@
 // Feeding, hunger, dirt, growth, combos, accessories and day settlement (PetLife.swift). Pure rules.
+import { countWeek, emptyWeek, rollWeek, weekFromJson, type WeekStats } from "./chapters";
 import { addDays, dayKey, isDayKey, parseDate } from "./dates";
 import { L } from "./l10n";
-import type { Accessory, AccessorySlot, CelebrationKind, Season, StageIndex } from "./types";
-import { ACCESSORIES, ACCESSORY_SLOT } from "./types";
+import { isSouvenirId, tripFromJson, type SouvenirId, type Trip } from "./trips";
+import type { Accessory, AccessorySlot, CelebrationKind, DecorId, Season, StageIndex } from "./types";
+import { ACCESSORIES, ACCESSORY_SLOT, DECOR_IDS } from "./types";
 
 export const STAGE_THRESHOLDS = [0, 100, 300, 700, 1500] as const;
 
@@ -147,6 +149,8 @@ export const REPAIR_TASKS = 2;
 /** …if that day comes within this many days of the break. */
 export const REPAIR_DAYS = 14;
 export const PAGE_SIZE = 10;
+/** The most chests held at once (v0.5; the chest rules live in chests.ts). */
+export const MAX_HELD_CHESTS = 3;
 /** Every sticker page starts with this many gift stickers 🎁. */
 export const PAGE_GIFTS = 2;
 
@@ -196,6 +200,29 @@ export interface LifeState {
   distraction: Record<string, number>;
   /** Unsolicited reminders shown today (the nudge budget), kept across restarts. */
   dayNudges: number;
+  // v0.5 "Game".
+  /** Chests held (0–3), earned with active work and opened by finishing a task. */
+  chests: number;
+  /** Chests earned on `chestDay` (at most 3 a day). */
+  chestsToday: number;
+  chestDay: string;
+  /** Seconds of active work toward the next chest. */
+  workSec: number;
+  /** The item being knitted during focus (0–1). */
+  craft: number;
+  /** Home decorations owned, in the order they were made. */
+  decor: DecorId[];
+  /** Souvenirs on the shelf, in the order they came home. */
+  souvenirs: SouvenirId[];
+  /** Set while the pet is away on a trip. */
+  trip: Trip | null;
+  /** The day of the last trip (one a day). */
+  tripDay: string;
+  /** This week's tasks, stickers and trips, and last week's for the Monday fresh start. */
+  week: WeekStats;
+  lastWeek: WeekStats | null;
+  /** The week whose fresh-start line the pet already said. */
+  weekGreeted: string;
 }
 
 export const newLife = (): LifeState => ({
@@ -226,6 +253,18 @@ export const newLife = (): LifeState => ({
   daySeen: false,
   distraction: {},
   dayNudges: 0,
+  chests: 0,
+  chestsToday: 0,
+  chestDay: "",
+  workSec: 0,
+  craft: 0,
+  decor: [],
+  souvenirs: [],
+  trip: null,
+  tripDay: "",
+  week: emptyWeek(),
+  lastWeek: null,
+  weekGreeted: "",
 });
 
 const isAccessory = (x: unknown): x is Accessory => typeof x === "string" && (ACCESSORIES as readonly string[]).includes(x);
@@ -279,6 +318,18 @@ export function lifeFromJson(raw: unknown): LifeState {
     daySeen: typeof r.daySeen === "boolean" ? r.daySeen : true,
     distraction,
     dayNudges: clampInt(r.dayNudges, 0, 1000, 0),
+    chests: clampInt(r.chests, 0, MAX_HELD_CHESTS, 0),
+    chestsToday: clampInt(r.chestsToday, 0, 1000, 0),
+    chestDay: isDayKey(r.chestDay) ? r.chestDay : "",
+    workSec: Math.max(0, num(r.workSec, 0)),
+    craft: Math.min(1, Math.max(0, num(r.craft, 0))),
+    decor: [...new Set((Array.isArray(r.decor) ? r.decor : []).filter((x): x is DecorId => (DECOR_IDS as readonly unknown[]).includes(x)))],
+    souvenirs: [...new Set((Array.isArray(r.souvenirs) ? r.souvenirs : []).filter(isSouvenirId))],
+    trip: tripFromJson(r.trip),
+    tripDay: isDayKey(r.tripDay) ? r.tripDay : "",
+    week: weekFromJson(r.week) ?? emptyWeek(),
+    lastWeek: weekFromJson(r.lastWeek),
+    weekGreeted: typeof r.weekGreeted === "string" ? r.weekGreeted : "",
   };
 }
 
@@ -300,6 +351,12 @@ export function demoLife(): LifeState {
     snacks: 1,
     pageFilled: PAGE_GIFTS + 4,
     distraction: { "youtube.com": 720, "facebook.com": 300 },
+    // A chest to open with the next task, a decoration half knitted, a home corner and a souvenir shelf.
+    chests: 1,
+    workSec: 600,
+    craft: 0.4,
+    decor: ["rug", "plant", "mug"],
+    souvenirs: ["hoian", "dalat", "kyoto", "paris"],
   };
 }
 
@@ -387,6 +444,7 @@ export function feed(s: LifeState, now: number, roll: number, pick: number): Fee
   const food = golden ? "🍰" : FOODS[Math.min(Math.floor(pick * FOODS.length * 7) % FOODS.length, FOODS.length - 1)];
   const unlocked = checkUnlocks(s);
   const after = stageOf(s.xp);
+  countWeek(s, dayOf(now), "done");
   return { food, combo: s.combo, golden, kind, unlocked, levelUp: after !== before ? after : null, cleaned };
 }
 
@@ -397,6 +455,7 @@ export function unfeed(s: LifeState, gained: { xp: number; golden: boolean } = {
   s.satiety = Math.max(0, s.satiety - 25);
   s.combo = Math.max(0, s.combo - 1);
   if (gained.golden) s.goldens = Math.max(0, s.goldens - 1);
+  s.week.done = Math.max(0, s.week.done - 1);
 }
 
 /** Hunger grows during work hours only (at most one hour per step, so sleep or lunch doesn't starve the pet). */
@@ -498,6 +557,7 @@ export function closeDay(s: LifeState, today: string, isWorkday: (key: string) =
       if (s.dayCompleted >= s.dayPlanned) {
         r.sticker = true;
         s.perfectDays.push(s.dayKey);
+        countWeek(s, s.dayKey, "stickers");
         s.xp += 30;
         const page = addSticker(s);
         r.pageDone = page.pageDone;
@@ -533,6 +593,10 @@ export function closeDay(s: LifeState, today: string, isWorkday: (key: string) =
   s.combo = 0;
   s.distraction = {};
   s.dayNudges = 0;
+  s.chestsToday = 0;
+  s.chestDay = today;
+  s.workSec = 0;
+  rollWeek(s, today);
   s.perfectDays = s.perfectDays.slice(-60);
   r.unlocked = checkUnlocks(s);
   return r;

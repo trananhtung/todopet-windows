@@ -39,6 +39,12 @@ import { defaultMoodInputs, evaluateMood, moodEmoji, moodLabel, type MoodReason 
 import { effectiveClaudeModel, effectiveFilter, isRestDay, isWorkday, prefsFromJson, type Prefs } from "./prefs";
 import { appRules, currentDistraction, siteRules } from "./sites";
 import { findStuck, pretendSeen, recordSeen, type SeenLog, type StuckTask } from "./stuck";
+// v0.5 "Game".
+import * as chapters from "./chapters";
+import * as chests from "./chests";
+import * as craft from "./craft";
+import { activeSeason, type ActiveSeason } from "./seasons";
+import * as trips from "./trips";
 import type { Accessory, CelebrationKind, Lang, Mood, SpeciesId } from "./types";
 
 const MIN = 60_000;
@@ -49,7 +55,7 @@ const NEVER = -8.64e15;
  * on its own. Urgent bubbles (timed tasks, meetings), replies and the two daily check-ins (morning greeting, end-of-day
  * review) have no kind.
  */
-export type ReminderKind = "welcome" | "distract" | "antic" | "night" | "plan" | "stuck" | "hungry" | "grumble" | "overdue" | "timeblock" | "distractsum" | "nudge" | "tip";
+export type ReminderKind = "welcome" | "distract" | "antic" | "night" | "plan" | "stuck" | "hungry" | "grumble" | "overdue" | "timeblock" | "distractsum" | "nudge" | "tip" | "trip";
 
 const KIND_NAMES: Readonly<Record<ReminderKind, readonly [string, string]>> = {
   welcome: ["chào mừng quay lại", "welcome back"],
@@ -65,8 +71,12 @@ const KIND_NAMES: Readonly<Record<ReminderKind, readonly [string, string]>> = {
   distractsum: ["tổng kết xao nhãng", "distraction summary"],
   nudge: ["việc tiếp theo", "next task"],
   tip: ["mẹo", "tip"],
+  trip: ["rủ đi chơi", "trip offer"],
 };
 const kindName = (k: ReminderKind) => L(KIND_NAMES[k][0], KIND_NAMES[k][1]);
+/** Check-ins (v0.5: the trip offer) have a kind but never count against the budget or the dismissal hold. */
+const CHECK_INS: ReadonlySet<ReminderKind> = new Set<ReminderKind>(["trip"]);
+const counted = (k: ReminderKind | undefined): k is ReminderKind => k !== undefined && !CHECK_INS.has(k);
 /** Each dismissal of a kind doubles its interval, up to this many times the usual. */
 const MAX_BACKOFF = 8;
 /** This many reminders dismissed in a row hold the rest for `HOLD_MINUTES`. */
@@ -118,6 +128,12 @@ export interface AnticEvent {
   start: number;
 }
 
+/** v0.5: what the pet just revealed (a new `id` each time), for the overlay's reveal animation. */
+export type Reveal =
+  | { id: number; at: number; kind: "chest"; chest: chests.ChestResult }
+  | ({ id: number; at: number; kind: "craft" } & craft.CraftResult)
+  | ({ id: number; at: number; kind: "souvenir" } & trips.TripReturn);
+
 export type DueChoice = "today" | "tomorrow" | "none" | "smart";
 export type Chime = "chatter" | "important" | "celebrate" | "big" | "grumble";
 
@@ -158,6 +174,17 @@ export interface BrainState {
   nudgesLeft: number;
   /** After three dismissed reminders in a row, non-urgent ones wait until then (epoch ms). */
   nudgeHoldUntil: number | null;
+  // v0.5 "Game".
+  /** Knitting progress (0–1) while a focus session runs, else null (the pet's `craft` pose). */
+  craft: number | null;
+  /** Chests held, earned today (3 at most), and progress toward the next one (0–1). */
+  chests: { held: number; today: number; next: number };
+  /** The pet's trip while it is away (the sign shows `back`), else null. */
+  trip: trips.Trip | null;
+  /** The season in progress (seasonal chest items, days left), or null. */
+  season: ActiveSeason | null;
+  /** The last chest, decoration or souvenir revealed. */
+  reveal: Reveal | null;
 }
 
 /** What the UI provides: sounds, speech and opening views. All optional. */
@@ -257,6 +284,8 @@ export class Brain {
   private backoff = new Map<string, number>();
   /** Reminders closed or ignored in a row; tapping a reminder's button starts over. */
   private dismissedInRow = 0;
+  /** v0.5: the distraction visit (its start) that already cost stitches during focus. */
+  private stitchesDroppedAt: number | null = null;
 
   private constructor(
     readonly backend: Backend,
@@ -303,7 +332,13 @@ export class Brain {
       prefs,
       nudgesLeft: budgetLeft({ prefs, life: lifeState }),
       nudgeHoldUntil: null,
+      craft: null,
+      chests: { held: 0, today: 0, next: 0 },
+      trip: null,
+      season: activeSeason(new Date(this.now())),
+      reveal: null,
     };
+    Object.assign(this.state, this.gameView());
   }
 
   /** Loads prefs, the pet's life and the postponed-task log, then picks the language. */
@@ -343,6 +378,7 @@ export class Brain {
     if (patch.bubble) this.bubbleAt = this.now();
     this.state = { ...this.state, ...patch };
     if (patch.life || patch.prefs) this.state.nudgesLeft = budgetLeft(this.state);
+    if (patch.life || "focus" in patch) Object.assign(this.state, this.gameView());
     for (const fn of this.listeners) fn();
   }
 
@@ -936,7 +972,7 @@ export class Brain {
       if (after.dirt > before.dirt) text += L(`, bẩn thêm ${after.dirt - before.dirt} lớp`, `, ${after.dirt - before.dirt} more layer(s) of dirt`);
       if (r.repairOffered && after.repair) text += L(`, có nhiệm vụ nối chuỗi tới hết ${after.repair.until}`, `, repair quest open until ${after.repair.until}`);
       if (r.repairExpired) text += L(", nhiệm vụ nối chuỗi đã hết hạn", ", the repair quest ran out");
-      this.diary.add("life", text);
+      this.diary.add("life", text, r.sticker ? { tag: "sticker", day: r.day } : {});
       this.dayNote = this.dayCloseNote(r, after, nowMs);
     }
     if (r.unlocked.length > 0) this.say({ text: lines.unlocked(r.unlocked), seconds: 12, urgent: true });
@@ -974,6 +1010,8 @@ export class Brain {
     b: { text: string; actions?: BubbleAction[]; seconds: number; urgent?: boolean },
     opts: { chime?: Chime; why?: string; antic?: boolean; kind?: ReminderKind } = {},
   ): boolean {
+    // v0.5: while the pet is away on a trip, only urgent bubbles and replies show.
+    if (this.state.life.trip && opts.why !== undefined && !b.urgent) return false;
     const cur = this.state.bubble;
     const actions = b.actions ?? [];
     if (cur && cur.actions.length > 0 && !b.urgent && actions.length === 0) return false;
@@ -982,14 +1020,14 @@ export class Brain {
     if (opts.kind) bubble.kind = opts.kind;
     this.lastBubbleAt = this.now();
     this.set({ bubble });
-    if (opts.kind) {
+    if (counted(opts.kind)) {
       this.mutateLife((s) => {
         s.dayNudges += 1;
       });
     }
     this.play(opts.chime ?? "chatter");
     const quote = `“${shortText(b.text.replace(/\n/g, " "), 90)}”`;
-    const left = opts.kind ? L(` (còn ${this.state.nudgesLeft} lượt nhắc hôm nay)`, ` (${this.state.nudgesLeft} left today)`) : "";
+    const left = counted(opts.kind) ? L(` (còn ${this.state.nudgesLeft} lượt nhắc hôm nay)`, ` (${this.state.nudgesLeft} left today)`) : "";
     if (opts.why !== undefined) this.diary.add(opts.antic ? "antic" : "bubble", `${quote} — ${L("vì ", "because ")}${opts.why}${left}`);
     else this.diary.add("system", L("Pet nói ", "Pet said ") + quote);
     return true;
@@ -1017,7 +1055,7 @@ export class Brain {
   dismissBubble(bubbleId: number, how: "closed" | "ignored"): void {
     const b = this.state.bubble;
     if (!b || b.id !== bubbleId) return;
-    const refused = b.kind !== undefined && (how === "closed" || b.actions.length > 0);
+    const refused = counted(b.kind) && (how === "closed" || b.actions.length > 0);
     let backoff = "";
     if (refused && b.kind) {
       const m = Math.min(MAX_BACKOFF, (this.backoff.get(b.kind) ?? 1) * 2);
@@ -1056,7 +1094,7 @@ export class Brain {
 
   private get outOfTheWay(): boolean {
     const s = this.state;
-    return s.hiddenUntil !== null || (s.fullscreen && s.prefs.hideInFullscreen);
+    return s.hiddenUntil !== null || (s.fullscreen && s.prefs.hideInFullscreen) || s.life.trip !== null;
   }
 
   private speak(text: string): void {
@@ -1167,6 +1205,7 @@ export class Brain {
     this.mutateLife((s) => life.decay(s, nowMs, working), true);
     const d = this.currentDistraction();
     if (this.state.hasToken && ctx.inWork && d) this.mutateLife((s) => life.addDistraction(s, d.app, 15), true);
+    this.gameTick(nowMs, ctx.inWork, d !== null);
     // Left the distracting app or site: the pet gets out of the way.
     if (this.state.antic?.kind.type === "block" && !d) this.set({ antic: null });
     this.trackDistraction(nowMs);
@@ -1451,12 +1490,17 @@ export class Brain {
       }
       if (s.life.dirt > 0) text += `\n${lines.dirty(s.life.dirt)}`;
       if (s.life.streak > 0) text += `\n${lines.streak(s.life.streak)}`;
+      const fresh = this.mutateLife((l) => chapters.takeFreshStart(l, this.dayKey), true);
+      if (fresh) text += `\n${lines.newWeek(fresh.last)}`;
       this.say(
         { text, actions: needsPlan ? this.planActions() : next ? [this.focusAction(next), this.laterAction()] : [], seconds: 60 },
         { why: L("lời chào đầu ngày làm việc", "first greeting of the workday") + (needsPlan ? L(`, mới có ${planned(day)}/${target} việc`, `, only ${planned(day)}/${target} planned`) : "") },
       );
       return;
     }
+
+    // 3b. Today's plan is done: the pet asks to go on a trip (v0.5). A check-in: never counted.
+    if (this.offerTrip(nowMs, ctx.inWork)) return;
 
     // 4. Not planned enough: nag every 30 minutes once the planning deadline passed.
     if (ctx.inWork && planned(day) < target && ctx.hoursAfterPlanDeadline >= 0 && this.remindEvery("plan", 30)) {
@@ -1635,6 +1679,10 @@ export class Brain {
     }
     if (!result) return null;
     const r = result;
+    // v0.5: a finished task opens a held chest; its XP isn't taken back by Undo.
+    const chest = task ? this.openChest(nowMs) : null;
+    const stageNow = life.stageOf(this.state.life.xp);
+    if (chest && levelUp === null && stageNow !== life.stageOf(xpBefore)) levelUp = stageNow;
     this.set({ antic: null, celebration: { id: ++this.bubbleSeq, kind: r.kind, food: r.food, golden: r.golden, combo: r.combo, start: nowMs } });
     const st = this.state.life;
     const title = shortText(task ? taskTitle(task) : "", 40);
@@ -1647,7 +1695,7 @@ export class Brain {
     if (r.golden) fed += L(", bánh vàng hiếm", ", rare golden treat");
     if (levelUp !== null) fed += L(`, lớn lên thành ${life.stageName(levelUp)}`, `, grew up: ${life.stageName(levelUp)}`);
     if (unlocked.length > 0) fed += L(", mở khoá ", ", unlocked ") + unlocked.map(life.accessoryEmoji).join("");
-    this.diary.add("life", fed);
+    this.diary.add("life", fed, { tag: "done", count: Math.max(1, feeds) });
     this.celebrateUntil = nowMs + (r.golden || levelUp !== null ? 5000 : 4000);
     this.recompute();
     this.play(r.golden || levelUp !== null ? "big" : "celebrate");
@@ -1658,18 +1706,19 @@ export class Brain {
       if (r.cleaned) parts.push(lines.cleaned(this.state.life.dirt));
       if (levelUp !== null) parts.push(lines.levelUp(levelUp));
       if (unlocked.length > 0) parts.push(lines.unlocked(unlocked));
+      if (chest) parts.push(chests.chestText(chest));
       // The task that finished today's repair quest: say so in the same bubble.
       const repaired = this.repairNote;
       if (repaired) parts.push(repaired);
       this.repairNote = null;
       const actions: BubbleAction[] = viaPet ? [{ title: L("Hoàn tác", "Undo"), run: () => void this.undoComplete(task) }] : [];
       this.lastBubbleAt = nowMs;
-      const big = unlocked.length > 0 || levelUp !== null || repaired !== null;
+      const big = unlocked.length > 0 || levelUp !== null || repaired !== null || chest?.reward === "accessory";
       this.set({ bubble: { id: ++this.bubbleSeq, text: parts.join("\n"), actions, seconds: big ? 14 : 8, urgent: true, reminder: false } });
       if (levelUp !== null || r.golden) this.speak(lines.voiceCheer());
     }
     this.later(() => this.recompute(), 4200);
-    return { xp: this.state.life.xp - xpBefore, golden: r.golden };
+    return { xp: this.state.life.xp - xpBefore - (chest?.xp ?? 0), golden: r.golden };
   }
 
   /** What the species says when cheering; set by the UI from the species registry. */
@@ -1713,6 +1762,7 @@ export class Brain {
     const gained = this.feeds.get(task.id);
     this.feeds.delete(task.id);
     this.mutateLife((s) => life.unfeed(s, gained));
+    this.diary.add("life", L(`Hoàn tác “${shortText(taskTitle(task), 40)}”`, `Undid “${shortText(taskTitle(task), 40)}”`), { tag: "undone" });
     const reopened: TodoTask = { ...task, checked: false, completedAt: null };
     this.reopening.set(task.id, reopened);
     this.completed = this.completed.filter((t) => t.id !== task.id);
@@ -1959,6 +2009,9 @@ export class Brain {
     }
     this.set({ focus: null });
     this.recompute();
+    // v0.5: an item that was already complete gets finished; anything less waits for the next session.
+    const made = f && !f.isBreak ? this.craftDone(false) : null;
+    if (made) this.say({ text: made, seconds: 10, urgent: true });
   }
 
   /** Ends the session right at 0:00 rather than at the next 15-second tick (the tick stays as a fallback). */
@@ -1994,10 +2047,143 @@ export class Brain {
       }
       actions.push({ title: L(`+${f.minutes}' nữa`, `+${f.minutes}' more`), run: () => this.startFocus(f.task, f.minutes) });
       actions.push({ title: L(`☕ Nghỉ ${this.state.prefs.breakMinutes}'`, `☕ Break ${this.state.prefs.breakMinutes}'`), run: () => this.startBreak() });
-      bubble = { id: ++this.bubbleSeq, text: lines.focusEnd(f.task, f.minutes), actions, seconds: 120, urgent: true, reminder: false };
+      const made = this.craftDone(true);
+      bubble = { id: ++this.bubbleSeq, text: lines.focusEnd(f.task, f.minutes) + (made ? `\n${made}` : ""), actions, seconds: 120, urgent: true, reminder: false };
     }
     this.lastBubbleAt = this.now();
     this.set({ bubble });
+  }
+
+  // ---------- v0.5 Game: chests, knitting, trips ----------
+
+  /** The game fields of BrainState, derived from the pet's life and the focus session. */
+  private gameView(): Pick<BrainState, "craft" | "chests" | "trip"> {
+    const l = this.state.life;
+    const f = this.state.focus;
+    return {
+      craft: f && !f.isBreak && !l.trip ? l.craft : null,
+      chests: { held: l.chests, today: l.chestsToday, next: Math.min(1, l.workSec / chests.CHEST_EVERY_SEC) },
+      trip: l.trip,
+    };
+  }
+
+  /** The heartbeat's game part: chests for active work, knitting and dropped stitches during focus, the trip's end. */
+  private gameTick(nowMs: number, inWork: boolean, distracted: boolean): void {
+    const now = new Date(nowMs);
+    this.patchState({ season: activeSeason(now) });
+    const inMeeting = currentEvent(this.state.events, now) !== null;
+    if (this.state.hasToken && chests.isActiveWork({ inWork, idleSeconds: this.sample.idleSeconds, distracted, inMeeting })) {
+      if (this.mutateLife((s) => chests.accrueWork(s, 15, dayKey(now)), true)) {
+        this.saveLife(false);
+        const held = this.state.life.chests;
+        this.diary.add("life", L(`Làm việc đủ 30 phút → nhận 1 rương 🎁 (đang giữ ${held})`, `30 minutes of active work → earned a chest 🎁 (${held} held)`));
+      }
+    }
+    const f = this.state.focus;
+    if (f && !f.isBreak && !this.state.life.trip) {
+      this.mutateLife((s) => craft.knit(s, 15, this.state.prefs.focusMinutes), true);
+      // 30 s on a distracting app or site drops a few stitches, once per visit.
+      const d = this.distractionSince;
+      if (d && nowMs - Math.max(d.since, f.start) >= craft.DROP_AFTER_SEC * 1000 && this.stitchesDroppedAt !== d.since) {
+        this.stitchesDroppedAt = d.since;
+        const lost = this.mutateLife((s) => craft.dropStitches(s));
+        if (lost > 0) {
+          this.diary.add("focus", L(`Ở ${d.label} 30 giây khi đang tập trung → tuột vài mũi đan (−${Math.round(lost * 100)}%)`, `30 s on ${d.label} during focus → dropped a few stitches (−${Math.round(lost * 100)}%)`));
+          this.say({ text: craft.droppedText(), seconds: 8 });
+        }
+      }
+    }
+    // Back at the time on the sign, once you're at the PC to say hello.
+    const trip = this.state.life.trip;
+    if (trip && nowMs >= trip.back && this.sample.idleSeconds < 300) this.returnFromTrip();
+  }
+
+  /** Opens a held chest for a finished task; returns what was inside for the celebration bubble. */
+  private openChest(nowMs: number): chests.ChestResult | null {
+    if (this.state.life.chests <= 0) return null;
+    const season = activeSeason(new Date(nowMs))?.season ?? null;
+    const r = this.mutateLife((s) => chests.openChest(s, this.random(), this.random(), season));
+    if (!r) return null;
+    this.set({ reveal: { id: ++this.bubbleSeq, at: nowMs, kind: "chest", chest: r } });
+    this.diary.add("life", chests.chestText(r));
+    return r;
+  }
+
+  /** Finishes the knitted item once it is complete (a completed session tops it up first). Returns its line. */
+  private craftDone(completed: boolean): string | null {
+    if (this.state.life.trip) return null;
+    const r = this.mutateLife((s) => {
+      if (completed) craft.topUp(s);
+      return craft.finishCraft(s, this.random());
+    });
+    if (!r) return null;
+    this.set({ reveal: { id: ++this.bubbleSeq, at: this.now(), kind: "craft", ...r } });
+    this.diary.add(
+      "life",
+      r.decor
+        ? L(`Đan xong: ${craft.decorName(r.decor)} ${craft.decorEmoji(r.decor)}`, `Finished knitting: ${craft.decorName(r.decor)} ${craft.decorEmoji(r.decor)}`)
+        : L(`Đan xong một món (+${r.xp} XP)`, `Finished knitting something (+${r.xp} XP)`),
+    );
+    return craft.craftText(r);
+  }
+
+  /** Today's plan is done: asks to go on a trip, once a day (a check-in: kind "trip", never counted). */
+  private offerTrip(nowMs: number, inWork: boolean): boolean {
+    const s = this.state;
+    const workEnd = atHour(s.prefs.workEnd, 0, new Date(nowMs)).getTime();
+    const offer = { now: nowMs, workEnd, inWork, completed: s.day.completed.length, target: s.target, left: s.day.today.length, tripDay: s.life.tripDay, away: s.life.trip !== null };
+    if (!trips.canOfferTrip(offer) || !this.once(`trip-${this.dayKey}`)) return false;
+    this.say(
+      {
+        text: lines.tripOffer(new Date(trips.backTime(nowMs, workEnd))),
+        actions: [
+          { title: lines.tripGo(), primary: true, run: () => void this.goOnTrip() },
+          { title: lines.tripStay(), run: () => void this.say({ text: lines.tripStayed(), seconds: 5 }) },
+        ],
+        seconds: 60,
+      },
+      { why: L("xong hết kế hoạch hôm nay", "today's plan is done"), kind: "trip" },
+    );
+    return true;
+  }
+
+  /** Sends the pet on today's trip (from the offer, or the UI). False when it is away already or went today. */
+  goOnTrip(): boolean {
+    const nowMs = this.now();
+    const l = this.state.life;
+    if (l.trip || l.tripDay === dayKey(new Date(nowMs))) return false;
+    const workEnd = atHour(this.state.prefs.workEnd, 0, new Date(nowMs)).getTime();
+    const trip = this.mutateLife((s) => trips.startTrip(s, nowMs, workEnd, this.random()));
+    const place = trips.placeName(trip.place);
+    const back = new Date(trip.back);
+    this.set({ antic: null });
+    this.diary.add("life", L(`Pet đi chơi ${place}, hẹn ${timeString(back)} về`, `The pet set off for ${place}, back at ${timeString(back)}`));
+    this.say({ text: lines.tripStart(place, back), seconds: 8, urgent: true });
+    return true;
+  }
+
+  /** Calls the pet back early (a click on its sign). A souvenir needs 30 minutes away. */
+  callBack(): void {
+    if (this.state.life.trip) this.returnFromTrip();
+  }
+
+  /** Home again: the souvenir (or XP), a postcard in the diary and a little dance. A reply, not a reminder. */
+  private returnFromTrip(): void {
+    const nowMs = this.now();
+    const r = this.mutateLife((s) => trips.endTrip(s, nowMs));
+    if (!r) return;
+    const place = trips.placeName(r.place);
+    if (r.souvenir || r.xp > 0) {
+      this.diary.add("life", lines.postcard(place, trips.postcardText(r.place)), { tag: "postcard" });
+      this.celebrateUntil = nowMs + 4000;
+      this.set({ celebration: { id: ++this.bubbleSeq, kind: "dance", food: "", golden: false, combo: 0, start: nowMs } });
+      this.play("celebrate");
+    } else {
+      this.diary.add("life", L(`Pet về sớm từ ${place} sau ${r.minutes} phút`, `The pet came back early from ${place} after ${r.minutes} min`));
+    }
+    this.set({ reveal: { id: ++this.bubbleSeq, at: nowMs, kind: "souvenir", ...r } });
+    this.recompute();
+    this.say({ text: lines.tripBack(r), seconds: 14, urgent: true });
   }
 
   // ---------- Pet interaction ----------
