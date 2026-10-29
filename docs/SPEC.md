@@ -194,3 +194,86 @@ constant ones, and endowed progress raises completion.
   doubles it; tapping any of its buttons resets it. Three dismissed reminders in a row hold non-urgent bubbles for
   an hour. Multipliers reset each day.
 - The board shows how many reminders are left today; the diary explains every skip.
+
+## v0.4 "Indispensable" (Không thể thiếu)
+
+Why: research proposals 4–8. Interrupted work often waits hours to be resumed and only a blatant cue helps; unclear
+next steps after meetings are the norm; if-then plans have a large effect (d = 0.65); a short end-of-day plan helps
+people detach; overcommitting is the main planning failure.
+
+### 1. "Where was I?" resume card (`brain.ts`, board)
+- The brain keeps, **in memory only** (never on disk, cleared at day change), the last *work* context: the task
+  (running focus task, else the task you last acted on in the board, else the next task), the foreground app name
+  and window title, and the browser address if it is http(s). Distracting apps and sites never become the context.
+- Snapshot moments: you go idle, a meeting starts, or you switch to a distracting app or site.
+- Coming back (after ≥ 5 min away, after a meeting, or leaving a distraction after ≥ 2 min) shows a resume card
+  instead of the generic welcome-back: "You were on: ⟨task⟩ · in ⟨app⟩ — ⟨title⟩" with **Reopen ↗** (only for an
+  http(s) address), **Focus** and **Something else**. It is a check-in, not counted against the nudge budget.
+- The board has **📌 Pin my place**: saves the context now with an optional one-line "next step" that the resume
+  card shows.
+
+### 2. Meeting bookends (`brain.ts`, `calendar.ts`)
+- The "meeting soon" bubble lists up to 2 related open tasks (sharing a word of 4+ letters with the meeting title,
+  case- and diacritic-insensitive, common words ignored).
+- After a meeting of 15+ minutes ends and you are at the PC (within 10 min): "“⟨meeting⟩” is over. Anything to
+  capture?" with **＋ Next step** (opens the board's add field prefilled with "⟨meeting⟩: ") and **Nothing**. If the
+  next meeting starts within 15 minutes, it also suggests a 5-minute breather. Once per meeting, not counted
+  against the budget.
+
+### 3. Shutdown ritual (board "Wrap up" sheet, `brain.ts`)
+- The end-of-day review bubble opens a **Wrap up** sheet (also in the board menu after 15:00), at most a few
+  taps: today's wins; each unfinished task with **Tomorrow** / **No date** / keep; pick **tomorrow's frog**; one
+  line "where do I start tomorrow?". **Done for today** puts the pet to sleep and stops non-urgent bubbles until
+  the next workday.
+- Tomorrow's frog and the note are stored locally (`plan` key) and the next morning's greeting names them; the
+  frog goes first in "eat the frog" ordering that day.
+
+### 4. Overbooked warning and day timeline (`calendar.ts`, `brain.ts`, board)
+- Estimates: the Todoist duration when set, else `prefs.defaultEstimate` (default 30 min, 15–120).
+- Load = estimates of today's open tasks + remaining meeting minutes in work hours; capacity = remaining work
+  minutes. Once a day, after planning, if load exceeds capacity by 60+ minutes: "Today looks overbooked: ~6h of
+  tasks + 3h of meetings in 7h left. Move some?" with **Pick tasks to move** and **It's fine** (a check-in).
+- The board shows a compact timeline of the work day: meetings, timed tasks, now, and a load meter.
+
+### 5. If-then starts and the 2-minute starter (`brain.ts`, board)
+- A task's menu has **Start when…**: after ⟨a meeting today⟩, when I open ⟨app⟩ (recent non-distracting apps or
+  typed), after lunch (13:00). Stored locally for the day; fires once with "As planned: ⟨task⟩" and **Focus now** /
+  **Later** (the user asked for it, so it is not counted against the budget).
+- **▶ Try 2 minutes** (task menu and the stuck-task bubble) starts a 2-minute focus on the task ("just open it");
+  when it ends the pet offers a normal focus session or "that's enough".
+
+## v0.5 "Game"
+
+Why: research proposals 9–12. The companions people keep open all day give the pet something to make while you
+focus (Focus Friend), reasons to come back on a timer (Finch's adventures, Bongo Cat's chests), limited seasonal
+sets, and gentle failure. Rewards stay cosmetic, random rewards have published odds, and nothing is ever sold.
+
+### 1. Crafting while you focus, and the pet's home
+- During a focus session the pet knits (a yarn ball and needles beside it, an item growing). A completed session
+  finishes one **home decoration**; abandoning it keeps the progress for next time.
+- Being on a distracting app or site for 30 s during focus **drops a few stitches** (−10% progress, never below 0,
+  never loses a finished item).
+- About 12 decorations (rug, plant, lamp, cushion, bookshelf, mug, poster, garland, fish bowl, radio, blanket,
+  lantern), drawn in the house style, given in random order; once all are owned a session gives XP.
+- **Home:** a small corner of the taskbar strip shows up to 3 chosen decorations (board → Home; `prefs.showHome`).
+
+### 2. Expeditions
+- When today's plan is complete the pet offers a trip ("Back at 16:30") with **Go!** / **Stay**. While it is away
+  (2 h, or until work ends) a small sign stands in its place (click to call it back) and non-urgent bubbles pause.
+- It returns with a **souvenir** from one of ~16 places (Hội An lantern, Đà Lạt strawberries, Hạ Long pearl, Sa Pa
+  postcard, Kyoto fan…) and a postcard entry in the diary. Souvenirs fill a shelf in the wardrobe. One trip a day.
+
+### 3. Chests, published odds and seasonal sets
+- Every 30 minutes of active work (in work hours, not idle, not distracted) earns a chest, at most 3 a day; finishing
+  a task opens one. The odds are shown in the wardrobe: common 70% (+20 XP or a 🍪), rare 25% (a new accessory),
+  legendary 5% (a seasonal or golden item). Duplicates turn into XP.
+- The accessory catalog grows from 6 to about 18 in the existing head, neck and face slots (beanie, flower crown,
+  party hat, nón lá, Santa hat, witch hat, red Tết scarf, bell collar, bandana, heart glasses, round glasses, star
+  glasses).
+- **Seasons:** Tết (Lunar New Year, two weeks around it), Trung Thu (Mid-Autumn, a week around it), Halloween
+  (Oct 20–Nov 1) and Christmas (Dec 15–Jan 1). Lunar dates come from a table for 2026–2032. Seasonal items drop only
+  in their window and the wardrobe shows how many days are left.
+
+### 4. Weekly chapters and a Monday fresh start
+- The first greeting of the week frames a fresh start with last week's recap (tasks, stickers, trips).
+- The diary groups days into weekly chapters with a one-line recap.
