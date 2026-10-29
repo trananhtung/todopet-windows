@@ -166,17 +166,19 @@ describe("acts", () => {
     }
   });
 
-  it("renders well-formed SVG and is deterministic (same pose in, same SVG out)", () => {
-    for (const id of SPECIES_IDS) {
-      for (const kind of PET_ACTS) {
-        for (const t of [ACT_KEY_T[kind], ACT_DURATION[kind] * 0.2, ACT_DURATION[kind] * 0.8]) {
-          const pose = defaultPose({ act: { kind, t }, t: 3 + t, wearing: ["roundglasses", "bandana"] });
-          const svg = renderPet(id, pose, { idPrefix: "a" });
-          check(svg, "a");
-          expect(renderPet(id, structuredClone(pose), { idPrefix: "a" })).toBe(svg);
-        }
+  // One test per species: all of them at once take over 5 s on a CI runner.
+  it.each(SPECIES_IDS)("renders well-formed SVG for %s and is deterministic (same pose in, same SVG out)", (id) => {
+    for (const kind of PET_ACTS) {
+      for (const t of [ACT_KEY_T[kind], ACT_DURATION[kind] * 0.2, ACT_DURATION[kind] * 0.8]) {
+        const pose = defaultPose({ act: { kind, t }, t: 3 + t, wearing: ["roundglasses", "bandana"] });
+        const svg = renderPet(id, pose, { idPrefix: "a" });
+        check(svg, "a");
+        expect(renderPet(id, structuredClone(pose), { idPrefix: "a" })).toBe(svg);
       }
     }
+  });
+
+  it("renders an act's SVG in both languages", () => {
     for (const lang of ["en", "vi"] as const) check(renderPet("cat", defaultPose({ act: { kind: "sneeze", t: 1.02 } }), { lang }), "pet");
   });
 
