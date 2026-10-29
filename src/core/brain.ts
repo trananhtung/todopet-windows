@@ -1548,6 +1548,9 @@ export class Brain {
     const kind = b.kind;
     const card = b.card;
     const refused = (kind !== undefined || card !== undefined) && (how === "closed" || (how === "ignored" && b.actions.length > 0));
+    // Gone first: the changes below go through `set`, which would otherwise find this bubble still waiting (and stale)
+    // and dismiss it again, once per change.
+    this.set({ bubble: null });
     // v0.5: closing the trip offer is a "Stay" too.
     if (b.id === this.tripOfferId && how === "closed") this.mutateLife((s) => trips.declineTrip(s, this.now()));
     // An offer that went stale unseen (a focus session started first) may come again once the day allows it.
@@ -1581,7 +1584,6 @@ export class Brain {
         s.dayNudges = Math.max(0, s.dayNudges - 1);
       });
     }
-    this.set({ bubble: null });
     if (this.state.life.dismissedInRow >= HOLD_AFTER) {
       const until = this.now() + HOLD_MINUTES * MIN;
       this.mutateLife((s) => {
@@ -3471,12 +3473,12 @@ export class Brain {
   }
 
   /** Today's plan is done: asks to go on a trip, once a day (a check-in: no kind, so never counted). */
-  private offerTrip(nowMs: number, inWork: boolean): boolean {
+  /** What `trips.canOfferTrip` needs, from the state now. */
+  private tripOffer(nowMs: number, inWork: boolean): trips.TripOfferInput {
     const s = this.state;
-    const workEnd = atHour(s.prefs.workEnd, 0, new Date(nowMs)).getTime();
-    const offer = {
+    return {
       now: nowMs,
-      workEnd,
+      workEnd: atHour(s.prefs.workEnd, 0, new Date(nowMs)).getTime(),
       inWork,
       completed: s.day.completed.length,
       target: s.target,
@@ -3485,6 +3487,11 @@ export class Brain {
       declined: s.life.tripDeclined,
       away: s.life.trip !== null,
     };
+  }
+
+  private offerTrip(nowMs: number, inWork: boolean): boolean {
+    const offer = this.tripOffer(nowMs, inWork);
+    const workEnd = offer.workEnd;
     if (!trips.canOfferTrip(offer) || !this.once(`trip-${this.dayKey}`)) return false;
     const shown = this.say(
       {
@@ -3500,12 +3507,11 @@ export class Brain {
           },
         ],
         seconds: 60,
-        // Waiting behind the board: gone once the pet left, you're done for today or focusing, or it's too late to go.
-        validUntil: workEnd - trips.OFFER_LEAD_MS,
+        // Waiting behind the board: gone once it couldn't be offered any more (the pet left, a new task came in, it's
+        // too late to go), or you're focusing or done for today.
         stillValid: () => {
-          const l = this.state.life;
           const t = this.now();
-          return !l.trip && l.tripDay !== dayKey(new Date(t)) && this.state.focus === null && !isDoneForToday(this.plan, t);
+          return trips.canOfferTrip(this.tripOffer(t, true)) && this.state.focus === null && !isDoneForToday(this.plan, t);
         },
       },
       { why: L("xong hết kế hoạch hôm nay", "today's plan is done") },

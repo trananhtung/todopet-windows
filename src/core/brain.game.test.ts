@@ -581,6 +581,49 @@ describe("Brain and Done for today (v0.4)", () => {
   });
 });
 
+describe("Brain and stale bubbles", () => {
+  it("gives back only the one reminder a stale bubble counted, and notes it once", async () => {
+    const { s, until, brain, diary } = await rig({ prefs: { bubbleGap: 0, remindEvery: 10 } });
+    const nudge = until((b) => b.kind === "nudge", 120);
+    expect(nudge.stillValid).toBeDefined();
+    const used = s().life.dayNudges;
+    expect(used).toBeGreaterThan(1);
+    diary.mockClear();
+    // The task it is about is done: the waiting nudge is out of date.
+    await brain.complete(s().day.today.concat(s().day.overdue).find((t) => nudge.text.includes(t.content))!);
+    expect(s().life.dayNudges).toBe(used - 1);
+    expect(diary.mock.calls.filter((c) => c[2]?.tag === "stale")).toHaveLength(1);
+    brain.stop();
+  });
+
+  it("drops a waiting trip offer once a new task for today comes in", async () => {
+    const { s, until, brain, backend } = await rig({ prefs: { bubbleGap: 0 } });
+    for (const id of ["1", "2", "4"]) await brain.complete(s().day.today.find((t) => t.id === id)!);
+    await brain.refresh();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    const offer = until(isTripOffer);
+    // Added on the phone: it arrives with the next sync.
+    await backend.todoist.add({ content: "One more thing", dueString: "today", priority: 1, parentId: null });
+    await brain.refresh();
+    expect(s().day.today).toHaveLength(1);
+    expect(brain.bubbleStale(offer)).toBe(true);
+    expect(s().bubble?.id).not.toBe(offer.id);
+    brain.stop();
+  });
+
+  it("notes a trip offer that went stale once", async () => {
+    const { s, until, brain, diary } = await rig({ prefs: { bubbleGap: 0 } });
+    for (const id of ["1", "2", "4"]) await brain.complete(s().day.today.find((t) => t.id === id)!);
+    await brain.refresh();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    until(isTripOffer);
+    diary.mockClear();
+    brain.startFocus(null, 25);
+    expect(diary.mock.calls.filter((c) => c[2]?.tag === "stale")).toHaveLength(1);
+    brain.stop();
+  });
+});
+
 describe("Brain and weekly chapters", () => {
   it("starts the week's first greeting with last week's recap, then counts the new week", async () => {
     // Monday 2 November; Friday was a perfect day. (v0.4 settles a day with Todoist's own count for it, so Todoist
