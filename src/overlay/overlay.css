@@ -3018,3 +3018,222 @@ button.decor:hover {
     padding: 0 6px;
   }
 }
+
+/* ---------- v0.6 Friends: the sheet ---------- */
+
+.friends-label {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.friends-card-text {
+  min-height: 0;
+  padding: 6px 8px;
+  font: 11.5px/1.4 var(--font-mono);
+  word-break: break-all;
+  resize: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+textarea.friends-card-text {
+  resize: none;
+}
+.friends-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.friends-note {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.friends-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.friends-error .icon {
+  flex: none;
+  margin-top: 1px;
+}
+.friends-empty,
+.friends-sub {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.friend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.friend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 4px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.friend-pet {
+  flex: none;
+  width: 52px;
+  height: 52px;
+}
+.friend-pet svg {
+  display: block;
+}
+.friend-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.friend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+}
+.friend-kind,
+.friend-date {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.friend-date.stale {
+  color: var(--warn-ink);
+}
+.friend-streak {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.friend-streak.on {
+  color: var(--accent-text);
+}
+.friend-remove {
+  flex: none;
+}
+.boss {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.boss-blob {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  font-size: 28px;
+  line-height: 1;
+}
+.boss.beaten .boss-blob {
+  background: var(--good-soft);
+}
+.boss-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.boss-name {
+  font-size: 13.5px;
+}
+/* The bar is a graphic: 3:1 against its track in both themes (the HP numbers say the same in words). */
+.boss-bar {
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+}
+.boss-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--bad);
+  transition: width 0.4s var(--ease-out);
+}
+.boss.beaten .boss-bar i {
+  background: var(--good);
+}
+.boss-hp {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.boss-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.boss-who li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.boss-who li.me {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.boss-who b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.boss-who li span {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.friends-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.friends-privacy .icon {
+  flex: none;
+  margin-top: 2px;
+}
+.sticker-page .slot.medal {
+  background: var(--warn-soft);
+  border-color: var(--warn-soft);
+}

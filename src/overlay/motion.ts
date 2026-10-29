@@ -40,7 +40,7 @@ export interface MotionState {
 
 const SPEED: Record<Gait, number> = { bounce: 42, hop: 48, waddle: 30, float: 36, scurry: 72 };
 /** Pixels per step: one step advances walkPhase by π. */
-const STEP: Record<Gait, number> = { bounce: 26, hop: 34, waddle: 16, float: 30, scurry: 14 };
+export const STEP: Record<Gait, number> = { bounce: 26, hop: 34, waddle: 16, float: 30, scurry: 14 };
 const GRAVITY = 2600;
 /** Let go on top of the home corner at ground level: a little hop (px/s up) lands it beside the corner. */
 const HOP_OUT = 420;

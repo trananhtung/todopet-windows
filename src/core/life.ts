@@ -1,5 +1,5 @@
 // Feeding, hunger, dirt, growth, combos, accessories and day settlement (PetLife.swift). Pure rules.
-import { countWeek, emptyWeek, rollWeek, weekFromJson, type WeekStats } from "./chapters";
+import { countWeek, emptyWeek, rollWeek, weekFromJson, weekKey, type WeekStats } from "./chapters";
 import { addDays, dayKey, isDayKey, parseDate } from "./dates";
 import { L } from "./l10n";
 import { isSouvenirId, tripFromJson, type SouvenirId, type Trip } from "./trips";
@@ -153,6 +153,13 @@ export const PAGE_SIZE = 10;
 export const MAX_HELD_CHESTS = 3;
 /** Every sticker page starts with this many gift stickers 🎁. */
 export const PAGE_GIFTS = 2;
+/**
+ * How the pet remembers a settled day (v0.6, for the pet card's record): `G` goal met, `K` kept (at least one task),
+ * `R` a rest day, weekend or excused busy day, `-` nothing. The card carries the last `HISTORY_DAYS` of them.
+ */
+export type DayMark = "G" | "K" | "R" | "-";
+export const DAY_MARKS: readonly DayMark[] = ["G", "K", "R", "-"];
+export const HISTORY_DAYS = 28;
 /** Each dismissal of a repeating reminder doubles its interval, up to this many times the usual. */
 export const MAX_BACKOFF = 8;
 
@@ -246,6 +253,13 @@ export interface LifeState {
   lastWeek: WeekStats | null;
   /** The week whose fresh-start line the pet already said. */
   weekGreeted: string;
+  // v0.6 "Friends".
+  /** The last `HISTORY_DAYS` settled days, by day key: what the pet card's record is made of (see `DayMark`). */
+  history: Record<string, DayMark>;
+  /** The ISO weeks whose Procrastination Blob was beaten (a 🏅 sticker and 50 XP each), newest last. */
+  bossWins: string[];
+  /** How many of the stickers on the current page are 🏅 medals rather than perfect-day 🌟. */
+  pageMedals: number;
 }
 
 export const newLife = (): LifeState => ({
@@ -295,11 +309,36 @@ export const newLife = (): LifeState => ({
   week: emptyWeek(),
   lastWeek: null,
   weekGreeted: "",
+  history: {},
+  bossWins: [],
+  pageMedals: 0,
 });
 
 const isAccessory = (x: unknown): x is Accessory => typeof x === "string" && (ACCESSORIES as readonly string[]).includes(x);
 const num = (x: unknown, d: number) => (typeof x === "number" && Number.isFinite(x) ? x : d);
 const clampInt = (x: unknown, lo: number, hi: number, d: number) => Math.min(hi, Math.max(lo, Math.trunc(num(x, d))));
+
+/** How many weeks of boss wins are kept. */
+const MAX_BOSS_WINS = 60;
+/** The 🏅 the weekly boss gives, plus its XP. */
+export const BOSS_XP = 50;
+
+const isDayMark = (x: unknown): x is DayMark => typeof x === "string" && (DAY_MARKS as readonly string[]).includes(x);
+
+/** A saved record of days: real days with a known mark, the newest 28. Pets from before v0.6 get their perfect days as goal days. */
+function historyFromJson(x: unknown, perfectDays: readonly string[]): Record<string, DayMark> {
+  const out: Record<string, DayMark> = {};
+  if (x && typeof x === "object" && !Array.isArray(x)) {
+    for (const [day, mark] of Object.entries(x)) if (isDayKey(day) && isDayMark(mark)) out[day] = mark;
+  }
+  for (const day of perfectDays) if (isDayKey(day) && !(day in out)) out[day] = "G";
+  return Object.fromEntries(
+    Object.keys(out)
+      .sort()
+      .slice(-HISTORY_DAYS)
+      .map((day) => [day, out[day]]),
+  );
+}
 
 function repairFromJson(x: unknown): RepairQuest | null {
   if (!x || typeof x !== "object") return null;
@@ -334,6 +373,7 @@ export function lifeFromJson(raw: unknown): LifeState {
       if (typeof v === "number" && v >= 2) dayBackoff[k] = Math.min(MAX_BACKOFF, Math.trunc(v));
     }
   }
+  const pageFilled = clampInt(r.pageFilled, 0, PAGE_SIZE, PAGE_GIFTS + (perfectDays.length % 8));
   return {
     satiety: Math.min(100, Math.max(0, num(r.satiety, d.satiety))),
     dirt: Math.min(3, Math.max(0, Math.trunc(num(r.dirt, d.dirt)))),
@@ -345,7 +385,7 @@ export function lifeFromJson(raw: unknown): LifeState {
     repair: repairFromJson(r.repair),
     // Older versions had no pages: 8 perfect days per page, after the 2 gifts.
     stickerPage: clampInt(r.stickerPage, 1, Number.MAX_SAFE_INTEGER, 1 + Math.floor(perfectDays.length / 8)),
-    pageFilled: clampInt(r.pageFilled, 0, PAGE_SIZE, PAGE_GIFTS + (perfectDays.length % 8)),
+    pageFilled,
     combo: num(r.combo, d.combo),
     bestCombo: num(r.bestCombo, d.bestCombo),
     goldens: num(r.goldens, d.goldens),
@@ -383,6 +423,10 @@ export function lifeFromJson(raw: unknown): LifeState {
     week: weekFromJson(r.week) ?? emptyWeek(),
     lastWeek: weekFromJson(r.lastWeek),
     weekGreeted: typeof r.weekGreeted === "string" ? r.weekGreeted : "",
+    history: historyFromJson(r.history, perfectDays),
+    bossWins: [...new Set(strings(r.bossWins).filter((w) => w !== ""))].slice(-MAX_BOSS_WINS),
+    // At most as many medals as the page has stickers of its own (after the gifts).
+    pageMedals: Math.min(Math.max(0, pageFilled - PAGE_GIFTS), clampInt(r.pageMedals, 0, PAGE_SIZE, 0)),
   };
 }
 
@@ -412,7 +456,19 @@ export function demoLife(): LifeState {
     craft: 0.4,
     decor: ["rug", "plant", "mug"],
     souvenirs: ["hoian", "dalat", "kyoto", "paris"],
+    history: demoHistory(dayKey(new Date())),
+    // A few tasks already finished this week, so the weekly boss has something of yours on it.
+    week: { key: weekKey(new Date()), done: 3, stickers: 0, trips: 0 },
   };
+}
+
+/** The demo pet's last two weeks, ending yesterday: a 4-day streak, a weekend off, and good days before it. */
+export function demoHistory(today: string): Record<string, DayMark> {
+  // Oldest first, the last one is yesterday: the streak of 4 is K G G G, after a missed day.
+  const marks: DayMark[] = ["K", "G", "K", "G", "G", "R", "R", "G", "G", "-", "K", "G", "G", "G"];
+  const out: Record<string, DayMark> = {};
+  marks.forEach((m, i) => (out[addDays(today, i - marks.length)] = m));
+  return out;
 }
 
 export const isHungry = (s: LifeState) => s.satiety < 30;
@@ -569,13 +625,41 @@ function addSnack(s: LifeState): boolean {
 }
 
 /** Sticks a perfect day's sticker on the page. A full page gives +50 XP and a snack, and a new page starts with its gifts. */
-function addSticker(s: LifeState): { pageDone: boolean; snack: boolean } {
+function addSticker(s: LifeState, kind: "star" | "medal" = "star"): { pageDone: boolean; snack: boolean } {
   s.pageFilled += 1;
+  if (kind === "medal") s.pageMedals += 1;
   if (s.pageFilled < PAGE_SIZE) return { pageDone: false, snack: false };
   s.xp += 50;
   s.stickerPage += 1;
   s.pageFilled = PAGE_GIFTS;
+  s.pageMedals = 0;
   return { pageDone: true, snack: addSnack(s) };
+}
+
+/** What the weekly boss's win gave (v0.6). `xp` includes the page's +50 when the medal filled it. */
+export interface BossReward {
+  xp: number;
+  pageDone: boolean;
+  snack: boolean;
+  levelUp: StageIndex | null;
+  unlocked: Accessory[];
+}
+
+/**
+ * The Procrastination Blob of ISO `week` was beaten (on `day`): +50 XP and a 🏅 on the sticker page, once a week.
+ * Returns what it gave, or null when this week's reward was already given (or the week has no name).
+ */
+export function winBoss(s: LifeState, week: string, day: string): BossReward | null {
+  if (week === "" || s.bossWins.includes(week)) return null;
+  const stageBefore = stageOf(s.xp);
+  const xpBefore = s.xp;
+  s.bossWins = [...s.bossWins, week].slice(-MAX_BOSS_WINS);
+  s.xp += BOSS_XP;
+  countWeek(s, day, "stickers");
+  const page = addSticker(s, "medal");
+  const unlocked = checkUnlocks(s);
+  const stageAfter = stageOf(s.xp);
+  return { xp: s.xp - xpBefore, pageDone: page.pageDone, snack: page.snack, levelUp: stageAfter !== stageBefore ? stageAfter : null, unlocked };
 }
 
 export function addDistraction(s: LifeState, label: string, seconds: number): void {
@@ -604,6 +688,13 @@ export interface DayClose {
   /** The growth stage the day's XP (sticker, full page) reached, if it crossed one. */
   levelUp: StageIndex | null;
   unlocked: Accessory[];
+}
+
+/** How the day being settled goes in the record: the goal met (even on a day off), a task, a day off, or nothing. */
+function dayMarkOf(s: LifeState, outcome: DayOutcome): DayMark {
+  if (outcome === "kept") return s.dayTarget > 0 && s.dayCompleted >= s.dayTarget ? "G" : "K";
+  if (outcome === "excused" || (outcome === "none" && !s.dayWorkday)) return "R";
+  return "-";
 }
 
 /**
@@ -676,6 +767,7 @@ export function closeDay(s: LifeState, today: string, isWorkday: (key: string) =
     s.dirt = Math.min(3, s.dirt + 1);
     s.streak = 0;
   }
+  s.history[r.day] = dayMarkOf(s, r.outcome);
   // An unfinished quest ends with its day (a busy day doesn't use it up), and 14 days after the break at the latest.
   if (s.repair && ((quest && r.outcome !== "excused") || today > s.repair.until)) {
     s.repair = null;
@@ -704,6 +796,9 @@ export function closeDay(s: LifeState, today: string, isWorkday: (key: string) =
   s.dayBackoff = {};
   s.dismissedInRow = 0;
   s.perfectDays = s.perfectDays.slice(-60);
+  // The record keeps the 28 days ending today (the card's window).
+  const oldest = addDays(today, 1 - HISTORY_DAYS);
+  for (const key of Object.keys(s.history)) if (key < oldest) delete s.history[key];
   const stageAfter = stageOf(s.xp);
   r.levelUp = stageAfter !== stageBefore ? stageAfter : null;
   r.unlocked = checkUnlocks(s);

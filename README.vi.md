@@ -37,6 +37,7 @@ Mọi tính năng của bản macOS:
 - **Hẹn "khi…thì bắt đầu" và 2 phút khởi động.** Menu **⋯** của mỗi việc có **Bắt đầu khi…** (sau cuộc họp, khi tôi mở một ứng dụng, sau bữa trưa) và **Thử 2 phút**: một phiên "chỉ mở ra xem" thật ngắn, hết giờ pet hỏi bạn có muốn làm một phiên đầy đủ hay thế là được rồi.
 - **Nghi thức kết thúc ngày.** Khi sắp hết giờ làm (hoặc từ thanh ngày trên bảng việc sau 15:00), **Tổng kết ngày** cho bạn xem những gì đã làm, để bạn chuyển từng việc dang dở sang **Ngày mai**, bỏ khỏi kế hoạch (**Không hạn**) hoặc giữ nguyên, chọn **con ếch của ngày mai** và ghi một dòng cho chính mình. **Xong hôm nay** cho pet đi ngủ và im lặng tới khi ngày làm việc tới bắt đầu (cuộc họp và việc có giờ vẫn được nhắc). Lời chào sáng hôm sau nhắc tên con ếch và dòng ghi chú, và con ếch được làm đầu tiên trong ngày đó.
 - **Cảnh báo quá tải và thanh ngày.** Bảng việc vẽ ngày làm việc của bạn thành một thanh gọn (cuộc họp, việc có giờ, bây giờ) cùng "~6h / 7h còn lại". Mỗi ngày một lần, sau khi đã lên kế hoạch, nếu việc cộng với các cuộc họp sắp tới vượt thời gian còn lại từ 1 giờ trở lên, pet nhẹ nhàng nói ra và gợi ý **Chọn việc để dời**. Việc chưa có thời lượng trong Todoist được tính theo thời lượng mặc định trong Cài đặt (30 phút). Không tính vào hạn mức nhắc.
+- **Bạn bè, không cần máy chủ.** Trong mục **Bạn bè** của bảng việc, bạn chép **thẻ thú cưng** (một dòng chữ ngắn) gửi cho bạn bè qua app chat nào cũng được, rồi dán thẻ của họ vào và bấm **Thêm**. Có **chuỗi bạn** (số ngày liên tiếp cả hai cùng đạt mục tiêu; ngày nghỉ không làm đứt chuỗi), **Quái Vật Trì Hoãn** 👾 mỗi tuần cùng nhau hạ gục (thắng thì +50 XP và sticker 🏅), và mỗi ngày một hai lần pet của bạn bè **ghé chơi** khoảng 25 giây lúc yên ả. Xem [Bạn bè](#bạn-bè).
 - **Không phá sự tập trung:** chỉ nhắc khi bạn ngừng tay, giữ im lặng khi bạn đang vào guồng, cách nhau ít nhất 15 phút, đứng yên khi bạn gõ, mặc định rất yên tĩnh.
 - **Nhật ký** ghi lại mỗi lời nhắc và lý do, để bạn tinh chỉnh.
 - **Tiếng Anh và tiếng Việt.**
@@ -81,6 +82,18 @@ Thêm API key của Anthropic trong **Cài đặt → Việc bị dời** ([lấ
 | <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>T</kbd> | Mở bảng việc với ô thêm việc, từ bất kỳ ứng dụng nào |
 | <kbd>Esc</kbd> | Đóng bảng việc |
 
+## Bạn bè
+
+Không có máy chủ bạn bè, không cần tài khoản, không phải trả tiền cho ai: bạn bè trao đổi **thẻ thú cưng**, là một dòng chữ ngắn bắt đầu bằng `TODOPET1.`, qua app chat bạn vẫn dùng. Mở bảng việc rồi bấm nút **Bạn bè** cạnh tủ đồ.
+
+- **Thẻ của mình:** thẻ pet của bạn, có nút **Chép thẻ**. Gửi cho bạn bè; muốn thì gửi thẻ mới bất cứ lúc nào (thẻ mới thay thẻ cũ bên họ, và chuỗi bạn dài ra mỗi lần hai bên đổi thẻ).
+- **Thêm bạn:** dán thẻ của họ vào ô rồi bấm **Thêm**. Thẻ đọc không được sẽ nhận lời nhắn nhẹ nhàng và không có gì thay đổi; thẻ của chính bạn, hay thẻ cũ hơn thẻ đang có, sẽ bị từ chối. Tối đa 12 bạn. **Xoá** (có hỏi lại) bỏ một bạn khỏi danh sách.
+- **Chuỗi bạn:** với mỗi bạn, là số ngày liên tiếp cả hai cùng đạt mục tiêu, đếm ngược từ ngày gần nhất mà cả hai thẻ đều có. Ngày một trong hai người nghỉ thì được bỏ qua, không làm đứt chuỗi.
+- **Quái vật tuần này:** Quái Vật Trì Hoãn có 15 HP cho bạn và cho mỗi bạn có thẻ trong tuần này. Mỗi việc bạn xong (tính ngay lúc đó) và mỗi việc ghi trong thẻ mới nhất của bạn bè đều làm nó đau. Không có thua, không bị phạt; thứ Hai nó hồi sinh. Hạ gục được thì ai cũng +50 XP và một sticker 🏅, mỗi tuần một lần.
+- **Ghé chơi:** bạn có thẻ không quá 7 ngày tuổi thì pet của họ có thể ghé chơi (tối đa hai lần một ngày) kèm nhãn nhỏ ("Mai ghé chơi! 🔥 chuỗi bạn 3 ngày"); bấm vào nhãn để mở Bạn bè. Chỉ ghé lúc yên ả (không phải lúc bạn gõ phím, tập trung, họp, đã "xong hôm nay", đang im lặng, bị ẩn hay có ứng dụng toàn màn hình) và không phải lời nhắc: không bao giờ tính vào hạn mức nhắc.
+
+Thẻ chỉ có **tên, loài, phụ kiện và độ lớn của pet, chuỗi hiện tại và dài nhất, số việc xong trong tuần này, và 28 ngày gần đây** (mỗi ngày một chữ: đạt mục tiêu, có làm, ngày nghỉ, hoặc không), cùng một mã ngẫu nhiên tạo một lần trên máy này và ngày làm thẻ. **Không bao giờ** có tên việc, giờ giấc, tên ứng dụng hay tên bạn. Không có gì được tải lên: thẻ chỉ rời máy khi chính bạn gửi đi.
+
 ## Tâm trạng tính thế nào
 
 Pet giữ điểm vui 0–100, tính lại mỗi 15 giây (y hệt bản macOS). Rê chuột vào dòng tâm trạng trên bảng việc để xem chi tiết. ≥ 75 là vui, ≥ 50 bình thường, thấp hơn là lo lắng. Pet chỉ nổi cáu (dưới 30) khi bạn đang ở ứng dụng hay trang web gây xao nhãng trong giờ làm. Ngoài giờ làm, ban đêm, khi họp hay khi bạn rời máy 10 phút, pet dịu lại hoặc ngủ.
@@ -92,6 +105,7 @@ Pet giữ điểm vui 0–100, tính lại mỗi 15 giây (y hệt bản macOS).
 - Thẻ **"Mình đang làm gì nhỉ?"** nhớ việc, ứng dụng, tiêu đề và địa chỉ trang (chỉ http/https) bạn đang dùng, cộng với "bước tiếp theo" bạn ghim. Tất cả **chỉ nằm trong bộ nhớ**: không lưu ra đĩa, không ghi vào nhật ký, và quên hẳn lúc nửa đêm. Các hẹn **Bắt đầu khi…** (một việc, và một cuộc họp, tên ứng dụng hoặc "sau bữa trưa") được lưu trong ngày và bị xoá vào hôm sau. Con ếch (chỉ lưu mã việc) và dòng ghi chú từ **Tổng kết ngày** cũng vậy, lưu tới hết ngày mà chúng dành cho.
 - Phát hiện gõ phím dùng Raw Input của Windows, chỉ ghi **thời điểm phím cuối cùng được nhấn xuống**; không bao giờ biết phím nào và không dùng keyboard hook.
 - Link ICS là địa chỉ bí mật nên được lưu trong Windows Credential Manager như token, và chỉ tải từ địa chỉ Internet công khai.
+- **Bạn bè** không đi qua máy chủ nào. Thẻ thú cưng chỉ có tên, loài, phụ kiện và độ lớn của pet, các chuỗi, số việc xong tuần này, 28 ngày đạt mục tiêu/có làm/nghỉ, một mã ngẫu nhiên tạo một lần trên máy này và ngày làm thẻ: không bao giờ có tên việc, giờ giấc, tên ứng dụng hay tên bạn. Thẻ chỉ rời máy khi chính bạn chép và gửi đi. Thẻ bạn thêm vào được đọc rất nghiêm ngặt, chỉ hiện dưới dạng chữ thường, và lưu trong tệp `friends` (cùng mã ngẫu nhiên và số lần ghé chơi trong ngày).
 - Cài đặt và trạng thái pet nằm trong `%APPDATA%\com.trananhtung.todopet`; nhật ký chỉ ở máy này, trong `%LOCALAPPDATA%\com.trananhtung.todopet` (giữ 14 ngày, có thể tắt).
 
 ## Phát triển

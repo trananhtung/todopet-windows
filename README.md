@@ -37,6 +37,7 @@ Everything from the macOS app:
 - **If-then starts and a 2-minute starter.** A task's **⋯** menu has **Start when…** (after a meeting, when I open an app, after lunch) and **Try 2 minutes**, a tiny "just open it" session that ends with an offer for a full one or a kind "that's enough".
 - **A shutdown ritual.** When the day is almost over (or from the board's day strip after 15:00) **Wrap up** shows today's wins, lets you send each unfinished task to **Tomorrow**, take it off the plan (**No date**) or keep it, pick **tomorrow's frog** and leave yourself a one-line note. **Done for today** puts the pet to sleep and quiet until your next workday starts (meetings and timed tasks still get through). The next morning's greeting names the frog and the note, and the frog goes first that day.
 - **An overbooked warning and a day strip.** The board shows your work day as a compact strip (meetings, timed tasks, now) with "~6h / 7h left". Once a day, after planning, if tasks plus the meetings still ahead run an hour or more past the time left, the pet says so kindly and offers **Pick tasks to move**. Tasks without a Todoist duration count for the default length in Settings (30 minutes). Not counted against the nudge budget.
+- **Friends, with no server.** In the board's **Friends** sheet you copy your **pet card**, a short line of text, and send it to a friend over any chat app; paste theirs and **Add**. You get a **buddy streak** (days in a row you both hit your goal; days off don't break it), a weekly **Procrastination Blob** 👾 to beat together (beaten: +50 XP and a 🏅 sticker), and once or twice a day a friend's pet **drops by** for about 25 seconds at a calm moment. See [Friends](#friends).
 - **Designed not to break your focus:** it interrupts only at a pause, holds non-urgent bubbles while you're in the zone, spaces bubbles at least 15 minutes apart, keeps still while you type, and is quiet by default.
 - **A diary** of every reminder and why it fired, to tune it to how you work.
 - **English and Vietnamese.**
@@ -85,6 +86,18 @@ Add an Anthropic API key in **Settings → Postponed tasks** ([get one](https://
 | <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>T</kbd> | Opens the board with the add field focused, from any app |
 | <kbd>Esc</kbd> | Closes the board |
 
+## Friends
+
+There is no friends server, no account and nothing to host: friends swap **pet cards**, short text codes that start with `TODOPET1.`, over whatever chat app you already use. Open the board and press the **Friends** button next to the wardrobe.
+
+- **My card:** your pet's card, with **Copy**. Send it to a friend; send a fresh one whenever you like (a newer card replaces your older one on their side, and the buddy streak grows each time cards are swapped).
+- **Add a friend:** paste their card into the box and press **Add**. A card that can't be read gets a kind message and changes nothing; your own card, and an older card than the one you have, are refused. You can have 12 friends. **Remove** (after a confirmation) takes a friend off the list.
+- **Buddy streak:** for each friend, the days in a row you both reached your daily goal, counted back from the latest day both cards cover. A day either of you took off is skipped, not broken.
+- **This week's boss:** the Procrastination Blob has 15 HP for you and for each friend whose card is from this week. Every task you finish (counted live) and every task in your friends' latest cards hurts it. There is no losing and no penalty; it comes back on Monday. Beat it and everyone gets +50 XP and a 🏅 sticker, once a week.
+- **Visits:** a friend whose card is at most 7 days old may drop by (at most twice a day) with a small label ("Mai dropped by! 🔥 buddy streak 3"); click it to open Friends. It only comes at a calm moment (not while you type, focus, meet, are done for today, muted, hidden or in a full-screen app) and is not a reminder: it never counts against the nudge budget.
+
+A card holds your pet's **name, species, accessories and growth stage, your current and best streak, this week's finished-task count, and a 28-day record** (one letter a day: goal met, kept, day off, or nothing), plus a random id made once on this PC and the date. It **never** holds task titles, times, app names or your name. Nothing is uploaded: the card leaves this PC only when you send it yourself.
+
 ## How the mood works
 
 The pet keeps a 0–100 happiness score, recalculated every 15 seconds (same formula as the macOS app). Hover the mood line on the board to see the breakdown.
@@ -108,7 +121,8 @@ Score ≥ 75 is happy, ≥ 50 chill, and anything lower worried. It only turns g
 - The **"Where was I?"** card remembers the task, app, page title and address (http/https only) you were on, plus the next step you pin. It lives **in memory only**: never saved to disk, never written to the diary, and forgotten at midnight. Your **Start when…** plans (a task, and a meeting's id and title, an app name or "after lunch") are saved for the day and deleted the day after; the diary only says what kind of plan it was. So are the frog (a task id) and the one-line note from **Wrap up**, until the day they are for is over.
 - Typing detection uses Windows Raw Input and records **only the time of the last key-down**: it never reads which key, and it is not a keyboard hook.
 - Calendar ICS links are secret addresses, so they're stored in Windows Credential Manager like the tokens, and only public internet addresses are fetched.
-- Settings, the pet's life, today's "start when…" plans and tomorrow's frog and note are in `%APPDATA%\com.trananhtung.todopet`; the diary stays on this PC in `%LOCALAPPDATA%\com.trananhtung.todopet` (14 days, can be turned off).
+- **Friends** never go through a server. A pet card holds only your pet's name, species, accessories and stage, your streaks, this week's finished-task count, a 28-day goal/kept/rest record, a random id made once on this PC and the date: never task titles, times, app names or your name. It leaves this PC only when you copy and send it yourself. The cards you add are read strictly, shown as plain text only, and kept in the `friends` document (with the random id and the day's visits).
+- Settings, the pet's life, today's "start when…" plans, tomorrow's frog and note and your friends' cards are in `%APPDATA%\com.trananhtung.todopet`; the diary stays on this PC in `%LOCALAPPDATA%\com.trananhtung.todopet` (14 days, can be turned off).
 - Spoken lines use the voices built into Windows, offline.
 
 ## Development
@@ -132,6 +146,7 @@ npm run tauri build    # on Windows: NSIS .exe and .msi in src-tauri/target/rele
 | `src/core/brain.ts` | Sync, mood, reminder rules, focus timer, actions (port of `Brain.swift`) |
 | `src/core/mood.ts` · `life.ts` · `calm.ts` · `stuck.ts` | Pure rules: mood score, pet life, interruption rules, postponed tasks |
 | `src/core/calendar.ts` | ICS parsing (`ical.js`), free time, time-block suggestions |
+| `src/core/friends.ts` | Pet cards (encode and strict decode), the friend list, buddy streaks, the weekly boss, visits |
 | `src/core/lines.ts` · `l10n.ts` | Everything the pet says, in English and Vietnamese |
 | `src/pets/` | The 24 species, drawn in SVG for every mood, stage and accessory |
 | `src/overlay/` | The pet surface: motion, bubble, board, mischief, effects |

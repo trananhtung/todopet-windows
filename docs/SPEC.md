@@ -18,7 +18,7 @@ original.
 | Surface | **One transparent, always-on-top overlay window** covering the primary monitor's work area | The pet walks with CSS transforms instead of moving a window; bubble, board, sign parade, table flip and fireworks share one surface. Rust polls the cursor (~40 Hz) and the overlay toggles click-through with `set_ignore_cursor_events` only when the cursor enters/leaves an interactive element (`document.elementFromPoint`). |
 | Other windows | Settings and Diary are normal decorated windows | They need focus and scrolling; they talk to the overlay through Tauri events. |
 | Secrets | Windows **Credential Manager** (`keyring` crate) | Tokens never reach JavaScript: Rust reads them and makes the Todoist / Anthropic calls itself. |
-| Storage | Small JSON files (atomic writes) in `%APPDATA%\com.trananhtung.todopet`; diary as daily JSONL files in `%LOCALAPPDATA%` | Prefs, pet life, postponed-task log, today's "start when…" plans (`triggers`, v0.4), tomorrow's frog and note (`plan`, v0.4); the diary keeps 14 days. Browser demo uses `localStorage`. |
+| Storage | Small JSON files (atomic writes) in `%APPDATA%\com.trananhtung.todopet`; diary as daily JSONL files in `%LOCALAPPDATA%` | Prefs, pet life, postponed-task log, today's "start when…" plans (`triggers`, v0.4), tomorrow's frog and note (`plan`, v0.4), the friends' pet cards, this install's random id and the day's visits (`friends`, v0.6, overlay window only); the diary keeps 14 days. Browser demo uses `localStorage`. |
 | Calendar | **ICS links** (Google "secret address in iCal format", Outlook "Publish calendar"), stored in Credential Manager, parsed with `ical.js` | Windows has no EventKit equivalent; ICS covers Google, Outlook/Microsoft 365 and iCloud. Rust fetches (public addresses only), JS parses and expands recurrences. |
 | Distraction | Foreground process via Win32, active tab address via **UI Automation** (Chrome, Edge, Brave, Vivaldi, Opera, Firefox), window title as fallback | Same rules as the original (`youtube.com`, `youtube.com/shorts`). Addresses stay in memory. |
 | Typing / idle | `GetLastInputInfo` for idle; Windows **Raw Input** that stores **only the timestamp** of the last key-down | Needed for "interrupt at a pause" and "in the zone" rules. No key codes are read or stored; no keyboard hook. |
@@ -135,7 +135,7 @@ picker in Settings shows a live preview; locked species show their requirement.
 No analytics, no servers of its own. Network: `api.todoist.com`, your ICS links, and `api.anthropic.com`
 only when you press Ask Claude. Browser titles and tab addresses stay in memory, and so does the v0.4 "Where was I?"
 place (never saved or written to the diary, dropped at the day change; private windows and calls never in it); only the day's "start when…" plans are stored. Raw Input stores only the time
-of the last key-down. Secrets (tokens, ICS links) live in Credential Manager; everything else is local. See
+of the last key-down. A v0.6 pet card holds only the pet's name, species, accessories and stage, the streaks, this week's finished-task count, a 28-day goal/kept/rest record, a random install id and the date; it leaves the PC only when you send it yourself. Secrets (tokens, ICS links) live in Credential Manager; everything else is local. See
 [SECURITY.md](../SECURITY.md).
 
 ## Thin vertical slices
@@ -429,3 +429,47 @@ Cards work on trust; with no rankings and no penalties there is nothing worth ch
 - **Friends list:** each friend with their pet, buddy streak, their card's date and Remove.
 - **This week:** the blob with an HP bar and who contributed.
 - **Privacy:** a one-line note on exactly what a card contains.
+
+### 6. As built (interpretations)
+
+Where the sections above left room, this is what v0.6 does. Tests are in `src/core/friends.test.ts`,
+`friends.life.test.ts`, `brain.friends.test.ts` and `src/overlay/board.test.tsx`; the Rust key list in `validate.rs`.
+
+- **Card JSON** (inside `TODOPET1.<base64url>`, UTF-8, no padding): `v` (1), `id` (`[A-Za-z0-9_-]{8,32}`, 20 characters of
+  a–z0–9 when made), `name`, `species`, `accessories` (≤ 3, one per slot), `stage` (0–4), `streak`, `best`, `week`
+  (`2026-W44`, the ISO week of `date`), `weekDone`, `history` (28 × `G K R -`, oldest first, ending on `date`), `date`.
+  Exactly these keys; an extra key is refused. Whitespace anywhere in the pasted text is ignored (chat apps wrap lines).
+- **"Numbers clamped"** is read as range-checked: a number that is not a whole number in range (streaks 0–9999, tasks
+  of the week 0–999, stage 0–4) is a damaged card and is refused with a kind message. The one clamp: a `best` lower
+  than `streak` is raised to it. A name is 1–20 code points of plain text, trimmed, with no control, bidi-override or
+  zero-width characters (the joiner stays for emoji). A date more than one day ahead is refused (a friend a time zone
+  ahead is already tomorrow).
+- **Friend list.** A card from a known id replaces theirs in place when it is from the same day or later (the last visit
+  is kept); an older one is refused ("I already have a newer card"). The 13th friend is refused; a known friend can
+  still update when the list is full. Cards read back from disk are checked as strictly (but never dropped for being
+  dated ahead of a clock that was set back).
+- **The record of days** is `LifeState.history` (day key → mark, the last 28 days), written by `closeDay`: `G` goal met
+  (even on a day off), `K` a task done, `R` a day off with nothing done or a busy day that was excused, `-` otherwise
+  (a missed workday, frozen or broken, or a day the app never saw). Days nobody settled (the PC was off) are `R` on a
+  day off and `-` on a workday when the card is made, and today is marked live. Older saves get their perfect days as `G`.
+- **Buddy streak.** The day a card was made is still open on that card (the pet may not have had its day yet): it counts
+  only if both hit the goal and never ends the streak. Closed days follow §2 exactly. At most 28.
+- **Boss.** Weeks are ISO weeks (Monday to Sunday, like the pet's own weeks). Alone you can beat it (15 HP). The win is
+  paid once per ISO week (`LifeState.bossWins`), as +50 XP and a 🏅 that takes a slot on the sticker page after the
+  🌟 (`pageMedals`; a full page pays its own +50 XP and 🍪) and counts as a sticker in the week's recap. It is not paid
+  while a finished task is still being closed in Todoist (if Todoist refuses, the task comes back), and it is said in
+  one small reply when you are around (never counted against the nudge budget). A friend whose latest card is from an
+  earlier week is "waiting", not counted, until a fresh card comes.
+- **Visits.** At most 2 a day in all, 2 hours apart; the friend who visited longest ago comes (a tie is settled by the
+  brain's random source). The first visit of a day or a session waits 15–75 minutes (a hash of the install id and the
+  day, so a restart doesn't re-roll). Besides §4's conditions (not typing, focusing, in a meeting, done for today, quiet,
+  hidden or full-screen) a visit also waits while you are away for 5+ minutes, the pet is asleep or on a trip, a bubble
+  is waiting, the board is open or a stunt is going on. A visitor leaves when the moment stops being calm (not for typing
+  or a bubble: it keeps still, and hides its label while a bubble shows), when the board opens, or when its friend is
+  removed; one that only just walked in is gone at once. Your pet stands still while it is there. The diary says a friend
+  dropped by, never whose.
+- **Storage.** The `friends` document: `installId`, `friends` (the cards and each friend's last visit) and the day's
+  `visits`. A failed read at startup is kept in memory only, never written over what is on disk. The Friends sheet is
+  also reachable by clicking a visitor or its label (`BoardRequest.friends`).
+- **Demo.** *Add 2 friends* adds Mai (a card from today) and Bin (two days old), made from sample data by the same path
+  as a pasted card; *Friend drops by* starts a visit now without using up the day's two.

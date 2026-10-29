@@ -232,6 +232,17 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             >
               🎒 {s.trip ? L("Gọi về", "Call back") : tripDone ? L("Hôm nay đi rồi", "Trip done today") : L("Đi phiêu lưu", "Go on a trip")}
             </button>
+            <button className="btn" title={L("Thêm 2 người bạn mẫu (thẻ làm từ dữ liệu mẫu), có chuỗi bạn và quái vật tuần này", "Add 2 sample friends (cards made from sample data), with buddy streaks and this week's boss")} onClick={() => brain.demoAddFriends()}>
+              👥 {L("Thêm 2 bạn", "Add 2 friends")}
+            </button>
+            <button
+              className="btn"
+              disabled={s.friends.length === 0}
+              title={s.friends.length === 0 ? L("Thêm bạn trước đã", "Add friends first") : L("Pet của một người bạn ghé chơi ngay bây giờ", "A friend's pet drops by right now")}
+              onClick={() => brain.demoVisit()}
+            >
+              👋 {L("Bạn ghé chơi", "Friend drops by")}
+            </button>
             <button className="btn" onClick={() => brain.tick()}>
               ⏱ {L("Chạy luật", "Run rules")}
             </button>

@@ -14,6 +14,7 @@ import { Effects } from "./Effects";
 import { HomeCorner, homeCornerWidth, homeItems, TripSign } from "./Home";
 import { PetLife, type InteractOutput } from "./interact";
 import { PetMotion } from "./motion";
+import { Visitor } from "./Visitor";
 import { placeBoard, type BoardPlacement, type Rect } from "./placement";
 import { playChime, speak } from "./sound";
 
@@ -45,6 +46,8 @@ export interface BoardRequest {
   focusTaskId: string | null;
   /** Opens ready to move tasks off an overbooked day: estimates on the rows, a one-tap "tomorrow" on each. */
   lighten: boolean;
+  /** Opens on the Friends sheet (a click on a visiting friend's pet). */
+  friends?: boolean;
 }
 
 /** What opens the board besides the add field and a prefill (see `BrainEffects.openBoard`). */
@@ -55,6 +58,7 @@ interface BoardOptions {
   wrapUp?: boolean;
   focusTaskId?: string;
   lighten?: boolean;
+  friends?: boolean;
 }
 
 const isHidden = (s: BrainState) => s.hiddenUntil !== null || (s.fullscreen && s.prefs.hideInFullscreen);
@@ -159,6 +163,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
         wrapUp: o.wrapUp ?? false,
         focusTaskId: o.focusTaskId ?? null,
         lighten: o.lighten ?? false,
+        friends: o.friends ?? false,
       }));
       void backend.system.focusOverlay().catch(() => undefined);
       applyClickThrough(false);
@@ -344,7 +349,8 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
           chase: st.prefs.chaseWhenAngry,
           focusing,
           antic,
-          acting: !!fx && (fx.acting || fx.curious),
+          // (and a friend's pet is visiting: the two stand together)
+          acting: (!!fx && (fx.acting || fx.curious)) || st.visitor !== null,
           reserveLeft: homeWidth.current,
         });
       }
@@ -561,6 +567,19 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
         )}
         {!hidden && <HomeCorner items={home} />}
         {!hidden && s.trip && <TripSign ref={tripRef} trip={s.trip} brain={brain} />}
+        {!hidden && !away && s.visitor && !board && (
+          <Visitor
+            key={s.visitor.id}
+            brain={brain}
+            visit={s.visitor}
+            anchor={anchor}
+            hideLabel={!!showBubble}
+            onOpen={() => {
+              brain.endVisit();
+              openBoard(false, { friends: true });
+            }}
+          />
+        )}
         <div
           className={`pet${hidden || away ? " hidden" : ""}`}
           ref={petRef}

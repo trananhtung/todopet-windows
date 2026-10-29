@@ -85,6 +85,8 @@ import * as chests from "./chests";
 import * as craft from "./craft";
 import { activeSeason, type ActiveSeason } from "./seasons";
 import * as trips from "./trips";
+// v0.6 "Friends".
+import * as fr from "./friends";
 
 const MIN = 60_000;
 const NEVER = -8.64e15;
@@ -284,7 +286,21 @@ export interface BrainState {
   season: ActiveSeason | null;
   /** The last chest, decoration or souvenir revealed. */
   reveal: Reveal | null;
+  // v0.6 "Friends".
+  /** The friends' latest pet cards (kept in storage, up to 12). */
+  friends: fr.Friend[];
+  /** Days in a row you both reached your goal, per friend id, against your card as it is now. */
+  buddyStreaks: Record<string, number>;
+  /** This week's Procrastination Blob: its HP, who has hurt it, and whether it is beaten. */
+  boss: fr.Boss;
+  /** A friend's pet that is dropping by (ambient: not a bubble), or null. */
+  visitor: fr.Visit | null;
 }
+
+/** What adding a friend's card came to: the friend, or the kind words for why not. */
+export type FriendAdd =
+  | { ok: true; friend: fr.Friend; replaced: boolean }
+  | { ok: false; error: fr.CardError | "self" | "older" | "full"; message: string };
 
 /** What `wrapUp` did: the pet only goes to sleep when every move you chose went through. */
 export interface WrapResult {
@@ -329,7 +345,16 @@ export interface BrainOptions {
   demo?: boolean;
   now?: () => number;
   random?: () => number;
+  /** The source for this install's id (v0.6): the game's own `random` is never used for it. Default: the browser's secure one. */
+  idRandom?: () => number;
   effects?: BrainEffects;
+}
+
+/** A random number in [0, 1) from the system's secure source when there is one (the install id isn't a secret, but should never repeat). */
+function secureRandom(): number {
+  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint32Array) => Uint32Array } }).crypto;
+  if (c?.getRandomValues) return c.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
+  return Math.random();
 }
 
 /** Kind words for the day (`yyyy-MM-dd`) they were written on. */
@@ -490,6 +515,16 @@ export class Brain {
   private chestNotice = false;
   /** v0.5: the bubble that offers today's trip (a check-in, so it has no kind): closing it is a "Stay". */
   private tripOfferId: number | null = null;
+  /** v0.6: the friends' cards, this install's id and today's visits (the `friends` storage key). */
+  private friendsDoc: fr.FriendsDoc = { installId: "", friends: [], visits: { day: "", count: 0, lastAt: null } };
+  /** False after a failed read at startup: never overwrite what's on disk. */
+  private persistFriends = true;
+  /** v0.6: no visit before this (epoch ms): a session and a day start quietly. */
+  private visitAfter = 0;
+  /** v0.6: the words for a won boss that haven't been said yet (a reply, so never counted). */
+  private bossNotice: string | null = null;
+  /** v0.6: the board is open (a visitor makes way for it, and none comes). */
+  private boardIsOpen = false;
 
   private constructor(
     readonly backend: Backend,
@@ -546,6 +581,10 @@ export class Brain {
       trip: null,
       season: activeSeason(new Date(this.now())),
       reveal: null,
+      friends: [],
+      buddyStreaks: {},
+      boss: fr.bossOf({ today: this.dayKey, myDone: 0, friends: [] }),
+      visitor: null,
     };
     Object.assign(this.state, this.gameView());
   }
@@ -553,12 +592,13 @@ export class Brain {
   /** Loads prefs, the pet's life and the postponed-task log, then picks the language. */
   static async create(backend: Backend, opts: BrainOptions = {}): Promise<Brain> {
     const now = (opts.now ?? Date.now)();
-    const [p, l, st, tr, pl, locale] = await Promise.all([
+    const [p, l, st, tr, pl, fd, locale] = await Promise.all([
       loadRetrying<unknown>(backend, "prefs"),
       loadRetrying<unknown>(backend, "life"),
       loadRetrying<SeenLog>(backend, "stuck"),
       loadRetrying<unknown>(backend, "triggers"),
       loadRetrying<unknown>(backend, "plan"),
+      loadRetrying<unknown>(backend, "friends"),
       backend.system.systemLocale().catch(() => "en"),
     ]);
     const prefs = prefsFromJson(p.ok ? p.value : null, now, now);
@@ -579,7 +619,14 @@ export class Brain {
     brain.plan = planFromJson(pl.ok ? pl.value : null, now);
     brain.state.todayPlan = planFor(brain.plan, dayKey(new Date(now)));
     brain.state.doneUntil = isDoneForToday(brain.plan, now) ? brain.plan.doneUntil : null;
-    if (!p.ok || !l.ok || !tr.ok) {
+    // v0.6: the friends and this install's id (made once; a failed read is not a missing file, so it is kept in memory only).
+    const loaded = fr.docFromJson(fd.ok ? fd.value : null, () => fr.newInstallId(opts.idRandom ?? secureRandom));
+    brain.friendsDoc = loaded.doc;
+    brain.persistFriends = fd.ok;
+    brain.visitAfter = now + fr.visitDelayMs(loaded.doc.installId, dayKey(new Date(now)));
+    if (fd.ok && loaded.fresh) await backend.storage.save("friends", fr.docToJson(loaded.doc)).catch(() => undefined);
+    Object.assign(brain.state, brain.friendsView(now));
+    if (!p.ok || !l.ok || !tr.ok || !fd.ok) {
       brain.diary.add("system", L("Không đọc được dữ liệu đã lưu — phiên này sẽ không ghi đè lên nó", "Couldn't read saved data — this session won't overwrite it"));
     }
     return brain;
@@ -600,6 +647,8 @@ export class Brain {
     if (patch.life || patch.prefs) this.state.nudgesLeft = budgetLeft(this.state);
     if (patch.life) this.state.nudgeHoldUntil = patch.life.nudgeHoldUntil;
     if (patch.life || "focus" in patch) Object.assign(this.state, this.gameView());
+    // A visitor goes when the moment stops being calm (hidden, muted, focusing, a meeting, a trip…).
+    if (this.state.visitor && !("visitor" in patch)) this.checkVisit();
     // What a bubble is about may have changed with this (the focus session stopped, the task is gone): drop it unseen.
     const waiting = this.state.bubble;
     if (waiting && patch.bubble === undefined && waiting.stillValid && !waiting.stillValid()) {
@@ -1142,6 +1191,8 @@ export class Brain {
     // Yesterday's frog and note have done their day.
     const plan = prunePlans(this.plan, this.dayKey);
     if (plan !== this.plan) this.setPlanDoc(plan);
+    // A new day starts quietly for the friends too.
+    this.visitAfter = this.now() + fr.visitDelayMs(this.friendsDoc.installId, this.dayKey);
   }
 
   // ---------- Mood ----------
@@ -1267,6 +1318,8 @@ export class Brain {
       );
     }
     this.patchState({ score: r.score, reasons: r.reasons, mood: r.mood, calmMotion: this.computeCalmMotion() });
+    this.patchState(this.friendsView(nowMs));
+    this.settleBoss(nowMs);
     this.updateTray();
   }
 
@@ -1611,6 +1664,7 @@ export class Brain {
    * reminder skipped, it costs nothing. Urgent news stays (the meeting is still about to start).
    */
   boardClosed(): void {
+    this.boardIsOpen = false;
     const id = this.readInBoard;
     this.readInBoard = null;
     this.lightening = false;
@@ -1861,7 +1915,9 @@ export class Brain {
     if (this.settling) return;
     this.tellNotes(nowMs);
     this.tellChest(nowMs);
+    this.tellBoss(nowMs);
     this.runRules(nowMs);
+    this.tickVisits(nowMs);
   }
 
   /** Tracks steady typing in work apps; ten minutes of it is "the zone". */
@@ -3560,6 +3616,234 @@ export class Brain {
     this.recompute();
     // After "Done for today" the pet slips back in quietly (the souvenir and postcard still land), unless you called it.
     if (asked || !isDoneForToday(this.plan, nowMs)) this.say({ text: lines.tripBack(r), seconds: 14, urgent: true });
+  }
+
+  // ---------- v0.6 Friends: cards, the weekly boss, visits ----------
+
+  /** My pet card as it stands now (not the text): the pet, its streaks, this week's tasks and the last 28 days. */
+  private cardData(nowMs: number): fr.PetCard {
+    const date = new Date(nowMs);
+    const today = dayKey(date);
+    const s = this.state;
+    const l = s.life;
+    const isWorkday = (key: string) => {
+      const d = parseDate(key);
+      return d ? this.workdayOn(d) : true;
+    };
+    const mark = fr.todayMark(s.day.completed.length, s.target, this.workdayOn(date));
+    return fr.buildCard({
+      installId: this.friendsDoc.installId,
+      petName: s.prefs.petName,
+      species: s.prefs.species,
+      wearing: l.wearing,
+      stage: life.stageOf(l.xp),
+      streak: l.streak,
+      bestStreak: l.bestStreak,
+      weekDone: fr.weekDoneOf(l.week, today),
+      history: fr.cardHistory(l.history, today, mark, isWorkday),
+      today,
+    });
+  }
+
+  /** The text of my card, built live from the pet and the settings: what the Friends sheet copies for you to send. */
+  myCard(): string {
+    return fr.encodeCard(this.cardData(this.now()));
+  }
+
+  /** The friends, their buddy streaks and this week's boss, from the document and the pet as they are now. */
+  private friendsView(nowMs: number): Pick<BrainState, "friends" | "buddyStreaks" | "boss"> {
+    const today = dayKey(new Date(nowMs));
+    const friends = this.friendsDoc.friends;
+    const mine = this.cardData(nowMs);
+    return {
+      friends,
+      buddyStreaks: Object.fromEntries(friends.map((f) => [f.id, fr.buddyStreak(mine, f)])),
+      boss: fr.bossOf({ today, myDone: fr.weekDoneOf(this.state.life.week, today), friends }),
+    };
+  }
+
+  private refreshFriends(): void {
+    this.patchState(this.friendsView(this.now()));
+  }
+
+  private saveFriends(): void {
+    if (!this.persistFriends) {
+      this.diary.add("system", L("Phiên này không lưu danh sách bạn bè (không đọc được danh sách đã lưu)", "This session's friends won't be saved (the saved ones couldn't be read)"), {
+        throttle: "friends-not-saved",
+        every: 60,
+      });
+      return;
+    }
+    this.backend.storage.save("friends", fr.docToJson(this.friendsDoc)).catch(() => {
+      this.diary.add("system", L("Không lưu được danh sách bạn bè", "Couldn't save your friends"), { throttle: "friends-save-failed", every: 30 });
+    });
+  }
+
+  /**
+   * Adds the friend whose card was pasted. Strict about what it reads (see `decodeCard`); a bad card, your own, an older
+   * one than you have, or a 13th friend gets kind words and changes nothing. A newer card from a friend replaces theirs.
+   */
+  addFriendCard(raw: string): FriendAdd {
+    const nowMs = this.now();
+    const decoded = fr.decodeCard(raw, dayKey(new Date(nowMs)));
+    if (!decoded.ok) return { ok: false, error: decoded.error, message: decoded.message };
+    const out = fr.addFriend(this.friendsDoc.friends, decoded.card, this.friendsDoc.installId);
+    if (!out.ok) return out;
+    this.friendsDoc = { ...this.friendsDoc, friends: out.friends };
+    this.saveFriends();
+    // The diary is on disk: it says a card came, never whose.
+    this.diary.add("system", out.replaced ? L("Cập nhật thẻ của một người bạn", "Updated a friend's card") : L("Thêm một người bạn mới", "Added a friend"));
+    this.refreshFriends();
+    this.settleBoss(nowMs);
+    return { ok: true, friend: out.friend, replaced: out.replaced };
+  }
+
+  /** Takes a friend off the list (their card is gone from this PC; they can send it again). */
+  removeFriend(id: string): boolean {
+    if (!this.friendsDoc.friends.some((f) => f.id === id)) return false;
+    this.friendsDoc = { ...this.friendsDoc, friends: fr.removeFriend(this.friendsDoc.friends, id) };
+    this.saveFriends();
+    this.diary.add("system", L("Xoá một người bạn khỏi danh sách", "Removed a friend"));
+    if (this.state.visitor?.friend.id === id) this.set({ visitor: null });
+    this.refreshFriends();
+    this.settleBoss(this.now());
+    return true;
+  }
+
+  /**
+   * The week's blob is beaten: +50 XP and a 🏅 on the sticker page, once a week, and a few kind words when you are
+   * around (a reply: never counted). Not while a task is still being closed in Todoist (if it refuses, the task comes
+   * back and the win would have been undeserved).
+   */
+  private settleBoss(nowMs: number): void {
+    const boss = this.state.boss;
+    if (!this.state.hasToken || !boss.defeated || this.closing.size > 0) return;
+    if (this.state.life.bossWins.includes(boss.week)) return;
+    const today = dayKey(new Date(nowMs));
+    const reward = this.mutateLife((l) => life.winBoss(l, boss.week, today));
+    if (!reward) return;
+    this.diary.add(
+      "life",
+      L(`Cả nhóm hạ gục Quái Vật Trì Hoãn tuần ${boss.week}: +${reward.xp} XP và một sticker 🏅`, `Beat the Procrastination Blob of ${boss.week}: +${reward.xp} XP and a 🏅 sticker`),
+      { tag: "sticker", day: today },
+    );
+    const parts = [fr.bossWinText(boss.members.length > 1)];
+    if (reward.levelUp !== null) parts.push(lines.levelUp(reward.levelUp));
+    if (reward.unlocked.length > 0) parts.push(lines.unlocked(reward.unlocked));
+    if (reward.pageDone) parts.push(lines.pageDone(this.state.life.stickerPage - 1, reward.snack));
+    this.bossNotice = parts.join("\n");
+    this.celebrateUntil = nowMs + 4000;
+    this.set({ celebration: { id: ++this.bubbleSeq, kind: "dance", food: "", golden: false, combo: 0, start: nowMs } });
+  }
+
+  /** Says a won boss once you're around and nothing else is showing (like a chest: a small reply, never counted). */
+  private tellBoss(nowMs: number): void {
+    const text = this.bossNotice;
+    if (text === null) return;
+    const f = this.state.focus;
+    if (this.state.bubble || this.outOfTheWay || this.state.flow || (f && !f.isBreak) || this.sample.idleSeconds > 300 || isDoneForToday(this.plan, nowMs)) return;
+    if (this.state.quietUntil !== null && nowMs < this.state.quietUntil) return;
+    if (!calm.atBreakpoint(this.sample.secondsSinceKey, this.secondsSinceAppSwitch())) return;
+    this.bossNotice = null;
+    this.say({ text, seconds: 14 }, { chime: "celebrate" });
+  }
+
+  /** What stands in the way of company right now (see `CalmMoment`). */
+  private calmNow(nowMs: number): fr.CalmMoment {
+    const s = this.state;
+    const f = s.focus;
+    return fr.calmMoment({
+      typing: s.flow || this.sample.secondsSinceKey < calm.TYPING_WINDOW,
+      focusing: !!f && !f.isBreak,
+      inMeeting: currentEvent(s.events, new Date(nowMs)) !== null,
+      doneForToday: isDoneForToday(this.plan, nowMs),
+      quiet: s.quietUntil !== null && nowMs < s.quietUntil,
+      hidden: s.hiddenUntil !== null,
+      fullscreen: s.fullscreen && s.prefs.hideInFullscreen,
+      away: this.sample.idleSeconds > 300,
+      sleeping: s.mood === "sleeping",
+      onTrip: s.life.trip !== null,
+      bubble: s.bubble !== null,
+      boardOpen: this.boardIsOpen,
+      mischief: s.antic !== null,
+    });
+  }
+
+  /**
+   * A friend's pet drops by when it is calm (SPEC v0.6 §4), at most twice a day. Ambient: not a bubble, no sound, never
+   * counted against the nudge budget. While one is here, it leaves as soon as the time is up or the moment is not calm.
+   */
+  private tickVisits(nowMs: number): void {
+    const v = this.state.visitor;
+    if (v) {
+      if (nowMs >= v.end) this.set({ visitor: null });
+      else this.checkVisit();
+      return;
+    }
+    if (nowMs < this.visitAfter || !this.state.hasToken || this.settling) return;
+    const doc = this.friendsDoc;
+    const friend = fr.pickVisitor({ friends: doc.friends, today: dayKey(new Date(nowMs)), now: nowMs, log: doc.visits, calm: this.calmNow(nowMs) }, this.random);
+    if (friend) this.startVisit(friend, nowMs, true);
+  }
+
+  private startVisit(friend: fr.Friend, nowMs: number, record: boolean): void {
+    if (record) {
+      this.friendsDoc = fr.recordVisit(this.friendsDoc, friend.id, nowMs, dayKey(new Date(nowMs)));
+      this.saveFriends();
+    }
+    const id = ++this.bubbleSeq;
+    const end = nowMs + fr.VISIT_SECONDS * 1000;
+    const here = this.friendsDoc.friends.find((f) => f.id === friend.id) ?? friend;
+    this.set({ visitor: { id, friend: here, streak: this.state.buddyStreaks[friend.id] ?? 0, start: nowMs, end } });
+    // The diary is on disk: it says a visit happened, never whose.
+    this.diary.add("system", L("Pet của một người bạn ghé chơi", "A friend's pet dropped by"));
+    this.later(() => {
+      if (this.state.visitor?.id === id && this.now() >= end) this.set({ visitor: null });
+    }, fr.VISIT_SECONDS * 1000 + 50);
+  }
+
+  /** The moment isn't calm any more (the typing and a waiting bubble don't count: a visitor keeps still and keeps out of the bubble's way). */
+  private checkVisit(): void {
+    if (!this.state.visitor) return;
+    const c = this.calmNow(this.now());
+    if (!fr.isCalm({ ...c, typing: false, bubble: false })) this.endVisit();
+  }
+
+  /** A visitor that has only just walked in is gone at once; one that has been here walks out. */
+  endVisit(): void {
+    const v = this.state.visitor;
+    if (!v) return;
+    const nowMs = this.now();
+    if (nowMs - v.start < fr.VISIT_WALK_MS) this.set({ visitor: null });
+    else if (v.end - nowMs > fr.VISIT_WALK_MS) this.set({ visitor: { ...v, end: nowMs + fr.VISIT_WALK_MS } });
+  }
+
+  /** The board opened: no company while it is open, and a visitor makes way (its click opens the Friends sheet). */
+  boardOpened(): void {
+    this.boardIsOpen = true;
+    this.checkVisit();
+  }
+
+  /** Demo: adds the two sample friends (cards made from sample data, added like any pasted card). Returns how many were new. */
+  demoAddFriends(): number {
+    let added = 0;
+    for (const card of fr.sampleCards(dayKey(new Date(this.now())))) {
+      const out = this.addFriendCard(fr.encodeCard(card));
+      if (out.ok && !out.replaced) added += 1;
+    }
+    return added;
+  }
+
+  /** Demo: a friend's pet drops by right now, whatever the schedule and the moment (it doesn't use up the day's visits). */
+  demoVisit(): boolean {
+    const today = dayKey(new Date(this.now()));
+    const able = this.friendsDoc.friends.filter((f) => fr.canVisit(f, today));
+    if (able.length === 0) return false;
+    // A plain bubble (the demo's hello) would hide the label: clear it. A question is left alone.
+    const b = this.state.bubble;
+    if (b && b.actions.length === 0) this.dismissBubble(b.id, "closed");
+    this.startVisit(able[Math.min(able.length - 1, Math.floor(this.random() * able.length))], this.now(), false);
+    return true;
   }
 
   // ---------- Pet interaction ----------

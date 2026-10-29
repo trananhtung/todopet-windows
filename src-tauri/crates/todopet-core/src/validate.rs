@@ -11,8 +11,9 @@ pub const MAX_DIARY_LINE_BYTES: usize = 8 * 1024;
 /// URL schemes `open_url` hands to the OS (http and https links may not carry a user name).
 pub const OPEN_URL_SCHEMES: [&str; 4] = ["http", "https", "msteams", "zoommtg"];
 /// The only storage documents the app uses: preferences, the pet's life, the postponed-task log, the day's
-/// "start when…" plans, and the wrap-up plan (tomorrow's frog and note).
-pub const STORE_KEYS: [&str; 5] = ["prefs", "life", "stuck", "triggers", "plan"];
+/// "start when…" plans, the wrap-up plan (tomorrow's frog and note), and the friends (v0.6: their pet cards and this
+/// install's random id).
+pub const STORE_KEYS: [&str; 6] = ["prefs", "life", "stuck", "triggers", "plan", "friends"];
 const MAX_URL_LEN: usize = 4096;
 /// Characters never valid unescaped in a URL that matter to the command lines the link may pass through
 /// (`explorer.exe`, protocol handlers): quotes, angle brackets, backslash, caret, backtick, pipe.
@@ -39,9 +40,9 @@ pub fn store_key(key: &str) -> CmdResult<&str> {
 }
 
 /// Which storage documents each window may read or write, by the window's label (enforced in Rust, whatever the
-/// page asks for). The overlay runs the brain and uses them all; Settings reads prefs and the pet's life and
-/// writes prefs; the Diary reads prefs (language, whether it is on); the gallery uses none. Unknown windows get
-/// nothing.
+/// page asks for). The overlay runs the brain and uses them all (the friends' cards are its alone); Settings reads
+/// prefs and the pet's life and writes prefs; the Diary reads prefs (language, whether it is on); the gallery uses
+/// none. Unknown windows get nothing.
 pub fn store_key_allowed(label: &str, key: &str, write: bool) -> bool {
     if !STORE_KEYS.contains(&key) {
         return false;
@@ -229,7 +230,8 @@ mod tests {
         }
         assert!(store_key("triggers").is_ok());
         assert!(store_key("plan").is_ok());
-        assert_eq!(STORE_KEYS.len(), 5);
+        assert!(store_key("friends").is_ok());
+        assert_eq!(STORE_KEYS.len(), 6);
         for bad in [
             "",
             "Prefs",
@@ -249,6 +251,13 @@ mod tests {
             "plan.json",
             "plan/x",
             "../plan",
+            "Friends",
+            "friend",
+            "friends2",
+            "friends ",
+            "friends.json",
+            "friends/x",
+            "../friends",
         ] {
             assert!(store_key(bad).is_err(), "{bad}");
         }
@@ -266,14 +275,14 @@ mod tests {
         assert!(store_key_allowed("settings", "prefs", true));
         assert!(store_key_allowed("settings", "life", false));
         assert!(!store_key_allowed("settings", "life", true));
-        for key in ["stuck", "triggers", "plan"] {
+        for key in ["stuck", "triggers", "plan", "friends"] {
             assert!(!store_key_allowed("settings", key, false), "settings reads {key}");
             assert!(!store_key_allowed("settings", key, true), "settings writes {key}");
         }
         // The diary reads prefs (language, whether it is on) and writes nothing.
         assert!(store_key_allowed("diary", "prefs", false));
         assert!(!store_key_allowed("diary", "prefs", true));
-        for key in ["life", "stuck", "triggers", "plan"] {
+        for key in ["life", "stuck", "triggers", "plan", "friends"] {
             assert!(!store_key_allowed("diary", key, false), "diary reads {key}");
             assert!(!store_key_allowed("diary", key, true), "diary writes {key}");
         }
@@ -294,6 +303,21 @@ mod tests {
     #[test]
     fn window_store_key_checks_the_key_and_the_window() {
         assert_eq!(window_store_key("overlay", "triggers", true).unwrap(), "triggers");
+        assert_eq!(window_store_key("overlay", "friends", true).unwrap(), "friends");
+        assert_eq!(window_store_key("overlay", "friends", false).unwrap(), "friends");
+        // The friends' cards (and the install id) belong to the overlay alone.
+        for label in ["settings", "diary", "gallery"] {
+            assert_eq!(
+                window_store_key(label, "friends", false).unwrap_err().kind,
+                ErrorKind::Invalid,
+                "{label} reads friends"
+            );
+            assert_eq!(
+                window_store_key(label, "friends", true).unwrap_err().kind,
+                ErrorKind::Invalid,
+                "{label} writes friends"
+            );
+        }
         assert_eq!(window_store_key("settings", "life", false).unwrap(), "life");
         assert_eq!(window_store_key("settings", "life", true).unwrap_err().kind, ErrorKind::Invalid);
         assert_eq!(window_store_key("gallery", "prefs", false).unwrap_err().kind, ErrorKind::Invalid);

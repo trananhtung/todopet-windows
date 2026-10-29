@@ -36,11 +36,12 @@ import {
 } from "./boardGame";
 import { BubbleView } from "./Bubble";
 import { DayStripCard } from "./DayStrip";
+import { FriendsSheet } from "./Friends";
 import type { BoardPlacement } from "./placement";
 import { Popover } from "./Popover";
 import { nextWorkdayName, WrapUpSheet } from "./WrapUp";
 
-type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "wardrobe" } | { kind: "home" } | { kind: "wrapup" };
+type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "wardrobe" } | { kind: "home" } | { kind: "wrapup" } | { kind: "friends" };
 
 /** Priority text colors (AA on the board's surfaces) and check-circle colors, P1…P4. */
 const PRIO_INK = ["", "var(--p1-ink)", "var(--p2-ink)", "var(--p3-ink)", "var(--p4-ink)"];
@@ -84,6 +85,7 @@ function IconButton({
   "aria-haspopup"?: "menu" | "dialog";
   "data-split"?: "";
   "data-wardrobe"?: "";
+  "data-friends"?: "";
 }) {
   return (
     <button ref={ref} type="button" className={`btn ghost icon${danger ? " danger" : ""}`} title={label} aria-label={label} onClick={onClick} {...aria}>
@@ -101,7 +103,9 @@ export function Board(props: {
 }) {
   const { brain, backend, request, placement, onClose } = props;
   const s = useSyncExternalStore(brain.subscribe, brain.getSnapshot);
-  const [view, setView] = useState<View>(request.split ? { kind: "split", task: request.split } : request.wrapUp ? { kind: "wrapup" } : { kind: "main" });
+  const [view, setView] = useState<View>(
+    request.split ? { kind: "split", task: request.split } : request.wrapUp ? { kind: "wrapup" } : request.friends ? { kind: "friends" } : { kind: "main" },
+  );
   // "Lighten the day": the board opened to move tasks off an overbooked day (it ends when the day fits, or with its close button).
   const [lighten, setLighten] = useState(request.lighten);
   const ref = useRef<HTMLElement>(null);
@@ -109,6 +113,7 @@ export function Board(props: {
   useEffect(() => {
     if (request.split) setView({ kind: "split", task: request.split });
     else if (request.wrapUp) setView({ kind: "wrapup" });
+    else if (request.friends) setView({ kind: "friends" });
     else if (request.focusAdd || request.lighten || request.focusTaskId) setView({ kind: "main" });
     setLighten(request.lighten);
   }, [request]);
@@ -136,6 +141,7 @@ export function Board(props: {
     let target: HTMLElement | null = null;
     if (was.kind === "wrapup") target = board.querySelector<HTMLElement>("[data-wrap-up]");
     else if (was.kind === "wardrobe") target = board.querySelector<HTMLElement>("[data-wardrobe]");
+    else if (was.kind === "friends") target = board.querySelector<HTMLElement>("[data-friends]");
     else if (was.kind === "split") {
       const row = [...board.querySelectorAll<HTMLElement>("li.task")].find((e) => e.dataset.taskId === was.task.id);
       target = row?.querySelector<HTMLElement>("[data-split]") ?? row ?? null;
@@ -155,7 +161,11 @@ export function Board(props: {
   useEffect(() => {
     if (bannerId !== null) brain.bannerRead(bannerId);
   }, [brain, bannerId]);
-  useEffect(() => () => brain.boardClosed(), [brain]);
+  // v0.6: a friend's pet that is visiting makes way for the open board, and none comes meanwhile.
+  useEffect(() => {
+    brain.boardOpened();
+    return () => brain.boardClosed();
+  }, [brain]);
 
   return (
     <section
@@ -177,7 +187,7 @@ export function Board(props: {
         }
       }}
     >
-      <Header s={s} backend={backend} onClose={onClose} onWardrobe={() => setView({ kind: "wardrobe" })} />
+      <Header s={s} backend={backend} onClose={onClose} onWardrobe={() => setView({ kind: "wardrobe" })} onFriends={() => setView({ kind: "friends" })} />
       {banner && <BubbleView key={banner.id} bubble={banner} brain={brain} banner />}
       <div className="board-body">
         {needsToken ? (
@@ -190,6 +200,8 @@ export function Board(props: {
           <HomeSheet brain={brain} s={s} onBack={() => setView({ kind: "wardrobe" })} />
         ) : view.kind === "wrapup" ? (
           <WrapUpSheet brain={brain} s={s} compact={compact} onBack={() => setView({ kind: "main" })} onDone={onClose} />
+        ) : view.kind === "friends" ? (
+          <FriendsSheet brain={brain} s={s} onBack={() => setView({ kind: "main" })} />
         ) : (
           <Main
             brain={brain}
@@ -211,7 +223,7 @@ export function Board(props: {
   );
 }
 
-function Header({ s, backend, onClose, onWardrobe }: { s: BrainState; backend: Backend; onClose: () => void; onWardrobe: () => void }) {
+function Header({ s, backend, onClose, onWardrobe, onFriends }: { s: BrainState; backend: Backend; onClose: () => void; onWardrobe: () => void; onFriends: () => void }) {
   const info = speciesInfo(s.prefs.species);
   const speciesName = info.name[getLang()];
   const sameName = s.prefs.petName.trim().toLocaleLowerCase() === speciesName.toLocaleLowerCase();
@@ -271,6 +283,7 @@ function Header({ s, backend, onClose, onWardrobe }: { s: BrainState; backend: B
       </div>
       <div className="head-tools">
         <IconButton icon="hanger" label={L("Tủ đồ & thành tích", "Wardrobe & achievements")} onClick={onWardrobe} data-wardrobe="" />
+        <IconButton icon="users" label={L("Bạn bè", "Friends")} onClick={onFriends} data-friends="" />
         <IconButton icon="book" label={L("Nhật ký của pet", "Pet diary")} onClick={() => void backend.system.openWindow("diary")} />
         <IconButton icon="gear" label={L("Cài đặt", "Settings")} onClick={() => void backend.system.openWindow("settings")} />
         <IconButton icon="close" label={L("Đóng (Esc)", "Close (Esc)")} onClick={onClose} />
@@ -1994,14 +2007,21 @@ function HomeSheet({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: 
   );
 }
 
-/** The sticker page being filled: 2 gift stickers, one per perfect day, and the empty slots left until the reward. */
+/**
+ * The sticker page being filled: 2 gift stickers, then a 🌟 for each perfect day and a 🏅 for each week the Procrastination
+ * Blob was beaten (v0.6; the medals follow the stars on the page), and the empty slots left until the reward.
+ */
 function StickerPage({ s }: { s: BrainState }) {
   const { stickerPage: page, pageFilled: filled } = s.life;
   const earned = Math.max(0, filled - life.PAGE_GIFTS);
-  // The page's own stickers are the latest perfect days.
-  const dates = earned > 0 ? s.life.perfectDays.slice(-earned) : [];
+  const medals = Math.min(s.life.pageMedals, earned);
+  const stars = earned - medals;
+  // The page's own stars are the latest perfect days.
+  const dates = stars > 0 ? s.life.perfectDays.slice(-stars) : [];
   const left = life.PAGE_SIZE - filled;
-  const slots = Array.from({ length: life.PAGE_SIZE }, (_, i) => (i < Math.min(filled, life.PAGE_GIFTS) ? "gift" : i < filled ? "star" : "empty"));
+  const slots = Array.from({ length: life.PAGE_SIZE }, (_, i) =>
+    i < Math.min(filled, life.PAGE_GIFTS) ? "gift" : i < life.PAGE_GIFTS + stars ? "star" : i < filled ? "medal" : "empty",
+  );
   const perfectHelp = L("Ngày hoàn hảo: đạt mục tiêu và xong hết việc đã lên kế hoạch.", "A perfect day: you hit your goal and finished everything you planned.");
   return (
     <>
@@ -2011,9 +2031,15 @@ function StickerPage({ s }: { s: BrainState }) {
       <div className="sticker-page" role="img" aria-label={L(`Trang ${page}: ${filled} trên ${life.PAGE_SIZE} ô đã dán`, `Page ${page}: ${filled} of ${life.PAGE_SIZE} stickers`)}>
         {slots.map((kind, i) => {
           const date = kind === "star" ? dates[i - life.PAGE_GIFTS] : undefined;
+          const title =
+            kind === "gift"
+              ? L("Quà tặng 🎁", "A gift 🎁")
+              : kind === "medal"
+                ? L("Huy chương: cả nhóm hạ Quái Vật Trì Hoãn 🏅", "Medal: you all beat the Procrastination Blob 🏅")
+                : (date ?? (kind === "star" ? "🌟" : undefined));
           return (
-            <span key={i} className={`slot ${kind}`} title={kind === "gift" ? L("Quà tặng 🎁", "A gift 🎁") : date ?? (kind === "star" ? "🌟" : undefined)}>
-              {kind === "gift" ? "🎁" : kind === "star" ? "🌟" : ""}
+            <span key={i} className={`slot ${kind}`} title={title}>
+              {kind === "gift" ? "🎁" : kind === "star" ? "🌟" : kind === "medal" ? "🏅" : ""}
             </span>
           );
         })}

@@ -292,3 +292,49 @@
     transform: translate(var(--dx), var(--dy)) scale(var(--s)) rotate(90deg);
   }
 }
+
+/* ---------- v0.6 Friends: a visiting pet ---------- */
+
+/* The frame loop sets width, height, opacity and the position; the box is the pet's, so the art is drawn into it. */
+.visitor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform, opacity;
+  opacity: 0;
+}
+.visitor-art {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+}
+.visitor-art svg {
+  display: block;
+  overflow: visible;
+}
+/* A small label above its head: a card, not a bubble (no tail, no buttons, quiet colors). */
+.visitor-label {
+  position: absolute;
+  bottom: 86%;
+  left: 0;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 10px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--ink);
+  font: 600 12px/1.4 var(--font);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+}
+.visitor-label:hover {
+  background: var(--surface-2);
+  border-color: var(--muted);
+}
+.visitor-label:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
