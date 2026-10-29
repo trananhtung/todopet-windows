@@ -67,7 +67,7 @@ export interface RenderOptions {
 /**
  * Public API of src/pets (implemented in src/pets/index.ts):
  *
- *   export const SPECIES: readonly SpeciesInfo[];            // all 14, in SPECIES_IDS order
+ *   export const SPECIES: readonly SpeciesInfo[];            // all 24, in SPECIES_IDS order
  *   export function speciesInfo(id: SpeciesId): SpeciesInfo;
  *   export function defaultPose(overrides?: Partial<PetPose>): PetPose;
  *   export function renderPet(id: SpeciesId, pose: PetPose, opts?: RenderOptions): string; // "<svg …>…</svg>"

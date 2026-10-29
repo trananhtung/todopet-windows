@@ -4,7 +4,7 @@ A Windows port of [TodoPet](https://github.com/trananhtung/todopet) (macOS, Swif
 top of the taskbar, reads your Todoist tasks, asks you to plan 3 tasks a day, reminds you, and gets happy or
 grumpy with your progress. English and Vietnamese.
 
-**What's new on Windows:** 14 pet species instead of one (12 from the start, 2 unlocked by milestones), each
+**What's new on Windows:** 24 pet species instead of one (21 from the start, 3 unlocked by milestones), each
 with its own body, gait and voice, all sharing the moods, growth stages, hunger, dirt and accessories of the
 original.
 
@@ -109,6 +109,16 @@ tasks (also forced by `?demo`).
 | Axolotl | float | pink gills that wiggle |
 | Capybara | waddle | calm snout, tiny ears; sleeps with a yuzu on its head |
 | Duckling | waddle | beak, little tuft, wings flap on celebrations |
+| Red panda | scurry | white face mask with tear marks, ringed bushy tail |
+| Sea otter | float | pale head, whiskers, holds a seashell |
+| Hedgehog | scurry | spiky coat that bristles with mood, button nose |
+| Koala | waddle | huge fluffy ears, big dark nose, nibbles eucalyptus when happy |
+| Pygmy hippo | waddle | glossy, wide muzzle with nostrils, strong blush |
+| Seal pup | waddle | fluffy white, huge eyes, flippers, whiskers |
+| Owlet | hop | facial disc, ear tufts, wings |
+| Lamb | hop | cloud of wool, floppy ears, hooves |
+| Piglet | bounce | round snout, floppy ears, curly tail |
+| Bee (unlock: 20 tasks) | float | stripes, buzzing wings, antennae |
 | Dragon (unlock: 7-day streak) | float | horns, wings, spiky tail, tiny smoke puff when grumpy |
 | Unicorn (unlock: 50 tasks) | hop | horn, rainbow mane |
 
@@ -129,7 +139,7 @@ of the last key-down. Secrets (tokens, ICS links) live in Credential Manager; ev
 1. **Scaffold + first end-to-end path:** Tauri shell, overlay with one pet walking, demo backend, board with
    today's tasks, complete → celebration + feeding. CI builds the Windows installer.
 2. **Core logic port** with tests: dates, models, mood, life, calm, stuck, sites, lines, prefs, brain rules.
-3. **Species:** 14 species, all moods/stages/accessories, gallery page, picker.
+3. **Species:** 24 species (14 at launch, 10 added in 0.2), all moods/stages/accessories, gallery page, picker.
 4. **Windows backend:** Todoist, Credential Manager, foreground app + browser URL, idle/typing, tray,
    hotkey, autostart, single instance, fullscreen hide, ICS fetch, Claude split, diary files.
 5. **Full UI:** bubbles with actions, board (all actions), focus, review, mischief, settings, diary.

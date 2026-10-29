@@ -41,7 +41,7 @@ const busyPose = (over: Partial<PetPose> = {}): PetPose =>
   });
 
 describe("species registry", () => {
-  it("lists all 14 species in SPECIES_IDS order", () => {
+  it("lists all 24 species in SPECIES_IDS order", () => {
     expect(SPECIES.map((s) => s.id)).toEqual([...SPECIES_IDS]);
   });
 
@@ -58,9 +58,10 @@ describe("species registry", () => {
     }
   });
 
-  it("locks exactly the dragon (7-day streak) and the unicorn (50 tasks)", () => {
+  it("locks exactly the bee (20 tasks), the dragon (7-day streak) and the unicorn (50 tasks)", () => {
     const locked = SPECIES.filter((s) => s.unlock).map((s) => s.id);
-    expect(locked).toEqual(["dragon", "unicorn"]);
+    expect(locked).toEqual(["bee", "dragon", "unicorn"]);
+    expect(speciesInfo("bee").unlock).toMatchObject({ kind: "tasks", value: 20 });
     expect(speciesInfo("dragon").unlock).toMatchObject({ kind: "streak", value: 7 });
     expect(speciesInfo("unicorn").unlock).toMatchObject({ kind: "tasks", value: 50 });
     expect(speciesInfo("dragon").unlock?.label.vi).toBe("Đạt mục tiêu 7 ngày liền");
@@ -69,7 +70,10 @@ describe("species registry", () => {
   it("uses the gaits from the spec", () => {
     const gaits = Object.fromEntries(SPECIES.map((s) => [s.id, s.gait]));
     expect(gaits).toMatchObject({ mochi: "bounce", bunny: "hop", fox: "scurry", panda: "waddle", axolotl: "float", dragon: "float", unicorn: "hop" });
+    expect(gaits).toMatchObject({ redpanda: "scurry", otter: "float", hedgehog: "scurry", koala: "waddle", hippo: "waddle" });
+    expect(gaits).toMatchObject({ seal: "waddle", owl: "hop", lamb: "hop", piglet: "bounce", bee: "float" });
     expect(speciesInfo("frog").sound).toEqual({ en: "ribbit", vi: "ộp ộp" });
+    expect(speciesInfo("piglet").sound).toEqual({ en: "oink oink", vi: "ụt ịt" });
   });
 });
 
@@ -192,14 +196,14 @@ describe("performance", () => {
       busyPose(),
       busyPose({ mood: "celebrating", celebration: "fireworks", golden: true, food: "🍩", foodT: 0.3 }),
     ];
-    for (let i = 0; i < 300; i++) renderPet(SPECIES_IDS[i % 14], poses[i % 3]); // warm up
+    for (let i = 0; i < 300; i++) renderPet(SPECIES_IDS[i % SPECIES_IDS.length], poses[i % 3]); // warm up
     const n = 3000;
     const start = performance.now();
     for (let i = 0; i < n; i++) {
       const p = poses[i % 3];
       p.t = i / 30;
       p.walkPhase = i / 5;
-      renderPet(SPECIES_IDS[i % 14], p);
+      renderPet(SPECIES_IDS[i % SPECIES_IDS.length], p);
     }
     const perCall = (performance.now() - start) / n;
     expect(perCall).toBeLessThan(0.5);

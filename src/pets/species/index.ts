@@ -1,6 +1,7 @@
 import type { SpeciesId } from "../../core/types";
 import type { SpeciesDef } from "../kit";
 import { axolotl } from "./axolotl";
+import { bee } from "./bee";
 import { bunny } from "./bunny";
 import { capybara } from "./capybara";
 import { cat } from "./cat";
@@ -9,9 +10,18 @@ import { duckling } from "./duckling";
 import { fox } from "./fox";
 import { frog } from "./frog";
 import { hamster } from "./hamster";
+import { hedgehog } from "./hedgehog";
+import { hippo } from "./hippo";
+import { koala } from "./koala";
+import { lamb } from "./lamb";
 import { mochi } from "./mochi";
+import { otter } from "./otter";
+import { owl } from "./owl";
 import { panda } from "./panda";
 import { penguin } from "./penguin";
+import { piglet } from "./piglet";
+import { redpanda } from "./redpanda";
+import { seal } from "./seal";
 import { shiba } from "./shiba";
 import { unicorn } from "./unicorn";
 
@@ -28,6 +38,16 @@ export const DEFS: Readonly<Record<SpeciesId, SpeciesDef>> = {
   axolotl,
   capybara,
   duckling,
+  redpanda,
+  otter,
+  hedgehog,
+  koala,
+  hippo,
+  seal,
+  owl,
+  lamb,
+  piglet,
+  bee,
   dragon,
   unicorn,
 };

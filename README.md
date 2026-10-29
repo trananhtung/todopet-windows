@@ -4,7 +4,7 @@
 
 <p align="center">
 A desktop pet for Windows 10/11 that lives on top of your taskbar, reads your <a href="https://todoist.com">Todoist</a> tasks,
-and gets <b>happy when you work</b> and <b>grumpy when you don't</b>. Now with <b>14 species</b>.<br>
+and gets <b>happy when you work</b> and <b>grumpy when you don't</b>. Now with <b>24 species</b>.<br>
 English · <a href="README.vi.md">Tiếng Việt</a> · Windows port of <a href="https://github.com/trananhtung/todopet">TodoPet for macOS</a>
 </p>
 
@@ -12,7 +12,7 @@ English · <a href="README.vi.md">Tiếng Việt</a> · Windows port of <a href=
 
 ## What's new on Windows
 
-- **14 pets instead of one.** Mochi (the original round cat-eared mochi), Cat, Shiba, Bunny, Fox, Panda, Penguin, Frog, Hamster, Axolotl, Capybara and Duckling from the start, plus a **Baby Dragon** (unlocked by a 7-day streak) and a **Unicorn** (unlocked after 50 finished tasks). Each one has its own body, gait (bounce, hop, waddle, float or scurry) and voice, and all of them share the moods, growth stages, hunger, dirt, accessories and celebrations. Pick yours in **Settings → Pet**.
+- **24 pets instead of one.** Mochi (the original round cat-eared mochi), Cat, Shiba, Bunny, Fox, Panda, Penguin, Frog, Hamster, Axolotl, Capybara, Duckling, Red Panda, Sea Otter, Hedgehog, Koala, Pygmy Hippo, Seal Pup, Owlet, Lamb and Piglet from the start, plus a **Bee** (unlocked after 20 finished tasks), a **Baby Dragon** (unlocked by a 7-day streak) and a **Unicorn** (unlocked after 50 finished tasks). Each one has its own body, gait (bounce, hop, waddle, float or scurry) and voice, and all of them share the moods, growth stages, hunger, dirt, accessories and celebrations. Pick yours in **Settings → Pet**.
 - **Native Windows integration.** Lives above the taskbar on your primary monitor, clicks pass through everywhere except the pet, its bubbles and the board. Tray icon with mood and progress (`😊 2/3`, `🍅 18:42`), **Ctrl+Alt+T** to add a task from anywhere, start with Windows, and it hides while a full-screen game, video or slideshow is in front.
 - **Any calendar.** Paste an ICS link (Google Calendar's "Secret address in iCal format", Outlook's "Publish calendar", iCloud) instead of relying on a system calendar. Recurring meetings and their exceptions are handled.
 
@@ -123,7 +123,7 @@ npm run tauri build    # on Windows: NSIS .exe and .msi in src-tauri/target/rele
 | `src/core/mood.ts` · `life.ts` · `calm.ts` · `stuck.ts` | Pure rules: mood score, pet life, interruption rules, postponed tasks |
 | `src/core/calendar.ts` | ICS parsing (`ical.js`), free time, time-block suggestions |
 | `src/core/lines.ts` · `l10n.ts` | Everything the pet says, in English and Vietnamese |
-| `src/pets/` | The 14 species, drawn in SVG for every mood, stage and accessory |
+| `src/pets/` | The 24 species, drawn in SVG for every mood, stage and accessory |
 | `src/overlay/` | The pet surface: motion, bubble, board, mischief, effects |
 | `src/settings/` · `src/diary/` | The Settings and Diary windows |
 | `src/backend/` | The `Backend` interface, its Tauri implementation and the in-memory demo |

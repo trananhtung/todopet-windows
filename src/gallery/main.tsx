@@ -197,7 +197,7 @@ function App() {
         <div>
           <h1>TodoPet pet gallery</h1>
           <p>
-            14 species drawn by one renderer. Every mood, gait, life state, accessory and celebration.
+            24 species drawn by one renderer. Every mood, gait, life state, accessory and celebration.
             {STATIC ? " Time is frozen at t = 1.3." : ""}
           </p>
         </div>

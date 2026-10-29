@@ -192,7 +192,7 @@ export function isEarned(a: Accessory, s: LifeState): boolean {
   }
 }
 
-/** Locked species (dragon, unicorn) open with a streak or a number of finished tasks. */
+/** Locked species (bee, dragon, unicorn) open with a streak or a number of finished tasks. */
 export function meetsUnlock(unlock: { kind: "streak" | "tasks"; value: number } | undefined, s: LifeState): boolean {
   if (!unlock) return true;
   return unlock.kind === "streak" ? s.bestStreak >= unlock.value : s.totalDone >= unlock.value;
