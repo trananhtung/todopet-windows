@@ -502,6 +502,28 @@ describe("Brain and Done for today (v0.4)", () => {
     brain.stop();
   });
 
+  it("slips back in quietly from a trip after Done for today, but answers when you call it", async () => {
+    const { s, tick, clock, brain } = await rig();
+    expect(brain.goOnTrip()).toBe(true);
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    await doneForToday(brain);
+    clock.t += 2 * 60 * MIN;
+    tick();
+    expect(s().trip).toBeNull();
+    expect(s().life.souvenirs).toHaveLength(5);
+    expect(s().bubble).toBeNull();
+
+    const called = await rig();
+    expect(called.brain.goOnTrip()).toBe(true);
+    called.brain.dismissBubble(called.s().bubble!.id, "ignored");
+    await doneForToday(called.brain);
+    called.clock.t += 45 * MIN;
+    called.brain.callBack();
+    expect(called.s().bubble?.text).toBeTruthy();
+    brain.stop();
+    called.brain.stop();
+  });
+
   it("keeps earning chests silently while done for today, and says so on waking", async () => {
     const { s, tick, brain } = await rig({ life: { chests: 0, chestsToday: 0, chestDay: "2026-10-28", workSec: 1790 } });
     await doneForToday(brain);

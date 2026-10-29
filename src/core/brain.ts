@@ -2978,11 +2978,11 @@ export class Brain {
 
   /** Calls the pet back early (a click on its sign). A souvenir needs 30 minutes away. */
   callBack(): void {
-    if (this.state.life.trip) this.returnFromTrip();
+    if (this.state.life.trip) this.returnFromTrip(true);
   }
 
   /** Home again: the souvenir (or XP), a postcard in the diary and a little dance. A reply, not a reminder. */
-  private returnFromTrip(): void {
+  private returnFromTrip(asked = false): void {
     const nowMs = this.now();
     const r = this.mutateLife((s) => trips.endTrip(s, nowMs));
     if (!r) return;
@@ -2999,7 +2999,8 @@ export class Brain {
     }
     this.set({ reveal: { id: ++this.bubbleSeq, at: nowMs, kind: "souvenir", ...r } });
     this.recompute();
-    this.say({ text: lines.tripBack(r), seconds: 14, urgent: true });
+    // After "Done for today" the pet slips back in quietly (the souvenir and postcard still land), unless you called it.
+    if (asked || !isDoneForToday(this.plan, nowMs)) this.say({ text: lines.tripBack(r), seconds: 14, urgent: true });
   }
 
   // ---------- Pet interaction ----------
