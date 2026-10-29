@@ -8,11 +8,13 @@ import {
   daysLeftText,
   nextSeason,
   oddsPercent,
+  previewViewBox,
   seasonLine,
   TIERS,
   tierGives,
   toggleHomeItem,
   tripBanner,
+  tripSignText,
   WARDROBE_GROUPS,
   yarnText,
 } from "./boardGame";
@@ -118,5 +120,34 @@ describe("knitting and trips", () => {
     expect(b.back).toBe("back at 16:00");
     expect(b.early).toBe(true);
     expect(tripBanner(trip, start + 45 * 60_000).early).toBe(false);
+  });
+
+  it("frames the wardrobe preview as a square around the pet's upper body, hat included", () => {
+    const vb = previewViewBox({ minX: 30, maxX: 130, minY: 20, maxY: 152 }).split(" ").map(Number);
+    const [x, y, w, h] = vb;
+    expect(w).toBe(h);
+    expect(x + w / 2).toBeCloseTo(80);
+    expect(y).toBeLessThan(20);
+    expect(x).toBeLessThan(30);
+    expect(x + w).toBeGreaterThan(130);
+    // Tall and thin: the square follows the height.
+    const [, , tall] = previewViewBox({ minX: 60, maxX: 100, minY: 0, maxY: 150 }).split(" ").map(Number);
+    expect(tall).toBeGreaterThan(120);
+  });
+
+  it("says on the sign, for the first 30 minutes, that calling it back early brings no souvenir", () => {
+    const start = new Date(2026, 9, 29, 14, 0).getTime();
+    const trip = { start, back: start + 2 * 3600_000, place: "hoian" as const };
+    const early = tripSignText(trip, start + 10 * 60_000);
+    expect(early.early).toBe(true);
+    expect(early.title).toContain("Call me back early and there's no souvenir yet");
+    expect(early.label).toContain("Call me back early and there's no souvenir yet");
+    expect(early.label).toContain("back at 16:00");
+    const later = tripSignText(trip, start + 30 * 60_000);
+    expect(later.title).toBe("In Hội An. Click to call me back early.");
+    expect(later.label).not.toContain("no souvenir");
+    setLang("vi");
+    expect(tripSignText(trip, start).title).toContain("Gọi về sớm thì chưa có quà đâu");
+    expect(tripSignText(trip, start).label).toContain("Gọi về sớm thì chưa có quà đâu");
   });
 });

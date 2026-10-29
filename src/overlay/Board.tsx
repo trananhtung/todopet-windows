@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type Ref } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type Ref } from "react";
 import type { Backend } from "../backend/types";
 import { errorMessage, type Brain, type BrainState, type DueChoice } from "../core/brain";
 import { currentEvent, freeMinutes } from "../core/calendar";
@@ -11,8 +11,8 @@ import { decorName, homeDecor } from "../core/craft";
 import { moodEmoji, moodLabel } from "../core/mood";
 import { isWorkday, MAX_HOME_ITEMS } from "../core/prefs";
 import { itemName, placeName, SOUVENIRS } from "../core/trips";
-import { DECOR_IDS, SPECIES_IDS, type Accessory, type DecorId } from "../core/types";
-import { defaultPose, renderDecor, renderPet, speciesInfo } from "../pets";
+import { DECOR_IDS, SPECIES_IDS, type Accessory, type DecorId, type SpeciesId, type StageIndex } from "../core/types";
+import { defaultPose, petBounds, renderDecor, renderPet, speciesInfo } from "../pets";
 import { Icon, type IconName } from "../ui/icons";
 import { localeTag } from "../ui/lang";
 import type { BoardRequest } from "./App";
@@ -20,6 +20,7 @@ import {
   chestProgress,
   groupTitle,
   oddsPercent,
+  previewViewBox,
   seasonLabel,
   seasonLine,
   TIERS,
@@ -189,15 +190,34 @@ function Header({ s, backend, onClose, onWardrobe }: { s: BrainState; backend: B
         <IconButton icon="gear" label={L("Cài đặt", "Settings")} onClick={() => void backend.system.openWindow("settings")} />
         <IconButton icon="close" label={L("Đóng (Esc)", "Close (Esc)")} onClick={onClose} />
       </div>
-      {s.hasToken && !s.authError && <Stats s={s} />}
+      {s.hasToken && !s.authError && <Stats s={s} onWardrobe={onWardrobe} />}
       {s.hasToken && !s.authError && <RepairLine s={s} />}
       {s.loading && <span className="sr-only">{L("Đang đồng bộ", "Syncing")}</span>}
     </header>
   );
 }
 
-/** Progress in one compact line: done/target, fullness, XP and stage, streak. */
-function Stats({ s }: { s: BrainState }) {
+/** Progress in one compact line: done/target, fullness, XP and stage, streak, and the chests waiting to be opened. */
+function Stats({ s, onWardrobe }: { s: BrainState; onWardrobe: () => void }) {
+  const ref = useRef<HTMLUListElement>(null);
+  // The labels ("today", "full") show whenever they fit; on a narrow board or with long values the icons and
+  // tooltips carry them. Measured before paint, so nothing is ever cut mid-word.
+  const fit = useRef(() => {
+    const ul = ref.current;
+    if (!ul) return;
+    ul.classList.remove("compact");
+    const over = [...ul.querySelectorAll<HTMLElement>(".stat, .stat-label")].some((el) => el.scrollWidth > el.clientWidth + 0.5);
+    ul.classList.toggle("compact", over);
+  });
+  useLayoutEffect(() => fit.current());
+  useEffect(() => {
+    const ul = ref.current;
+    if (!ul || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => fit.current());
+    ro.observe(ul);
+    return () => ro.disconnect();
+  }, []);
+  const held = s.chests.held;
   const done = s.day.completed.length;
   const stage = life.stageOf(s.life.xp);
   const next = life.nextStageXp(stage);
@@ -227,7 +247,7 @@ function Stats({ s }: { s: BrainState }) {
     .join("\n");
   const stash = [snacks > 0 ? `🍪${snacks > 1 ? `×${snacks}` : ""}` : "", dirt > 0 ? `🪰${dirt > 1 ? `×${dirt}` : ""}` : ""].filter(Boolean).join(" ") || undefined;
   return (
-    <ul className="stats" aria-label={L("Tiến độ", "Progress")}>
+    <ul ref={ref} className="stats" aria-label={L("Tiến độ", "Progress")}>
       <Stat
         icon="checkCircle"
         tone="good"
@@ -265,6 +285,19 @@ function Stats({ s }: { s: BrainState }) {
         extra={stash}
         title={streakTitle}
       />
+      {held > 0 && (
+        <li className="stat stat-chest">
+          <button
+            type="button"
+            onClick={onWardrobe}
+            title={L(`${held} rương chờ mở: xong việc tiếp theo là mở một rương`, `${plural(held, "", "chest", "chests").trim()} to open: finish your next task to open one`)}
+            aria-label={L(`${held} rương chờ mở. Xong việc tiếp theo là mở một rương. Mở tủ đồ`, `${plural(held, "", "chest", "chests").trim()} to open. Finish your next task to open one. Open the wardrobe`)}
+          >
+            <span aria-hidden>🎁</span>
+            <b aria-hidden>{held}</b>
+          </button>
+        </li>
+      )}
     </ul>
   );
 }
@@ -1122,8 +1155,23 @@ function ChestStrip({ s }: { s: BrainState }) {
   );
 }
 
+/** The pet wearing just this accessory (its upper body, where they all sit), as SVG; drawn once per species, stage and item. */
+const wearCache = new Map<string, string>();
+function wearSvg(species: SpeciesId, stage: StageIndex, a: Accessory): string {
+  const key = `${species}-${stage}-${a}`;
+  let svg = wearCache.get(key);
+  if (!svg) {
+    const pose = defaultPose({ t: 1.3, stage, wearing: [a] });
+    const box = previewViewBox(petBounds(species, pose));
+    svg = renderPet(species, pose, { size: 48, idPrefix: `wear-${key}` }).replace('viewBox="0 0 160 160"', `viewBox="${box}"`);
+    wearCache.set(key, svg);
+  }
+  return svg;
+}
+
 /** One group of accessories: milestones show what unlocks them, chest finds and seasonal ones where they come from. */
 function AccessoryGroup({ id, items, brain, s }: { id: WardrobeGroupId; items: readonly Accessory[]; brain: Brain; s: BrainState }) {
+  const stage = life.stageOf(s.life.xp);
   const head = useId();
   const owned = items.filter((a) => s.life.unlocked.includes(a)).length;
   const status = (a: Accessory, has: boolean, wearing: boolean): string => {
@@ -1152,7 +1200,7 @@ function AccessoryGroup({ id, items, brain, s }: { id: WardrobeGroupId; items: r
               aria-pressed={wearing}
               onClick={() => brain.toggleAccessory(a)}
             >
-              <span className="emoji">{life.accessoryEmoji(a)}</span>
+              <span className="wear" aria-hidden dangerouslySetInnerHTML={{ __html: wearSvg(s.prefs.species, stage, a) }} />
               {life.accessoryName(a)}
               <small>{status(a, has, wearing)}</small>
             </button>
@@ -1282,7 +1330,7 @@ function HomeSheet({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: 
             <span>
               {owned.length < DECOR_IDS.length
                 ? L(`Đan thêm trong những phiên tập trung nhé · món đang đan được ${knit}%`, `Knit them during focus sessions · the next one is ${knit}% done`)
-                : L("Đủ cả 12 món rồi! Giờ mỗi món đan xong được +30 XP", "All 12 made! Each one knitted now gives +30 XP")}
+                : L("Đủ cả 12 món rồi! Giờ mỗi món đan xong được +30 XP, tối đa 90 XP mỗi ngày", "All 12 made! Each one knitted now gives +30 XP, up to 90 XP a day")}
             </span>
           </>
         )}
@@ -1335,7 +1383,16 @@ function NudgeCount({ s }: { s: BrainState }) {
   return (
     <span className={`nudges${left === 0 ? " none" : ""}`} title={title} aria-label={title}>
       <span aria-hidden>{left > 0 && !hold ? "🔔" : "🔕"}</span>
-      {left > 0 ? L(`còn ${left} lượt`, `${left} left today`) : L("hết lượt", "none left")}
+      {left > 0 ? (
+        // The words in .nudges-day give way on a narrow board ("8 left", "8 lượt"); the tooltip says the rest.
+        <>
+          <span className="nudges-day">{L("còn ", "")}</span>
+          {L(`${left} lượt`, `${left} left`)}
+          <span className="nudges-day">{L("", " today")}</span>
+        </>
+      ) : (
+        L("hết lượt", "none left")
+      )}
     </span>
   );
 }

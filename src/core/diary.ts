@@ -1,7 +1,7 @@
 // The pet diary (PetLog.swift): why each reminder fired, what you did with it, what was held back.
 // Entries are kept on this PC only, as one JSON line each, in daily files (14 days).
 import type { DiaryApi } from "../backend/types";
-import { dayKey, timeString } from "./dates";
+import { dayKey, isDayKey, timeString } from "./dates";
 import { L } from "./l10n";
 
 export type DiaryKind =
@@ -47,15 +47,24 @@ export const kindIcon: Record<DiaryKind, string> = {
   system: "⚙️",
 };
 
+/**
+ * Reads diary lines. A torn or broken line is skipped, never fatal; a bad optional field (`count`, `day`) is dropped
+ * and the entry kept.
+ */
 export function parseEntries(lines: string[]): DiaryEntry[] {
   const out: DiaryEntry[] = [];
   for (const line of lines) {
+    let e: DiaryEntry;
     try {
-      const e = JSON.parse(line) as DiaryEntry;
-      if (typeof e.at === "number" && typeof e.text === "string" && typeof e.kind === "string") out.push(e);
+      e = JSON.parse(line) as DiaryEntry;
     } catch {
-      // A torn line (power loss mid-write) is skipped, never fatal.
+      // A torn line (power loss mid-write).
+      continue;
     }
+    if (!e || typeof e !== "object" || typeof e.at !== "number" || !Number.isFinite(e.at) || typeof e.text !== "string" || typeof e.kind !== "string") continue;
+    if (e.count !== undefined && !(Number.isInteger(e.count) && e.count >= 0)) delete e.count;
+    if (e.day !== undefined && !isDayKey(e.day)) delete e.day;
+    out.push(e);
   }
   return out;
 }

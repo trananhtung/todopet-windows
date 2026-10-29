@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import type { DemoBackend } from "../backend/demo";
 import type { Backend } from "../backend/types";
 import type { Brain } from "../core/brain";
+import { dayKey } from "../core/dates";
 import { getLang, L } from "../core/l10n";
 import { meetsUnlock } from "../core/life";
 import { SPECIES_IDS, type SpeciesId } from "../core/types";
@@ -49,6 +50,8 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
   const s = useSyncExternalStore(brain.subscribe, brain.getSnapshot);
   const [open, setOpen] = useState(true);
   const fake = isDemoBackend(backend) ? backend.demo : null;
+  // One trip a day: once today's is over the button says so (an early call-back frees the day again).
+  const tripDone = !s.trip && s.life.tripDay === dayKey(new Date());
   // Pretend you've been on YouTube for 3 minutes, so the mood drop and the reminder show at once.
   const watchYouTube = () => {
     fake?.setForeground(YOUTUBE, YOUTUBE_URL);
@@ -108,8 +111,13 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             <button className="btn" title={L("Giả vờ hôm qua chưa xong việc nào, rồi sang ngày mới", "Pretend nothing got done yesterday, then wake up to it")} onClick={() => brain.demoMissDay()}>
               🍪 {L("Lỡ một ngày", "Miss a day")}
             </button>
-            <button className="btn" title={L("Pet đi chơi (mỗi ngày một chuyến)", "Send the pet on today's trip (one a day)")} onClick={() => (s.trip ? brain.callBack() : brain.goOnTrip())}>
-              🎒 {s.trip ? L("Gọi về", "Call back") : L("Đi phiêu lưu", "Go on a trip")}
+            <button
+              className="btn"
+              title={tripDone ? L("Hôm nay pet đi chơi rồi, mai đi tiếp nha", "The pet already went today: one trip a day") : L("Pet đi chơi (mỗi ngày một chuyến)", "Send the pet on today's trip (one a day)")}
+              disabled={tripDone}
+              onClick={() => (s.trip ? brain.callBack() : brain.goOnTrip())}
+            >
+              🎒 {s.trip ? L("Gọi về", "Call back") : tripDone ? L("Hôm nay đi rồi", "Trip done today") : L("Đi phiêu lưu", "Go on a trip")}
             </button>
             <button className="btn" onClick={() => brain.tick()}>
               ⏱ {L("Chạy luật", "Run rules")}

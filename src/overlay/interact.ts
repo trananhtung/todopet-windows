@@ -21,6 +21,11 @@ export const INTERACT = {
   speedWindow: 0.2,
   /** A gap in the strokes longer than this restarts the 0.3 s count. */
   strokeGap: 0.15,
+  /**
+   * A click this soon after the last one (s, about Windows' double-click time) is part of a burst: it never toggles
+   * the board, so a double click opens it once instead of opening and closing it.
+   */
+  burstGap: 0.5,
   /** 3 clicks within 2 s: giggle. 6 within 4 s: dizzy, then a pout. */
   giggleClicks: 3,
   giggleWithin: 2,
@@ -60,8 +65,8 @@ export const INTERACT = {
   tiltSoft: 8,
   /** Easing time constant: ~95 % of the way in 0.5 s. */
   tiltEase: 0.16,
-  /** "Half a beat" before celebrating. */
-  ponder: 0.4,
+  /** "Half a beat" before celebrating: the whole ponder act, ramp-out included. */
+  ponder: ACT_DURATION.ponder,
   /** After the put-down shake the pet looks straight at you this long. */
   lookAtUser: 1.4,
   /** A drop that has not landed within this long gets no shake. */
@@ -192,6 +197,7 @@ export class PetLife {
   private petFadeLeft = 0;
 
   private clicks: number[] = [];
+  private lastClick = NEVER;
   private giggleReady = NEVER;
   private dizzyReady = NEVER;
   /** Clicks until then are part of a combo ("pokes"), not requests for the board. */
@@ -233,16 +239,19 @@ export class PetLife {
   }
 
   /**
-   * A click on the pet. Returns true when it is a "poke" (the third quick click or later, or during a combo's
-   * reaction): the overlay then leaves the board alone instead of toggling it on every click.
+   * A click on the pet. Returns true when it is a "poke" (a quick follow-up click within `burstGap`, the third quick
+   * click or later, or during a combo's reaction): the overlay then leaves the board alone instead of toggling it on
+   * every click. The first click of a burst is never a poke, so a single click opens the board at once.
    */
   click(now: number): boolean {
     const I = INTERACT;
+    const burst = now - this.lastClick < I.burstGap;
+    this.lastClick = now;
     this.clicks = this.clicks.filter((c) => now - c < I.dizzyWithin);
     this.clicks.push(now);
     this.quietSince = now;
     const inGiggle = this.clicks.filter((c) => now - c < I.giggleWithin).length;
-    let poke = inGiggle >= I.giggleClicks || now < this.comboUntil;
+    let poke = burst || inGiggle >= I.giggleClicks || now < this.comboUntil;
     if (!this.canReply()) return poke;
     if (this.clicks.length >= I.dizzyClicks && now >= this.dizzyReady) {
       this.reply(now, ["dizzy", "pout"]);
@@ -275,7 +284,10 @@ export class PetLife {
     this.quietSince = now;
   }
 
-  /** A celebration begins: a 0.4 s ponder first. Returns how long the celebration is held back (0 when skipped). */
+  /**
+   * A celebration begins: a 0.4 s ponder first (the whole act, so it eases out instead of being cut mid-pose).
+   * Returns how long the celebration is held back (0 when skipped).
+   */
   celebrate(now: number): number {
     const c = this.ctx;
     if (c && (c.held || c.away)) return 0;

@@ -657,4 +657,26 @@ describe("diary", () => {
     expect([s.reminders, s.ignored, s.focusMinutes]).toEqual([1, 1, 12]);
     expect(asText("2026-10-28", entries)).toContain("hi");
   });
+
+  it("skips entries without a finite time, and drops a bad count or day but keeps the entry", () => {
+    const lines = [
+      JSON.stringify({ at: 1, kind: "life", text: "done", tag: "done", count: 2, day: "2026-10-27" }),
+      // JSON can't say Infinity, but a hand-edited file can say a string or null.
+      '{"at": null, "kind": "life", "text": "no time"}',
+      JSON.stringify({ at: "5", kind: "life", text: "string time" }),
+      '{"at": 1e999, "kind": "life", "text": "infinite time"}',
+      JSON.stringify({ at: 2, kind: "life", text: "bad count", count: -1 }),
+      JSON.stringify({ at: 3, kind: "life", text: "fraction", count: 1.5 }),
+      JSON.stringify({ at: 4, kind: "life", text: "text count", count: "3", day: "yesterday" }),
+      "null",
+      "42",
+    ];
+    const entries = parseEntries(lines);
+    expect(entries.map((e) => e.text)).toEqual(["done", "bad count", "fraction", "text count"]);
+    expect(entries[0]).toMatchObject({ count: 2, day: "2026-10-27" });
+    for (const e of entries.slice(1)) {
+      expect(e.count).toBeUndefined();
+      expect(e.day).toBeUndefined();
+    }
+  });
 });

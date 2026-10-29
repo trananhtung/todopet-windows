@@ -42,6 +42,8 @@ const SPEED: Record<Gait, number> = { bounce: 42, hop: 48, waddle: 30, float: 36
 /** Pixels per step: one step advances walkPhase by π. */
 const STEP: Record<Gait, number> = { bounce: 26, hop: 34, waddle: 16, float: 30, scurry: 14 };
 const GRAVITY = 2600;
+/** Let go on top of the home corner at ground level: a little hop (px/s up) lands it beside the corner. */
+const HOP_OUT = 420;
 
 export class PetMotion {
   readonly s: MotionState;
@@ -52,6 +54,10 @@ export class PetMotion {
   private paradeDir: 1 | -1 = 1;
   private lastAntic: MotionInput["antic"] = null;
   private homeBeforeBlock: number | null = null;
+  /** Just let go: the next step checks where it is going to land. */
+  private released = false;
+  /** Where a pet dropped onto the home corner lands instead (beside it), while it is in the air. */
+  private landX: number | null = null;
 
   constructor(
     x: number,
@@ -65,6 +71,8 @@ export class PetMotion {
     this.s.held = true;
     this.s.walking = false;
     this.target = null;
+    this.released = false;
+    this.landX = null;
     this.dragOffset = { x: this.s.x - cursorX, y: this.s.y - cursorY };
   }
 
@@ -78,6 +86,7 @@ export class PetMotion {
     this.s.held = false;
     this.vy = 0;
     this.pauseLeft = 1.5;
+    this.released = true;
   }
 
   /** Advances the simulation by `dt` seconds. */
@@ -85,7 +94,7 @@ export class PetMotion {
     const s = this.s;
     const ground = i.height;
     const margin = i.size * 0.4;
-    // Left end of the walking strip, past the home corner (the pet may still be dropped onto it).
+    // Left end of the walking strip, past the home corner. A pet dropped onto the corner lands beside it.
     const lo = Math.min(Math.max(margin, (i.reserveLeft ?? 0) + i.size * 0.32), i.width - margin);
     dt = Math.min(dt, 0.1);
 
@@ -96,6 +105,14 @@ export class PetMotion {
     if (s.held) {
       s.walking = false;
       return;
+    }
+    if (this.released) {
+      this.released = false;
+      // Let go over the home corner: it drifts out as it falls, or hops off if it was already on the ground.
+      if (s.x < lo - 1 && i.antic !== "block") {
+        this.landX = lo;
+        if (s.y >= ground - 0.5) this.vy = -HOP_OUT;
+      }
     }
 
     // The table flip: leap into the middle of the screen, big.
@@ -112,12 +129,20 @@ export class PetMotion {
     if (s.scale > 1.001) s.scale += (1 - s.scale) * Math.min(1, dt * 6);
     else s.scale = 1;
 
-    // Falling back to the taskbar after a drag or a stunt.
-    if (s.y < ground - 0.5) {
+    // Falling back to the taskbar after a drag or a stunt (or hopping off the home corner).
+    if (s.y < ground - 0.5 || this.vy < 0) {
       this.vy += GRAVITY * dt;
       s.y = Math.min(ground, s.y + this.vy * dt);
       s.walking = false;
-      if (s.y >= ground) this.vy = 0;
+      if (this.landX !== null) {
+        s.x += (this.landX - s.x) * Math.min(1, dt * 9);
+        s.facing = 1;
+      }
+      if (s.y >= ground) {
+        this.vy = 0;
+        if (this.landX !== null) s.x = this.landX;
+        this.landX = null;
+      }
       return;
     }
     s.y = ground;

@@ -24,23 +24,29 @@ export interface EffectsAnchor {
   size: number;
 }
 
+/** A chest reveal and the celebration it came with start within this long of each other (ms). */
+const SAME_MOMENT_MS = 1000;
+
 /**
- * Confetti for every finished task; fireworks for combos and golden treats. `delay` (seconds) holds it back while
- * the pet ponders for half a beat; a chest opened with the task pops open beside the pet a moment later.
+ * Confetti for every finished task; fireworks for combos and golden treats. `delayFor` says how long (seconds) a
+ * celebration is held back while the pet ponders for half a beat (0 when the ponder doesn't play); a chest opened
+ * with the task pops open beside the pet a moment after its confetti.
  */
 export function Effects({
   celebration,
   reveal = null,
   anchor,
-  delay = 0,
+  delayFor,
 }: {
   celebration: CelebrationEvent | null;
   reveal?: Reveal | null;
   anchor: RefObject<EffectsAnchor>;
-  delay?: number;
+  delayFor?: (c: CelebrationEvent) => number;
 }) {
   const [bursts, setBursts] = useState<Burst[]>([]);
   const [chests, setChests] = useState<ChestPop[]>([]);
+  /** Chest reveals already popped (the effect re-runs when the celebration changes). */
+  const popped = useRef(new Set<number>());
   // Each burst owns its removal timer, so a new celebration never cancels an older burst's cleanup.
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const later = (ms: number, run: () => void) => {
@@ -61,16 +67,20 @@ export function Effects({
 
   useEffect(() => {
     if (!celebration) return;
+    const delay = delayFor?.(celebration) ?? 0;
     if (delay > 0 && Date.now() - celebration.start < delay * 1000) {
       later(delay * 1000 - (Date.now() - celebration.start), () => fire(celebration));
       return;
     }
     fire(celebration);
-  }, [celebration, anchor, delay]);
+  }, [celebration, anchor, delayFor]);
 
-  // A chest opened with this task: it pops up beside the pet once the confetti is out.
+  // A chest opened with this task: it pops up beside the pet once the confetti is out (after the same ponder).
   useEffect(() => {
-    if (!reveal || reveal.kind !== "chest" || Date.now() - reveal.at > 3000) return;
+    if (!reveal || reveal.kind !== "chest" || Date.now() - reveal.at > 3000 || popped.current.has(reveal.id)) return;
+    // Chests open only with a celebration: wait for it, to share its ponder.
+    if (!celebration || Math.abs(celebration.start - reveal.at) > SAME_MOMENT_MS) return;
+    const delay = delayFor?.(celebration) ?? 0;
     const a = anchor.current;
     if (!a) return;
     const right = a.x + a.size * 0.62 < window.innerWidth - 40;
@@ -80,10 +90,12 @@ export function Effects({
       y: a.feetY,
       chest: reveal.chest,
       sparks: sparks(reveal.chest.tier === "legendary" ? 12 : reveal.chest.tier === "rare" ? 10 : 8),
+      delay,
     };
-    setChests((c) => (c.some((x) => x.id === pop.id) ? c : [...c, pop]));
+    popped.current.add(pop.id);
+    setChests((c) => [...c, pop]);
     later(CHEST_MS + delay * 1000, () => setChests((c) => c.filter((x) => x.id !== pop.id)));
-  }, [reveal, anchor, delay]);
+  }, [reveal, anchor, celebration, delayFor]);
 
   function fire(celebration: CelebrationEvent) {
     const a = anchor.current;
@@ -112,7 +124,7 @@ export function Effects({
   return (
     <>
       {chests.map((c) => (
-        <ChestPopView key={c.id} pop={c} delay={delay} />
+        <ChestPopView key={c.id} pop={c} />
       ))}
       {bursts.map((b) => (
         <div key={b.id} aria-hidden>
@@ -151,6 +163,8 @@ interface ChestPop {
   y: number;
   chest: ChestResult;
   sparks: { dx: number; dy: number; s: number; delay: number }[];
+  /** Seconds the pop waits for the pet's ponder (0 when there was none). */
+  delay?: number;
 }
 
 /** The chest pop: in at 0.25 s after the confetti, opens at ~0.75 s, gone by 2 s. */
@@ -179,8 +193,8 @@ function prize(c: ChestResult): string {
   }
 }
 
-function ChestPopView({ pop, delay }: { pop: ChestPop; delay: number }) {
-  const base = delay + 0.25;
+function ChestPopView({ pop }: { pop: ChestPop }) {
+  const base = (pop.delay ?? 0) + 0.25;
   return (
     <div className={`chest-pop tier-${pop.chest.tier}`} style={{ left: pop.x, top: pop.y, "--d": `${base}s` } as React.CSSProperties} aria-hidden>
       <span className="chest-glow" />

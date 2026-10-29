@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Backend } from "../backend/types";
-import type { Brain, BrainState } from "../core/brain";
+import type { Brain, BrainState, CelebrationEvent } from "../core/brain";
 import { currentEvent } from "../core/calendar";
 import { getLang, L } from "../core/l10n";
 import { stageOf } from "../core/life";
@@ -12,7 +12,7 @@ import { BubbleView } from "./Bubble";
 import { DemoDesktop, DemoPanel } from "./Demo";
 import { Effects } from "./Effects";
 import { HomeCorner, homeCornerWidth, homeItems, TripSign } from "./Home";
-import { INTERACT, PetLife, type InteractOutput } from "./interact";
+import { PetLife, type InteractOutput } from "./interact";
 import { PetMotion } from "./motion";
 import { placeBoard, type BoardPlacement, type Rect } from "./placement";
 import { playChime, speak } from "./sound";
@@ -67,6 +67,24 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
   /** The latest system sample (idle and key timers), with when it arrived (s, performance clock). */
   const sampleRef = useRef({ idle: 0, key: 999, at: 0 });
   const homeWidth = useRef(0);
+  /** The mood on screen (the frame loop keeps it; a ponder holds the old one for half a beat). */
+  const shownMoodRef = useRef<Mood>(brain.getSnapshot().mood);
+  /** Each celebration's ponder, decided once (celebrations already under way at start get none). */
+  const ponderRef = useRef<{ id: number | null; shift: number }>({ id: brain.getSnapshot().celebration?.id ?? null, shift: 0 });
+
+  /**
+   * How long a celebration is held back for the pet's ponder: 0.4 s when the ponder plays, 0 when it doesn't (held,
+   * away, already celebrating, or a celebration seen late). Decided once per celebration, by whichever of the frame
+   * loop and the confetti asks first, so the pose and the confetti always agree.
+   */
+  const ponderFor = useCallback((cel: CelebrationEvent): number => {
+    const p = ponderRef.current;
+    if (p.id === cel.id) return p.shift;
+    const fresh = shownMoodRef.current !== "celebrating" && Date.now() - cel.start < 1500;
+    const shift = fresh ? lifeRef.current!.celebrate(performance.now() / 1000) : 0;
+    ponderRef.current = { id: cel.id, shift };
+    return shift;
+  }, []);
 
   const species = speciesInfo(s.prefs.species);
   brain.speciesSound = species.sound[getLang()];
@@ -235,14 +253,11 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     let t = 0;
     let prevMood: Mood = brain.getSnapshot().mood;
     let shownMood: Mood = prevMood;
+    shownMoodRef.current = shownMood;
     let blendStart = -10;
     let lastSvg = "";
     const life = lifeRef.current!;
     let fx: InteractOutput | null = null;
-    // Celebrations already under way when the loop starts get no ponder.
-    let seenCelebration = brain.getSnapshot().celebration?.id ?? null;
-    /** Seconds the current celebration was held back for the ponder. */
-    let celShift = 0;
     let meeting = false;
     let meetingAt = -10;
     let wokeForHello = false;
@@ -310,10 +325,8 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       const smp = sampleRef.current;
       const since = smp.at > 0 ? Math.max(0, nowS - smp.at) : 0;
       const cel = st.celebration;
-      if (cel && cel.id !== seenCelebration) {
-        seenCelebration = cel.id;
-        celShift = shownMood !== "celebrating" && Date.now() - cel.start < 1500 ? life.celebrate(nowS) : 0;
-      }
+      /** Seconds the current celebration is held back for the ponder. */
+      const celShift = cel ? ponderFor(cel) : 0;
       fx = life.step({
         now: nowS,
         pet: { x: m.x, y: m.y, size },
@@ -341,6 +354,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       if (moodNow !== shownMood) {
         prevMood = shownMood;
         shownMood = moodNow;
+        shownMoodRef.current = moodNow;
         blendStart = t;
       }
       const boxTop = m.y - size * FEET * m.scale;
@@ -420,7 +434,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [brain]);
+  }, [brain, ponderFor]);
 
   /** Ends a press on the pet. A press that did not move is a click (pointer up only, never a cancel). */
   const endPress = useCallback(
@@ -437,7 +451,8 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
         return;
       }
       if (!asClick) return;
-      // Quick pokes (the third click in a row and on) make the pet giggle or get dizzy, not flip the board.
+      // The first click toggles the board at once. Its quick follow-ups (a double click, the third click in a row
+      // and on) are pokes: the pet giggles or gets dizzy and the board stays as the first click left it.
       const poke = lifeRef.current?.click(performance.now() / 1000) ?? false;
       brain.petClicked();
       if (poke) return;
@@ -532,7 +547,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
           <div ref={svgRef} />
           <PetBadge brain={brain} />
         </div>
-        <Effects celebration={s.celebration} reveal={s.reveal} anchor={anchor} delay={INTERACT.ponder} />
+        <Effects celebration={s.celebration} reveal={s.reveal} anchor={anchor} delayFor={ponderFor} />
         {showBubble && s.bubble && <BubbleView key={s.bubble.id} ref={bubbleRef} bubble={s.bubble} brain={brain} />}
         {board && placement && <Board key="board" brain={brain} backend={backend} request={board} placement={placement} onClose={closeBoard} />}
         {demo && <DemoPanel brain={brain} backend={backend} />}

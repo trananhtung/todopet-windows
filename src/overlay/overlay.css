@@ -785,16 +785,41 @@ body.overlay {
   font-variant-numeric: tabular-nums;
   color: var(--accent-text);
 }
-/* Narrow boards (small screens): the icons and tooltips carry the labels. */
-@container board (max-width: 380px) {
-  .stat-label {
-    display: none;
-  }
-  .seg button {
-    padding: 0 7px;
-  }
+/* The chests waiting to be opened (finish a task): a tiny pill at the end of the row; a click opens the wardrobe. */
+.stat.stat-chest {
+  flex: none;
+  padding: 0;
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  cursor: pointer;
 }
-
+.stat-chest button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 100%;
+  padding: 0 7px 0 6px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+}
+.stat-chest button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* When the labels can't fit (narrow board, long values) the icons and tooltips carry them; screen readers keep them. */
+.stats.compact .stat-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .board-body {
   flex: 1;
   min-height: 0;
@@ -1267,12 +1292,17 @@ body.overlay {
 .cal-summary > .icon:first-child {
   color: var(--info);
 }
+/* Up to two lines, so the free time at its end still shows on a narrow board. */
 .cal-text {
   flex: 1;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
+  line-height: 1.35;
 }
 .cal-summary .chev {
   color: var(--muted);
@@ -1486,6 +1516,28 @@ body.overlay {
   opacity: 0.45;
   filter: grayscale(1);
 }
+/* The accessory on the pet itself, instead of an emoji that only looks like it. Locked ones keep a hint of their
+   colors, so you can see what you'd get. */
+.item .wear {
+  display: block;
+  width: 48px;
+  height: 48px;
+  margin: -6px auto 0;
+}
+.item .wear svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.item.locked .wear {
+  opacity: 0.6;
+  filter: saturate(0.45);
+}
+.wardrobe.cols-4 .item .wear {
+  width: 44px;
+  height: 44px;
+  margin: -4px auto 0;
+}
 .item small {
   display: block;
   color: var(--muted);
@@ -1609,7 +1661,8 @@ body.overlay {
   border-color: var(--gold);
   background: color-mix(in srgb, var(--gold) 10%, var(--surface));
 }
-.item.locked.in-season .emoji {
+.item.locked.in-season .emoji,
+.item.locked.in-season .wear {
   opacity: 0.8;
   filter: grayscale(0.3);
 }
@@ -2111,4 +2164,28 @@ button.decor:hover {
   margin-top: 6px;
   min-height: 28px;
   padding: 2px 6px;
+}
+
+/* Narrow boards (small screens): a little less air, so the labels, the sync time and the priorities still fit.
+   Kept last in the file so it wins over the base rules above. */
+@container board (max-width: 390px) {
+  .stats {
+    gap: 4px;
+  }
+  .stat {
+    gap: 4px;
+    padding: 0 5px 2px;
+  }
+  .seg button {
+    padding: 0 6px;
+  }
+  .prio button {
+    width: 24px;
+  }
+  .nudges-day {
+    display: none;
+  }
+  .board-foot .btn.small {
+    padding: 0 6px;
+  }
 }

@@ -210,6 +210,9 @@ export interface LifeState {
   workSec: number;
   /** The item being knitted during focus (0–1). */
   craft: number;
+  /** Knitting XP given on `craftXpDay` once every decoration is owned (at most 90 a day). */
+  craftXpToday: number;
+  craftXpDay: string;
   /** Home decorations owned, in the order they were made. */
   decor: DecorId[];
   /** Souvenirs on the shelf, in the order they came home. */
@@ -218,6 +221,8 @@ export interface LifeState {
   trip: Trip | null;
   /** The day of the last trip (one a day). */
   tripDay: string;
+  /** The day you said "Stay" to the trip offer: not offered again that day, even after a restart. */
+  tripDeclined: string;
   /** This week's tasks, stickers and trips, and last week's for the Monday fresh start. */
   week: WeekStats;
   lastWeek: WeekStats | null;
@@ -258,10 +263,13 @@ export const newLife = (): LifeState => ({
   chestDay: "",
   workSec: 0,
   craft: 0,
+  craftXpToday: 0,
+  craftXpDay: "",
   decor: [],
   souvenirs: [],
   trip: null,
   tripDay: "",
+  tripDeclined: "",
   week: emptyWeek(),
   lastWeek: null,
   weekGreeted: "",
@@ -323,10 +331,13 @@ export function lifeFromJson(raw: unknown): LifeState {
     chestDay: isDayKey(r.chestDay) ? r.chestDay : "",
     workSec: Math.max(0, num(r.workSec, 0)),
     craft: Math.min(1, Math.max(0, num(r.craft, 0))),
+    craftXpToday: clampInt(r.craftXpToday, 0, 1000, 0),
+    craftXpDay: isDayKey(r.craftXpDay) ? r.craftXpDay : "",
     decor: [...new Set((Array.isArray(r.decor) ? r.decor : []).filter((x): x is DecorId => (DECOR_IDS as readonly unknown[]).includes(x)))],
     souvenirs: [...new Set((Array.isArray(r.souvenirs) ? r.souvenirs : []).filter(isSouvenirId))],
     trip: tripFromJson(r.trip),
     tripDay: isDayKey(r.tripDay) ? r.tripDay : "",
+    tripDeclined: isDayKey(r.tripDeclined) ? r.tripDeclined : "",
     week: weekFromJson(r.week) ?? emptyWeek(),
     lastWeek: weekFromJson(r.lastWeek),
     weekGreeted: typeof r.weekGreeted === "string" ? r.weekGreeted : "",

@@ -42,7 +42,8 @@ export const ACT_DURATION: Readonly<Record<PetActKind, number>> = {
   yawn: 5,
   sneeze: 1.8,
   trip: 1.4,
-  ponder: 2,
+  // Half a beat before a celebration (the overlay's scheduler plays all of it), so it's quick.
+  ponder: 0.4,
 };
 
 /** A characteristic moment of each act (seconds), for stills in the gallery and docs. */
@@ -60,7 +61,7 @@ export const ACT_KEY_T: Readonly<Record<PetActKind, number>> = {
   yawn: 2,
   sneeze: 1.02,
   trip: 0.36,
-  ponder: 0.8,
+  ponder: 0.16,
 };
 
 export type ActEyes = "spiral" | "squint" | "squeeze" | "wide" | "closed";
@@ -391,12 +392,11 @@ export function actFrame(p: PetPose, mood: Mood): ActFrame | null {
       break;
     }
     case "ponder":
-      // Hmm… head tilted, eyes up to one side, a paw at the chin, a slow blink, thought dots.
+      // Hmm… (half a beat): head tilted, eyes up to one side, a paw at the chin, thought dots; then it eases back.
       f.faceTilt = 13 * k;
       f.lookX = 0.55;
       f.lookY = -0.7;
       f.lookK = k;
-      f.lid = bump(t, 0.95, 1.4);
       f.arms = "chin";
       f.armK = k;
       if (on) f.mouth = "hmm";

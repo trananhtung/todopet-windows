@@ -117,6 +117,20 @@ export function openChest(s: LifeState, roll: number, pick: number, season: Seas
   return { tier, reward: "golden", xp: GOLDEN_XP };
 }
 
+/**
+ * Puts an opened chest back (the task it was opened for couldn't be closed in Todoist): it is held again and its
+ * XP, snack or golden treat is taken back. An accessory stays, as a gift.
+ */
+export function restoreChest(s: LifeState, r: ChestResult): void {
+  s.chests = Math.min(MAX_HELD_CHESTS, s.chests + 1);
+  s.xp = Math.max(0, s.xp - r.xp);
+  if (r.reward === "snack") s.snacks = Math.max(0, s.snacks - 1);
+  if (r.reward === "golden") s.goldens = Math.max(0, s.goldens - 1);
+}
+
+/** The quiet note when a chest is earned (a reply: never counted against the budget). */
+export const chestEarnedText = (): string => L("🎁 Mình kiếm được một rương! Xong việc tiếp theo là mở", "🎁 I found a chest! Finish your next task to open it");
+
 /** One line for the celebration bubble. */
 export function chestText(r: ChestResult): string {
   const a = r.accessory ? `${accessoryEmoji(r.accessory)} ${accessoryName(r.accessory)}` : "";

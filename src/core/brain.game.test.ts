@@ -7,6 +7,7 @@ import { dayKey } from "./dates";
 import { setLang } from "./l10n";
 import { demoLife, type LifeState } from "./life";
 import { defaultPrefs, type Prefs } from "./prefs";
+import { DECOR_IDS } from "./types";
 
 const MIN = 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -68,7 +69,7 @@ async function rig(opts: { start?: number; life?: Partial<LifeState>; prefs?: Pa
     throw new Error("no matching bubble");
   };
   const diary = vi.spyOn(brain.diary, "add");
-  return { clock, brain, show, tick, step, until, diary, s: () => brain.getSnapshot() };
+  return { clock, backend, brain, show, tick, step, until, diary, s: () => brain.getSnapshot() };
 }
 
 describe("Brain and chests", () => {
@@ -116,6 +117,48 @@ describe("Brain and chests", () => {
     brain.stop();
   });
 
+  it("says so once, quietly, when a chest is earned (a reply: not counted)", async () => {
+    const { s, tick, brain } = await rig({ life: { chests: 0, chestsToday: 0, chestDay: "2026-10-28", workSec: 1790 } });
+    const left = s().nudgesLeft;
+    const chime = vi.fn();
+    brain.effects.chime = chime;
+    tick();
+    const b = s().bubble!;
+    expect(b.text).toBe("🎁 I found a chest! Finish your next task to open it");
+    expect(b).toMatchObject({ reminder: false, urgent: false, actions: [] });
+    expect(b.kind).toBeUndefined();
+    expect(s().nudgesLeft).toBe(left);
+    expect(chime).not.toHaveBeenCalled();
+    brain.dismissBubble(b.id, "ignored");
+    // Once per chest: holding it says nothing more.
+    for (let i = 0; i < 20; i++) tick();
+    expect(s().bubble?.text ?? "").not.toContain("found a chest");
+    brain.stop();
+  });
+
+  it("keeps a chest earned during focus for the end-of-session bubble", async () => {
+    const { s, tick, clock, brain } = await rig({ life: { chests: 0, chestsToday: 0, chestDay: "2026-10-28", workSec: 1790 } });
+    const start = clock.t;
+    brain.startFocus(s().next, 25);
+    brain.dismissBubble(s().bubble!.id, "closed");
+    tick();
+    expect(s().life.chests).toBe(1);
+    expect(s().bubble).toBeNull();
+    clock.t = start + 25 * MIN;
+    brain.tick();
+    expect(s().bubble?.text).toContain("25 minutes up");
+    expect(s().bubble?.text).toContain("I found a chest!");
+    brain.stop();
+  });
+
+  it("puts the chest back when Todoist can't close the task", async () => {
+    const { s, brain } = await rig({ life: { chests: 1, xp: 100 } });
+    vi.spyOn(brain.backend.todoist, "close").mockRejectedValueOnce(new Error("offline"));
+    await brain.complete(s().next!);
+    expect(s().life).toMatchObject({ chests: 1, xp: 100 });
+    brain.stop();
+  });
+
   it("says nothing about chests when none is held", async () => {
     const { s, brain } = await rig({ life: { chests: 0 } });
     await brain.complete(s().next!);
@@ -132,7 +175,7 @@ describe("Brain and chests", () => {
 });
 
 describe("Brain and crafting", () => {
-  it("knits during focus and finishes a decoration when the session completes", async () => {
+  it("knits during focus and finishes a decoration when a whole session completes", async () => {
     // Picks the first decoration not owned yet.
     const { s, tick, clock, brain } = await rig({ life: { craft: 0, decor: ["rug"] }, random: () => 0 });
     expect(s().craft).toBeNull();
@@ -142,14 +185,52 @@ describe("Brain and crafting", () => {
     for (let i = 0; i < 10; i++) tick();
     expect(s().life.craft).toBeCloseTo(150 / 1500);
     expect(s().craft).toBeCloseTo(0.1);
-    clock.t = start + 25 * MIN - 15_000;
-    tick();
+    // The heartbeat runs out of phase with the session: the last 7 s are knitted at 0:00.
+    tick(8);
+    while (clock.t + 15_000 < start + 25 * MIN) tick();
+    expect(s().life.craft).toBeLessThan(1);
+    clock.t = start + 25 * MIN;
+    brain.tick();
     const b = s().bubble!;
     expect(b.text).toContain("25 minutes up");
     expect(b.text).toContain("All done! A potted plant");
     expect(s().life).toMatchObject({ craft: 0, decor: ["rug", "plant"] });
     expect(s().craft).toBeNull();
     expect(s().reveal).toMatchObject({ kind: "craft", decor: "plant", xp: 0 });
+    brain.stop();
+  });
+
+  it("gives a short session only its share, at the running session's own length", async () => {
+    const { s, tick, brain } = await rig({ life: { craft: 0.4, decor: ["rug"] }, prefs: { focusMinutes: 25 } });
+    // The demo's "Focus 1'" (and "Try 2 minutes"): a twenty-fifth of an item a minute, no decoration at the end.
+    brain.startFocus(s().next, 1);
+    for (let i = 0; i < 4; i++) tick();
+    expect(s().focus).toBeNull();
+    expect(s().life.craft).toBeCloseTo(0.44);
+    expect(s().life.decor).toEqual(["rug"]);
+    expect(s().bubble?.text).not.toContain("All done");
+    // A 50-minute session knits at its own pace: half an item in 25 minutes.
+    brain.startFocus(s().next, 50);
+    for (let i = 0; i < 100; i++) tick();
+    expect(s().life.craft).toBeCloseTo(0.94);
+    brain.stop();
+  });
+
+  it("knits only while you're working on it: not idle, not on a distraction", async () => {
+    const { s, tick, show, brain } = await rig({ life: { craft: 0 } });
+    brain.startFocus(s().next, 25);
+    tick();
+    expect(s().life.craft).toBeCloseTo(0.01);
+    show({ idleSeconds: 90 });
+    tick();
+    tick();
+    expect(s().life.craft).toBeCloseTo(0.01);
+    show(YOUTUBE);
+    tick();
+    expect(s().life.craft).toBeCloseTo(0.01);
+    show({});
+    tick();
+    expect(s().life.craft).toBeCloseTo(0.02);
     brain.stop();
   });
 
@@ -163,15 +244,45 @@ describe("Brain and crafting", () => {
     brain.startBreak();
     for (let i = 0; i < 4; i++) tick();
     expect(s().life.craft).toBeCloseTo(0.2);
-    // A carried-over item that is already done gets finished when you stop.
     brain.stopFocus();
+    expect(s().life.craft).toBeCloseTo(0.2);
+    expect(s().life.decor).toHaveLength(3);
+    brain.stop();
+  });
+
+  it("finishes the item the moment it's complete, mid-session, so no dropped stitch can take it back", async () => {
+    const { s, tick, show, brain } = await rig({ life: { craft: 0.9 }, random: () => 0 });
     brain.startFocus(s().next, 25);
-    for (let i = 0; i < 90; i++) tick();
-    expect(s().life.craft).toBe(1);
-    brain.stopFocus();
-    expect(s().life.craft).toBe(0);
+    brain.dismissBubble(s().bubble!.id, "closed");
+    for (let i = 0; i < 9; i++) tick();
+    expect(s().life.craft).toBeCloseTo(0.99);
+    tick();
     expect(s().life.decor).toHaveLength(4);
+    expect(s().life.craft).toBe(0);
     expect(s().bubble?.text).toContain("All done!");
+    expect(s().reveal).toMatchObject({ kind: "craft" });
+    expect(s().focus).not.toBeNull();
+    // Off to YouTube right after: the finished item is safe, the new one has nothing to lose yet.
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    show(YOUTUBE);
+    tick();
+    tick();
+    expect(s().life.decor).toHaveLength(4);
+    expect(s().life.craft).toBe(0);
+    brain.stop();
+  });
+
+  it("gives at most 90 knitting XP a day once every decoration is owned", async () => {
+    const { s, tick, brain } = await rig({ life: { craft: 0, decor: [...DECOR_IDS], xp: 100 } });
+    for (let n = 0; n < 4; n++) {
+      brain.startFocus(s().next, 25);
+      for (let i = 0; i < 100; i++) tick();
+      expect(s().focus).toBeNull();
+      brain.dismissBubble(s().bubble!.id, "closed");
+    }
+    // Three items for 30 XP each, the fourth for none (the feed XP from tasks doesn't come into it).
+    expect(s().life.xp).toBe(190);
+    expect(s().life.craftXpToday).toBe(90);
     brain.stop();
   });
 
@@ -181,22 +292,23 @@ describe("Brain and crafting", () => {
     brain.dismissBubble(s().bubble!.id, "closed");
     show(YOUTUBE);
     tick();
-    expect(s().life.craft).toBeCloseTo(0.51);
+    expect(s().life.craft).toBeCloseTo(0.5);
     tick();
-    expect(s().life.craft).toBeCloseTo(0.42);
+    expect(s().life.craft).toBeCloseTo(0.4);
     expect(s().bubble?.text).toContain("dropped a few stitches");
     expect(s().bubble?.reminder).toBe(false);
     tick();
     tick();
-    expect(s().life.craft).toBeCloseTo(0.44);
+    expect(s().life.craft).toBeCloseTo(0.4);
     // Back to work, then off again: a new visit.
     show({});
     tick();
+    expect(s().life.craft).toBeCloseTo(0.41);
     show(YOUTUBE);
     tick();
     tick();
     tick();
-    expect(s().life.craft).toBeCloseTo(0.38);
+    expect(s().life.craft).toBeCloseTo(0.31);
     brain.stop();
   });
 });
@@ -208,9 +320,9 @@ describe("Brain and crafting, already distracted", () => {
     tick(120);
     brain.startFocus(s().next, 25);
     tick();
-    expect(s().life.craft).toBeCloseTo(0.51);
+    expect(s().life.craft).toBeCloseTo(0.5);
     tick();
-    expect(s().life.craft).toBeCloseTo(0.42);
+    expect(s().life.craft).toBeCloseTo(0.4);
     brain.stop();
   });
 });
@@ -285,6 +397,67 @@ describe("Brain and trips", () => {
     expect(s().bubble?.text).toContain("Back already");
     expect(s().reveal).toMatchObject({ kind: "souvenir", souvenir: null });
     brain.callBack();
+    // A stray click doesn't cost the day's trip.
+    expect(s().life.tripDay).toBe("");
+    expect(brain.goOnTrip()).toBe(true);
+    clock.t += 40 * MIN;
+    brain.callBack();
+    expect(s().life.tripDay).toBe("2026-10-28");
+    expect(brain.goOnTrip()).toBe(false);
+    brain.stop();
+  });
+
+  it("offers the trip again after an early call-back, but never after Stay, not even after a restart", async () => {
+    const { s, until, clock, backend, brain } = await rig({ prefs: { bubbleGap: 0 } });
+    for (const id of ["1", "2", "4"]) await brain.complete(s().day.today.find((t) => t.id === id)!);
+    await brain.refresh();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    brain.pickAction(until((b) => b.kind === "trip").id, 0);
+    clock.t += 5 * MIN;
+    brain.callBack();
+    brain.dismissBubble(s().bubble!.id, "ignored");
+    const again = until((b) => b.kind === "trip");
+    brain.pickAction(again.id, 1);
+    expect(s().life.tripDeclined).toBe("2026-10-28");
+    brain.stop();
+    // A restart: the saved "Stay" holds for the rest of the day.
+    const next = await Brain.create(backend, { demo: true, now: () => clock.t, random: () => 0.5 });
+    await next.start();
+    expect(next.getSnapshot().life.tripDeclined).toBe("2026-10-28");
+    for (let i = 0; i < 30; i++) {
+      clock.t += MIN;
+      next.recompute();
+      next.runRules(clock.t);
+      const b = next.getSnapshot().bubble;
+      expect(b?.kind).not.toBe("trip");
+      if (b) next.dismissBubble(b.id, "ignored");
+    }
+    next.stop();
+  });
+
+  it("ends a trip at once when the clock is earlier than its start", async () => {
+    const { s, clock, tick, show, brain } = await rig();
+    brain.goOnTrip();
+    clock.t -= 3 * 60 * MIN;
+    show({ idleSeconds: 900 });
+    tick(0);
+    expect(s().trip).toBeNull();
+    expect(s().life.souvenirs).toHaveLength(4);
+    brain.stop();
+  });
+});
+
+describe("Brain and bubble buttons", () => {
+  it("resets the dismissal run only for counted reminders, not for a check-in like the trip offer", async () => {
+    const { s, brain } = await rig();
+    const inner = brain as unknown as { dismissedInRow: number; say: Brain["say"] };
+    inner.dismissedInRow = 2;
+    brain.say({ text: "Off on a trip?", actions: [{ title: "Go!", run: () => undefined }], seconds: 60 }, { why: "test", kind: "trip" });
+    brain.pickAction(s().bubble!.id, 0);
+    expect(inner.dismissedInRow).toBe(2);
+    brain.say({ text: "Next task?", actions: [{ title: "Later", run: () => undefined }], seconds: 60 }, { why: "test", kind: "nudge" });
+    brain.pickAction(s().bubble!.id, 0);
+    expect(inner.dismissedInRow).toBe(0);
     brain.stop();
   });
 });

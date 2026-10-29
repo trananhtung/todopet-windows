@@ -99,4 +99,41 @@ describe("PetMotion", () => {
     run(d, 8, input({ reserveLeft: 160 }));
     expect(d.s.x).toBeGreaterThanOrEqual(160 + 150 * 0.32);
   });
+
+  it("lands a pet dropped onto the home corner beside it, even with the cursor still on it", () => {
+    const lo = 152 + 150 * 0.32;
+    // Dropped from high up: it drifts out of the corner on the way down.
+    const high = new PetMotion(600, 700);
+    high.grab(600, 650);
+    high.drag(10, 300);
+    high.step(1 / 30, input({ reserveLeft: 152 }));
+    high.release();
+    let landed = false;
+    for (let t = 0; t < 1.5; t += 1 / 30) {
+      high.step(1 / 30, input({ reserveLeft: 152, hovered: true }));
+      if (!landed && high.s.y === 700) {
+        landed = true;
+        expect(high.s.x).toBe(lo);
+      }
+    }
+    expect(landed).toBe(true);
+    expect(high.s.x).toBe(lo);
+    // Let go on the taskbar itself (the evaluator's x = 10): a little hop off the decorations.
+    const low = new PetMotion(600, 700);
+    low.grab(600, 650);
+    low.drag(10, 650);
+    low.step(1 / 30, input({ reserveLeft: 152 }));
+    low.release();
+    low.step(1 / 30, input({ reserveLeft: 152, hovered: true, calm: true }));
+    expect(low.s.y).toBeLessThan(700);
+    run(low, 1, input({ reserveLeft: 152, hovered: true, calm: true }));
+    expect(low.s).toMatchObject({ x: lo, y: 700, facing: 1 });
+    // Dropped beside the corner: it stays where it was put.
+    const beside = new PetMotion(600, 700);
+    beside.grab(600, 650);
+    beside.drag(400, 650);
+    beside.release();
+    run(beside, 1, input({ reserveLeft: 152, hovered: true }));
+    expect(beside.s).toMatchObject({ x: 400, y: 700 });
+  });
 });

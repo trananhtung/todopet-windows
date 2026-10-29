@@ -119,8 +119,8 @@ export function yarnText(craft: number): { pct: number; title: string } {
   return {
     pct,
     title: L(
-      `Pet đang đan một món cho góc nhà: ${pct}%. Hết phiên này là xong 🧶`,
-      `Knitting a little something for home: ${pct}%. It's done when this session ends 🧶`,
+      `Pet đang đan một món cho góc nhà: ${pct}%. Mỗi phút bạn tập trung là thêm vài mũi, trọn một phiên từ 25 phút trở lên là xong một món 🧶`,
+      `Knitting a little something for home: ${pct}%. Every focused minute adds a few stitches, and a whole session of 25 minutes or more makes one 🧶`,
     ),
   };
 }
@@ -136,4 +136,32 @@ export function tripBanner(trip: Trip, now: number): { title: string; back: stri
       ? L("Đi chưa đủ 30 phút thì chưa kịp mua quà đâu nha", "Under 30 minutes away means no souvenir yet")
       : L("Gọi về bây giờ thì pet vẫn mang quà về cho bạn", "Call it home now and it still brings a souvenir"),
   };
+}
+
+/**
+ * The trip sign's tooltip and accessible name, in the pet's voice: where it is, and in its first 30 minutes that
+ * coming back now brings no souvenir (it doesn't cost the day's trip, though).
+ */
+export function tripSignText(trip: Trip, now: number): { title: string; label: string; early: boolean } {
+  const back = timeString(new Date(trip.back));
+  const place = placeName(trip.place);
+  const early = now - trip.start < SOUVENIR_AFTER_MS;
+  const call = early ? L("Gọi về sớm thì chưa có quà đâu.", "Call me back early and there's no souvenir yet.") : L("Bấm để gọi mình về sớm.", "Click to call me back early.");
+  return {
+    title: L(`Mình đang ở ${place}. ${call}`, `In ${place}. ${call}`),
+    label: L(`Mình đang ở ${place}, về lúc ${back}. ${call}`, `I'm in ${place}, back at ${back}. ${call}`),
+    early,
+  };
+}
+
+/**
+ * The wardrobe preview's viewBox: a square around the top `share` of the pet (head and neck, where every accessory
+ * sits), centered, with a little room. `b` is the pet's bounds in its 160 × 160 view.
+ */
+export function previewViewBox(b: { minX: number; maxX: number; minY: number; maxY: number }, share = 0.8, pad = 4): string {
+  const side = Math.max(b.maxX - b.minX, (b.maxY - b.minY) * share) + 2 * pad;
+  const x = (b.minX + b.maxX) / 2 - side / 2;
+  const y = b.minY - pad;
+  const r = (v: number) => Math.round(v * 10) / 10;
+  return `${r(x)} ${r(y)} ${r(side)} ${r(side)}`;
 }

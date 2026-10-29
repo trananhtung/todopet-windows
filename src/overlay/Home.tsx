@@ -1,11 +1,12 @@
-import { forwardRef, memo, useMemo } from "react";
+import { forwardRef, memo, useEffect, useMemo, useState } from "react";
 import type { Brain } from "../core/brain";
 import { homeDecor } from "../core/craft";
 import { timeString } from "../core/dates";
 import { L } from "../core/l10n";
-import { placeName, type Trip } from "../core/trips";
+import { SOUVENIR_AFTER_MS, type Trip } from "../core/trips";
 import type { DecorId } from "../core/types";
 import { renderDecor } from "../pets";
+import { tripSignText } from "./boardGame";
 
 /** Home corner layout: decorations this big (px), this far apart, this far from the left edge. */
 export const HOME_ITEM = 40;
@@ -40,11 +41,20 @@ export const HomeCorner = memo(function HomeCorner({ items }: { items: readonly 
 
 /**
  * The little sign the pet leaves where it stood while it is on a trip. A click calls it back early (the frame
- * loop puts it on the ground; it is a hit area for click-through).
+ * loop puts it on the ground; it is a hit area for click-through). A call back in the first 30 minutes brings no
+ * souvenir but doesn't use up the day's trip.
  */
 export const TripSign = forwardRef<HTMLButtonElement, { trip: Trip; brain: Brain }>(function TripSign({ trip, brain }, ref) {
   const back = timeString(new Date(trip.back));
-  const place = placeName(trip.place);
+  const [now, setNow] = useState(() => Date.now());
+  // Re-render once the souvenir is earned, so the warning goes away on time.
+  useEffect(() => {
+    const left = trip.start + SOUVENIR_AFTER_MS - Date.now();
+    if (left <= 0) return;
+    const id = setTimeout(() => setNow(Date.now()), left + 50);
+    return () => clearTimeout(id);
+  }, [trip.start, now]);
+  const text = tripSignText(trip, now);
   return (
     <button
       ref={ref}
@@ -52,8 +62,8 @@ export const TripSign = forwardRef<HTMLButtonElement, { trip: Trip; brain: Brain
       className="trip-sign"
       data-hit=""
       onClick={() => brain.callBack()}
-      title={L(`Đang ở ${place}. Bấm để gọi về sớm`, `In ${place}. Click to call me back early`)}
-      aria-label={L(`Pet đang đi ${place}, về lúc ${back}. Gọi về sớm`, `The pet is in ${place}, back at ${back}. Call it back early`)}
+      title={text.title}
+      aria-label={text.label}
     >
       <span className="plank">
         <span className="pack" aria-hidden>

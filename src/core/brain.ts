@@ -82,6 +82,8 @@ const MAX_BACKOFF = 8;
 /** This many reminders dismissed in a row hold the rest for `HOLD_MINUTES`. */
 const HOLD_AFTER = 3;
 const HOLD_MINUTES = 60;
+/** v0.5: a heartbeat gap longer than this (the PC slept mid-session) knits this much at most. */
+const KNIT_GAP_MAX_SEC = 60;
 const budgetLeft = (s: { prefs: Prefs; life: life.LifeState }) => Math.max(0, s.prefs.nudgeBudget - s.life.dayNudges);
 
 export interface BubbleAction {
@@ -286,6 +288,12 @@ export class Brain {
   private dismissedInRow = 0;
   /** v0.5: the distraction visit (its start) that already cost stitches during focus. */
   private stitchesDroppedAt: number | null = null;
+  /** v0.5: knitting is counted up to here (epoch ms) in the running focus session. */
+  private knitAt: number | null = null;
+  /** v0.5: an item finished mid-session whose line couldn't be shown yet: it joins the end-of-session bubble. */
+  private craftLine: string | null = null;
+  /** v0.5: a chest was just earned and the pet hasn't said so yet (once per chest). */
+  private chestNotice = false;
 
   private constructor(
     readonly backend: Backend,
@@ -999,6 +1007,24 @@ export class Brain {
     this.say({ text, seconds: 12 });
   }
 
+  /**
+   * A chest was earned: one small, silent line once you're around and nothing else is showing. A reply (never
+   * counted), once per chest. During focus it waits for the end-of-session bubble instead.
+   */
+  private tellChest(nowMs: number): void {
+    if (!this.chestNotice) return;
+    if (this.state.life.chests <= 0) {
+      this.chestNotice = false;
+      return;
+    }
+    const f = this.state.focus;
+    if (this.state.bubble || this.outOfTheWay || this.state.flow || (f && !f.isBreak) || this.sample.idleSeconds > 300) return;
+    if (this.state.quietUntil !== null && nowMs < this.state.quietUntil) return;
+    if (!calm.atBreakpoint(this.sample.secondsSinceKey, this.secondsSinceAppSwitch())) return;
+    this.chestNotice = false;
+    this.say({ text: chests.chestEarnedText(), seconds: 6 }, { silent: true });
+  }
+
   // ---------- Talking ----------
 
   /**
@@ -1008,7 +1034,7 @@ export class Brain {
    */
   say(
     b: { text: string; actions?: BubbleAction[]; seconds: number; urgent?: boolean },
-    opts: { chime?: Chime; why?: string; antic?: boolean; kind?: ReminderKind } = {},
+    opts: { chime?: Chime; why?: string; antic?: boolean; kind?: ReminderKind; silent?: boolean } = {},
   ): boolean {
     // v0.5: while the pet is away on a trip, only urgent bubbles and replies show.
     if (this.state.life.trip && opts.why !== undefined && !b.urgent) return false;
@@ -1025,7 +1051,7 @@ export class Brain {
         s.dayNudges += 1;
       });
     }
-    this.play(opts.chime ?? "chatter");
+    if (!opts.silent) this.play(opts.chime ?? "chatter");
     const quote = `“${shortText(b.text.replace(/\n/g, " "), 90)}”`;
     const left = counted(opts.kind) ? L(` (còn ${this.state.nudgesLeft} lượt nhắc hôm nay)`, ` (${this.state.nudgesLeft} left today)`) : "";
     if (opts.why !== undefined) this.diary.add(opts.antic ? "antic" : "bubble", `${quote} — ${L("vì ", "because ")}${opts.why}${left}`);
@@ -1033,13 +1059,13 @@ export class Brain {
     return true;
   }
 
-  /** The user tapped a bubble button. A reminder's button resets that kind's back-off. */
+  /** The user tapped a bubble button. A counted reminder's button resets that kind's back-off and the dismissal run. */
   pickAction(bubbleId: number, index: number): void {
     const b = this.state.bubble;
     if (!b || b.id !== bubbleId) return;
     const a = b.actions[index];
     if (!a) return;
-    if (b.kind) {
+    if (counted(b.kind)) {
       this.backoff.delete(b.kind);
       this.dismissedInRow = 0;
     }
@@ -1056,6 +1082,8 @@ export class Brain {
     const b = this.state.bubble;
     if (!b || b.id !== bubbleId) return;
     const refused = counted(b.kind) && (how === "closed" || b.actions.length > 0);
+    // v0.5: closing the trip offer is a "Stay" too.
+    if (b.kind === "trip" && how === "closed") this.mutateLife((s) => trips.declineTrip(s, this.now()));
     let backoff = "";
     if (refused && b.kind) {
       const m = Math.min(MAX_BACKOFF, (this.backoff.get(b.kind) ?? 1) * 2);
@@ -1212,6 +1240,7 @@ export class Brain {
     this.updateFlow(now);
     this.recompute();
     this.tellNotes(nowMs);
+    this.tellChest(nowMs);
     this.runRules(nowMs);
   }
 
@@ -1664,7 +1693,7 @@ export class Brain {
 
   /** Feeds the pet once per finished task, then dances with a random (sometimes rare golden) celebration. */
   /** Returns what the feeding gave (XP, golden), so Undo can take back exactly that. */
-  private celebrate(task: TodoTask | null, viaPet: boolean, feeds = 1, sound = "yay"): { xp: number; golden: boolean } | null {
+  private celebrate(task: TodoTask | null, viaPet: boolean, feeds = 1, sound = "yay"): { xp: number; golden: boolean; chest: chests.ChestResult | null } | null {
     const nowMs = this.now();
     this.lastCelebration = nowMs;
     const xpBefore = this.state.life.xp;
@@ -1718,7 +1747,7 @@ export class Brain {
       if (levelUp !== null || r.golden) this.speak(lines.voiceCheer());
     }
     this.later(() => this.recompute(), 4200);
-    return { xp: this.state.life.xp - xpBefore - (chest?.xp ?? 0), golden: r.golden };
+    return { xp: this.state.life.xp - xpBefore - (chest?.xp ?? 0), golden: r.golden, chest };
   }
 
   /** What the species says when cheering; set by the UI from the species registry. */
@@ -1734,9 +1763,12 @@ export class Brain {
     this.completed = [done, ...this.completed];
     this.completedViaPet.add(task.id);
     this.knownCompleted.add(task.id);
-    if (this.state.focus && !this.state.focus.isBreak && this.state.focus.task?.id === task.id) this.set({ focus: null });
+    if (this.state.focus && !this.state.focus.isBreak && this.state.focus.task?.id === task.id) {
+      this.dropFocusKnitting();
+      this.set({ focus: null });
+    }
     const gained = this.celebrate(done, true, 1, this.speciesSound);
-    if (gained) this.feeds.set(task.id, gained);
+    if (gained) this.feeds.set(task.id, { xp: gained.xp, golden: gained.golden });
     try {
       await this.backend.todoist.close(task.id);
     } catch (e) {
@@ -1745,7 +1777,12 @@ export class Brain {
       this.knownCompleted.delete(task.id);
       if (!this.active.some((t) => t.id === task.id)) this.active = [...this.active, task];
       this.feeds.delete(task.id);
-      this.mutateLife((s) => life.unfeed(s, gained ?? undefined));
+      this.mutateLife((s) => {
+        life.unfeed(s, gained ?? undefined);
+        // v0.5: the chest it opened goes back, so the next finished task opens it again.
+        if (gained?.chest) chests.restoreChest(s, gained.chest);
+      });
+      if (gained?.chest) this.diary.add("life", L("Chưa đóng được việc trong Todoist → cất rương lại chờ mở", "Couldn't close the task in Todoist → the chest is back, waiting to be opened"));
       this.lastCelebration = NEVER;
       this.celebrateUntil = NEVER;
       this.set({ celebration: null });
@@ -1889,7 +1926,10 @@ export class Brain {
   /** Deletes a task (and its sub-tasks) from Todoist for good. The UI asks for confirmation first. */
   async remove(task: TodoTask): Promise<void> {
     this.active = this.active.filter((t) => t.id !== task.id && t.parentId !== task.id);
-    if (this.state.focus && !this.state.focus.isBreak && this.state.focus.task?.id === task.id) this.set({ focus: null });
+    if (this.state.focus && !this.state.focus.isBreak && this.state.focus.task?.id === task.id) {
+      this.dropFocusKnitting();
+      this.set({ focus: null });
+    }
     this.lastPlanAction = this.now();
     this.recompute();
     try {
@@ -1980,6 +2020,8 @@ export class Brain {
     const m = minutes ?? this.state.prefs.focusMinutes;
     const nowMs = this.now();
     const t = task ?? this.state.next;
+    this.knitUntil(nowMs);
+    this.knitAt = nowMs;
     this.set({ focus: { task: t, start: nowMs, end: nowMs + m * MIN, isBreak: false, minutes: m }, antic: null });
     this.finishFocusAt(nowMs + m * MIN);
     this.recompute();
@@ -1991,6 +2033,8 @@ export class Brain {
   startBreak(): void {
     const nowMs = this.now();
     const m = this.state.prefs.breakMinutes;
+    this.knitUntil(nowMs);
+    this.knitAt = null;
     this.set({ focus: { task: null, start: nowMs, end: nowMs + m * MIN, isBreak: true, minutes: m } });
     this.finishFocusAt(nowMs + m * MIN);
     this.recompute();
@@ -2007,10 +2051,12 @@ export class Brain {
         f.isBreak ? L(`Bạn dừng giờ nghỉ sau ${minutes} phút`, `You ended the break after ${minutes} min`) : L(`Bạn dừng tập trung sau ${minutes}/${f.minutes} phút`, `You stopped focusing after ${minutes}/${f.minutes} min`),
       );
     }
+    // v0.5: knitting counts up to now; a complete item gets finished, anything less waits for the next session.
+    this.knitUntil(this.now());
+    this.knitAt = null;
     this.set({ focus: null });
     this.recompute();
-    // v0.5: an item that was already complete gets finished; anything less waits for the next session.
-    const made = f && !f.isBreak ? this.craftDone(false) : null;
+    const made = f && !f.isBreak ? this.craftEnd() : null;
     if (made) this.say({ text: made, seconds: 10, urgent: true });
   }
 
@@ -2025,6 +2071,9 @@ export class Brain {
   private finishFocus(): void {
     const f = this.state.focus;
     if (!f) return;
+    // v0.5: the last few seconds of knitting, up to 0:00 (the heartbeat counts every 15 s).
+    this.knitUntil(f.end);
+    this.knitAt = null;
     this.diary.add("focus", f.isBreak ? L("Hết giờ nghỉ", "Break over") : L(`Xong phiên tập trung ${f.minutes} phút`, `Finished a ${f.minutes}-minute focus session`));
     this.set({ focus: null });
     this.recompute();
@@ -2047,8 +2096,12 @@ export class Brain {
       }
       actions.push({ title: L(`+${f.minutes}' nữa`, `+${f.minutes}' more`), run: () => this.startFocus(f.task, f.minutes) });
       actions.push({ title: L(`☕ Nghỉ ${this.state.prefs.breakMinutes}'`, `☕ Break ${this.state.prefs.breakMinutes}'`), run: () => this.startBreak() });
-      const made = this.craftDone(true);
-      bubble = { id: ++this.bubbleSeq, text: lines.focusEnd(f.task, f.minutes) + (made ? `\n${made}` : ""), actions, seconds: 120, urgent: true, reminder: false };
+      const made = this.craftEnd();
+      // A chest earned during the session: said here rather than in the middle of your focus.
+      const chest = this.chestNotice && this.state.life.chests > 0 ? chests.chestEarnedText() : null;
+      this.chestNotice = false;
+      const extra = [made, chest].filter(Boolean).join("\n");
+      bubble = { id: ++this.bubbleSeq, text: lines.focusEnd(f.task, f.minutes) + (extra ? `\n${extra}` : ""), actions, seconds: 120, urgent: true, reminder: false };
     }
     this.lastBubbleAt = this.now();
     this.set({ bubble });
@@ -2077,11 +2130,17 @@ export class Brain {
         this.saveLife(false);
         const held = this.state.life.chests;
         this.diary.add("life", L(`Làm việc đủ 30 phút → nhận 1 rương 🎁 (đang giữ ${held})`, `30 minutes of active work → earned a chest 🎁 (${held} held)`));
+        this.chestNotice = true;
       }
     }
     const f = this.state.focus;
     if (f && !f.isBreak && !this.state.life.trip) {
-      this.mutateLife((s) => craft.knit(s, 15, this.state.prefs.focusMinutes), true);
+      this.knitUntil(nowMs);
+      // Finished mid-session: it goes home right away, so no dropped stitch can ever undo it.
+      if (craft.isFinished(this.state.life.craft)) {
+        const made = this.craftDone();
+        if (made && !this.say({ text: made, seconds: 8 })) this.craftLine = [this.craftLine, made].filter(Boolean).join("\n");
+      }
       // 30 s on a distracting app or site drops a few stitches, once per visit.
       const d = this.distractionSince;
       if (d && nowMs - Math.max(d.since, f.start) >= craft.DROP_AFTER_SEC * 1000 && this.stitchesDroppedAt !== d.since) {
@@ -2093,9 +2152,9 @@ export class Brain {
         }
       }
     }
-    // Back at the time on the sign, once you're at the PC to say hello.
+    // Back at the time on the sign, once you're at the PC to say hello (at once if the clock went back before it left).
     const trip = this.state.life.trip;
-    if (trip && nowMs >= trip.back && this.sample.idleSeconds < 300) this.returnFromTrip();
+    if (trip && trips.tripOver(trip, nowMs) && (nowMs < trip.start || this.sample.idleSeconds < 300)) this.returnFromTrip();
   }
 
   /** Opens a held chest for a finished task; returns what was inside for the celebration bubble. */
@@ -2109,20 +2168,50 @@ export class Brain {
     return r;
   }
 
-  /** Finishes the knitted item once it is complete (a completed session tops it up first). Returns its line. */
-  private craftDone(completed: boolean): string | null {
+  /**
+   * Knits the running focus session up to `until` (epoch ms, never past its end), if you're working on it: input in
+   * the last minute and not on a distraction. A gap longer than a minute (the PC slept) counts as a minute at most.
+   */
+  private knitUntil(until: number): void {
+    const f = this.state.focus;
+    const from = this.knitAt;
+    if (!f || f.isBreak || from === null) return;
+    const to = Math.max(from, Math.min(until, f.end));
+    this.knitAt = to;
+    const seconds = Math.min(KNIT_GAP_MAX_SEC, (to - from) / 1000);
+    if (seconds <= 0 || this.state.life.trip) return;
+    if (!craft.isKnitting({ idleSeconds: this.sample.idleSeconds, distracted: this.currentDistraction() !== null })) return;
+    this.mutateLife((s) => craft.knit(s, seconds, f.minutes), true);
+  }
+
+  /** The session ends without an end bubble (its task was finished or deleted): knitting counts up to now. */
+  private dropFocusKnitting(): void {
+    this.knitUntil(this.now());
+    this.knitAt = null;
+    this.craftLine = null;
+  }
+
+  /** The end of a focus session: finishes the item if it's complete; returns the lines for the end bubble. */
+  private craftEnd(): string | null {
+    const parts = [this.craftLine, this.craftDone()].filter(Boolean);
+    this.craftLine = null;
+    return parts.length > 0 ? parts.join("\n") : null;
+  }
+
+  /** Finishes the knitted item once it is complete (only real progress counts: no top-up). Returns its line. */
+  private craftDone(): string | null {
     if (this.state.life.trip) return null;
-    const r = this.mutateLife((s) => {
-      if (completed) craft.topUp(s);
-      return craft.finishCraft(s, this.random());
-    });
+    const day = dayKey(new Date(this.now()));
+    const r = this.mutateLife((s) => craft.finishCraft(s, this.random(), day));
     if (!r) return null;
     this.set({ reveal: { id: ++this.bubbleSeq, at: this.now(), kind: "craft", ...r } });
     this.diary.add(
       "life",
       r.decor
         ? L(`Đan xong: ${craft.decorName(r.decor)} ${craft.decorEmoji(r.decor)}`, `Finished knitting: ${craft.decorName(r.decor)} ${craft.decorEmoji(r.decor)}`)
-        : L(`Đan xong một món (+${r.xp} XP)`, `Finished knitting something (+${r.xp} XP)`),
+        : r.xp > 0
+          ? L(`Đan xong một món (+${r.xp} XP)`, `Finished knitting something (+${r.xp} XP)`)
+          : L("Đan xong một món (hôm nay đủ 90 XP đan len rồi)", "Finished knitting something (today's 90 knitting XP already given)"),
     );
     return craft.craftText(r);
   }
@@ -2131,14 +2220,30 @@ export class Brain {
   private offerTrip(nowMs: number, inWork: boolean): boolean {
     const s = this.state;
     const workEnd = atHour(s.prefs.workEnd, 0, new Date(nowMs)).getTime();
-    const offer = { now: nowMs, workEnd, inWork, completed: s.day.completed.length, target: s.target, left: s.day.today.length, tripDay: s.life.tripDay, away: s.life.trip !== null };
+    const offer = {
+      now: nowMs,
+      workEnd,
+      inWork,
+      completed: s.day.completed.length,
+      target: s.target,
+      left: s.day.today.length,
+      tripDay: s.life.tripDay,
+      declined: s.life.tripDeclined,
+      away: s.life.trip !== null,
+    };
     if (!trips.canOfferTrip(offer) || !this.once(`trip-${this.dayKey}`)) return false;
     this.say(
       {
         text: lines.tripOffer(new Date(trips.backTime(nowMs, workEnd))),
         actions: [
           { title: lines.tripGo(), primary: true, run: () => void this.goOnTrip() },
-          { title: lines.tripStay(), run: () => void this.say({ text: lines.tripStayed(), seconds: 5 }) },
+          {
+            title: lines.tripStay(),
+            run: () => {
+              this.mutateLife((l) => trips.declineTrip(l, this.now()));
+              this.say({ text: lines.tripStayed(), seconds: 5 });
+            },
+          },
         ],
         seconds: 60,
       },
@@ -2180,6 +2285,8 @@ export class Brain {
       this.play("celebrate");
     } else {
       this.diary.add("life", L(`Pet về sớm từ ${place} sau ${r.minutes} phút`, `The pet came back early from ${place} after ${r.minutes} min`));
+      // Too short to count: today's trip can still be offered and taken.
+      this.fired.delete(`trip-${this.dayKey}`);
     }
     this.set({ reveal: { id: ++this.bubbleSeq, at: nowMs, kind: "souvenir", ...r } });
     this.recompute();

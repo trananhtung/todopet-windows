@@ -249,23 +249,31 @@ focus (Focus Friend), reasons to come back on a timer (Finch's adventures, Bongo
 sets, and gentle failure. Rewards stay cosmetic, random rewards have published odds, and nothing is ever sold.
 
 ### 1. Crafting while you focus, and the pet's home
-- During a focus session the pet knits (a yarn ball and needles beside it, an item growing). A completed session
-  finishes one **home decoration**; abandoning it keeps the progress for next time.
+- During a focus session the pet knits (a yarn ball and needles beside it, an item growing), but only while you're
+  actually working on it: not idle (input within a minute) and not on a distracting app or site. A whole session of
+  25 minutes or more of that real focus (at the session's own length) finishes one **home decoration**; a shorter
+  session ("Try 2 minutes") knits its share, and abandoning one keeps the progress for next time. There is no
+  top-up at the end: an item is finished only when its progress really reaches 100%, and the moment it does, even
+  mid-session.
 - Being on a distracting app or site for 30 s during focus **drops a few stitches** (−10% progress, never below 0,
   never loses a finished item).
 - About 12 decorations (rug, plant, lamp, cushion, bookshelf, mug, poster, garland, fish bowl, radio, blanket,
-  lantern), drawn in the house style, given in random order; once all are owned a session gives XP.
+  lantern), drawn in the house style, given in random order; once all are owned a finished item gives +30 XP, at
+  most 90 XP a day.
 - **Home:** a small corner of the taskbar strip shows up to 3 chosen decorations (board → Home; `prefs.showHome`).
 
 ### 2. Expeditions
-- When today's plan is complete the pet offers a trip ("Back at 16:30") with **Go!** / **Stay**. While it is away
-  (2 h, or until work ends) a small sign stands in its place (click to call it back) and non-urgent bubbles pause.
+- When today's plan is complete the pet offers a trip ("Back at 16:30") with **Go!** / **Stay** (Stay holds for the
+  rest of the day, restarts included). While it is away (2 h, or until work ends) a small sign stands in its place
+  (click to call it back) and non-urgent bubbles pause. A call-back in the first 30 minutes brings no souvenir, and
+  the sign says so, but it doesn't use up the day's trip.
 - It returns with a **souvenir** from one of ~16 places (Hội An lantern, Đà Lạt strawberries, Hạ Long pearl, Sa Pa
   postcard, Kyoto fan…) and a postcard entry in the diary. Souvenirs fill a shelf in the wardrobe. One trip a day.
 
 ### 3. Chests, published odds and seasonal sets
 - Every 30 minutes of active work (in work hours, not idle, not distracted) earns a chest, at most 3 a day; finishing
-  a task opens one. The odds are shown in the wardrobe: common 70% (+20 XP or a 🍪), rare 25% (a new accessory),
+  a task opens one. The pet says so once per chest in a small, silent bubble (not counted against the reminders),
+  and the board shows a 🎁 with the number waiting. The odds are shown in the wardrobe: common 70% (+20 XP or a 🍪), rare 25% (a new accessory),
   legendary 5% (a seasonal or golden item). Duplicates turn into XP.
 - The accessory catalog grows from 6 to about 18 in the existing head, neck and face slots (beanie, flower crown,
   party hat, nón lá, Santa hat, witch hat, red Tết scarf, bell collar, bandana, heart glasses, round glasses, star

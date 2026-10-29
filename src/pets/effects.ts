@@ -229,9 +229,9 @@ function actEffects(c: Ctx, e: EffectSpace): string {
       break;
     }
     case "ponder":
-      // Thought dots rising one by one on the side the pet looks at.
+      // Thought dots popping up one by one on the side the pet looks at (all three within the 0.4 s act).
       for (let i = 0; i < 3; i++) {
-        const o = clamp01((t - 0.3 - i * 0.3) / 0.2) * k;
+        const o = clamp01((t - 0.03 - i * 0.05) / 0.05) * k;
         if (o <= 0) continue;
         out += circle(cx + side * (bw * 0.5 + 4 + i * 6), Math.max(e.minY + 4, top + 2 - i * 7), 1.9 + i * 0.7, `fill="${ink}"${op(o)}`);
       }

@@ -150,7 +150,24 @@ describe("click combos", () => {
     const life = new PetLife(rng(8));
     run(life, 0, 1);
     const pokes = clickAt(life, [1, 1.3, 1.6, 2.5, 3.2, 3.6]);
-    expect(pokes).toEqual([false, false, true, true, true, true]);
+    expect(pokes).toEqual([false, true, true, true, true, true]);
+  });
+
+  it("counts a quick double click as one open, not an open and a close", () => {
+    const life = new PetLife(rng(11));
+    run(life, 0, 1);
+    expect(clickAt(life, [1, 1.13])).toEqual([false, true]);
+    // A single click a moment later toggles again, at once.
+    expect(clickAt(life, [3.5])).toEqual([false]);
+    // Bursts of 3 and 6 clicks 130 ms apart: one toggle, then the giggle and the dizzy spell, as before.
+    const three = new PetLife(rng(12));
+    run(three, 0, 1);
+    expect(clickAt(three, [1, 1.13, 1.26])).toEqual([false, true, true]);
+    expect(three.step(base(1.3)).act?.kind).toBe("giggle");
+    const six = new PetLife(rng(13));
+    run(six, 0, 1);
+    expect(clickAt(six, [1, 1.13, 1.26, 1.39, 1.52, 1.65])).toEqual([false, true, true, true, true, true]);
+    expect(started(run(six, 1.65, 6)).map((a) => a.kind)).toEqual(["dizzy", "pout"]);
   });
 
   it("does not react while held or celebrating", () => {
@@ -356,10 +373,14 @@ describe("head tilt", () => {
     expect(far.every((o) => o.out.headTilt === 0)).toBe(true);
   });
 
-  it("ponders for 0.4 s before a celebration", () => {
+  it("ponders for 0.4 s before a celebration, playing the whole act", () => {
+    expect(INTERACT.ponder).toBeCloseTo(0.4);
+    expect(INTERACT.ponder).toBe(ACT_DURATION.ponder);
     const life = new PetLife(rng(24));
     run(life, 0, 1);
     expect(life.celebrate(1)).toBe(INTERACT.ponder);
+    // Still on at the very end: the act runs out on its own ramp, not cut off.
+    expect(life.step(base(1.39, { mood: "celebrating" })).act).toMatchObject({ kind: "ponder" });
     const during = life.step(base(1.2, { mood: "celebrating" }));
     expect(during.act?.kind).toBe("ponder");
     expect(during.pondering).toBe(true);

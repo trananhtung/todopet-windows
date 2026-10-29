@@ -248,14 +248,32 @@ export interface TripOfferInput {
   left: number;
   /** The day of the last trip. */
   tripDay: string;
+  /** The day the offer was turned down ("Stay"). */
+  declined: string;
   away: boolean;
 }
 
-/** Today's plan is done (target reached, nothing left), in work hours, an hour or more before work ends, no trip yet today. */
+/**
+ * Today's plan is done (target reached, nothing left), in work hours, an hour or more before work ends, no trip yet
+ * today and no "Stay" today.
+ */
 export function canOfferTrip(x: TripOfferInput): boolean {
+  const today = dayKey(new Date(x.now));
   return (
-    x.inWork && !x.away && x.target > 0 && x.completed >= x.target && x.left === 0 && x.now <= x.workEnd - OFFER_LEAD_MS && x.tripDay !== dayKey(new Date(x.now))
+    x.inWork &&
+    !x.away &&
+    x.target > 0 &&
+    x.completed >= x.target &&
+    x.left === 0 &&
+    x.now <= x.workEnd - OFFER_LEAD_MS &&
+    x.tripDay !== today &&
+    x.declined !== today
   );
+}
+
+/** "Stay": no more offers today, kept across restarts. */
+export function declineTrip(s: Pick<LifeState, "tripDeclined">, now: number): void {
+  s.tripDeclined = dayKey(new Date(now));
 }
 
 /** When a trip starting `now` ends: 2 hours later, or when work ends (the full 2 hours when work is already over). */
@@ -264,6 +282,9 @@ export function backTime(now: number, workEnd: number): number {
 }
 
 type TripLife = Pick<LifeState, "trip" | "tripDay" | "souvenirs" | "xp" | "week" | "lastWeek" | "weekGreeted">;
+
+/** The trip is over: back at the time on the sign, or the clock went back before it started. */
+export const tripOver = (t: Trip, now: number): boolean => now >= t.back || now < t.start;
 
 /** Sets off somewhere it has no souvenir from yet (`pick` chooses), back in 2 hours or when work ends. */
 export function startTrip(s: TripLife, now: number, workEnd: number, pick: number): Trip {
@@ -287,7 +308,8 @@ export interface TripReturn {
 
 /**
  * Comes home. After 30+ minutes away it brings its place's souvenir (or +20 XP when that one is on the shelf
- * already) and the trip counts for the week; a shorter trip brings nothing. Null when it wasn't away.
+ * already) and the trip counts for the week; a shorter trip brings nothing and doesn't use up today's trip (a stray
+ * click on the sign costs nothing). Null when it wasn't away.
  */
 export function endTrip(s: TripLife, now: number): TripReturn | null {
   const t = s.trip;
@@ -295,7 +317,10 @@ export function endTrip(s: TripLife, now: number): TripReturn | null {
   s.trip = null;
   const away = Math.max(0, Math.min(now, t.back) - t.start);
   const r: TripReturn = { place: t.place, minutes: Math.round(away / MIN), souvenir: null, xp: 0 };
-  if (away < SOUVENIR_AFTER_MS) return r;
+  if (away < SOUVENIR_AFTER_MS) {
+    s.tripDay = "";
+    return r;
+  }
   if (s.souvenirs.includes(t.place)) {
     r.xp = TRIP_XP;
     s.xp += TRIP_XP;
@@ -307,10 +332,16 @@ export function endTrip(s: TripLife, now: number): TripReturn | null {
   return r;
 }
 
-/** A saved trip, or null when it doesn't look like one. */
+/** Saved times outside these (epoch ms, 2020 to 2200) are junk, not trips. */
+const EARLIEST = Date.UTC(2020, 0, 1);
+const LATEST = Date.UTC(2200, 0, 1);
+
+/** A saved trip, or null when it doesn't look like one. A trip never lasts more than 2 hours. */
 export function tripFromJson(x: unknown): Trip | null {
   if (!x || typeof x !== "object") return null;
   const r = x as Record<string, unknown>;
-  const ok = typeof r.start === "number" && typeof r.back === "number" && Number.isFinite(r.start) && Number.isFinite(r.back) && r.back >= r.start && isSouvenirId(r.place);
-  return ok ? { start: r.start as number, back: r.back as number, place: r.place as SouvenirId } : null;
+  const { start, back, place } = r;
+  if (typeof start !== "number" || typeof back !== "number" || !isSouvenirId(place)) return null;
+  if (!(start >= EARLIEST && start <= LATEST) || !(back >= start && back <= LATEST)) return null;
+  return { start, back: Math.min(back, start + TRIP_MS), place };
 }

@@ -134,11 +134,13 @@ describe("acts", () => {
     return [0, 0.06, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 0.99].map((f) => f * d).concat(ACT_KEY_T[kind]);
   };
 
-  it("lists 14 acts with durations, a ~5 s yawn and key moments inside each act", () => {
+  it("lists 14 acts with durations, a ~5 s yawn, a half-beat ponder and key moments inside each act", () => {
     expect(PET_ACTS).toHaveLength(14);
     expect(Object.keys(ACT_DURATION).sort()).toEqual([...PET_ACTS].sort());
+    // The ponder before a celebration is half a beat; the overlay plays all of it.
+    expect(ACT_DURATION.ponder).toBeCloseTo(0.4);
     for (const k of PET_ACTS) {
-      expect(ACT_DURATION[k]).toBeGreaterThan(0.5);
+      expect(ACT_DURATION[k]).toBeGreaterThan(k === "ponder" ? 0.3 : 0.5);
       expect(ACT_KEY_T[k]).toBeGreaterThan(0);
       expect(ACT_KEY_T[k]).toBeLessThan(ACT_DURATION[k]);
     }
@@ -243,8 +245,13 @@ describe("acts", () => {
     expect(frame("trip").tilt).toBeGreaterThan(0.1);
     expect(frame("trip").eyes).toBe("wide");
     expect(frame("trip", 1.2)).toMatchObject({ eyes: "squint", blush: true });
+    expect(frame("ponder")).toMatchObject({ arms: "chin", mouth: "hmm" });
     expect(frame("ponder").faceTilt).toBeGreaterThan(10);
-    expect(frame("ponder", 1.17).lid).toBeGreaterThan(0.9); // the slow blink
+    expect(at("ponder")).not.toBe(at("ponder", ACT_DURATION.ponder - 0.001)); // the thought dots
+    // It eases back to rest by its end instead of being cut mid-pose.
+    const end = frame("ponder", ACT_DURATION.ponder - 0.01);
+    expect(end.faceTilt).toBeLessThan(0.5);
+    expect(end.armK).toBeLessThan(0.05);
   });
 });
 
