@@ -35,6 +35,8 @@ export interface Colors {
   foot: string;
   /** Arms: between top and bottom. */
   arm: string;
+  /** Blush hatch marks: the cheek color, deeper. */
+  blush: string;
 }
 
 export const hex = (s: string): RGB => {
@@ -143,6 +145,8 @@ const C = {
   goldCheek: hex("#FF7F9E"),
 };
 
+const BLUSH_INK = hex("#CC3360");
+
 const saturate = (c: RGB, k: number): RGB => mix(grey(c), c, 1 + k);
 
 /** Mood tints applied on top of a species' own palette. */
@@ -246,5 +250,6 @@ export function toColors(b: Base): Colors {
     cheekA: b.cheekA,
     foot: toHex(mix(b.bottom, b.line, 0.12)),
     arm: toHex(mix(b.top, b.bottom, 0.6)),
+    blush: toHex(mix(b.cheek, BLUSH_INK, 0.55)),
   };
 }

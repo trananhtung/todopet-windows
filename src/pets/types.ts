@@ -24,6 +24,13 @@ export interface PetPose {
   blend: number;
   /** The user is typing or in the zone: keep movements small. */
   calm: boolean;
+  /**
+   * Head tilt in degrees (optional, default 0; clamped to ±20). + tilts toward where the pet faces.
+   * The face turns by most of it and the body leans onto one foot by the rest. The caller eases it in
+   * (10–15° over ~0.5 s) when the cursor rests near the pet, a task arrives, or just before a
+   * celebration. Ignored while held.
+   */
+  headTilt?: number;
 
   // Long-term life state.
   stage: StageIndex;

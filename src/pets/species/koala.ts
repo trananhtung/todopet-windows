@@ -51,7 +51,7 @@ export const koala: SpeciesDef = {
   base: makeBase({ top: "#C9CDD6", bottom: "#959BA9", belly: "#FFFFFF", mark: "#37333D", accent: "#86C29A", inner: "#EBD3DC", line: "#46434F" }),
   w: 84,
   h: 66,
-  face: { eyeY: 0.44, eyeDX: 0.25, eyeScale: 0.92, mouthY: 0.3, mouthW: 0.8, cheekDX: 0.35, cheekDY: 8 },
+  face: { eyeY: 0.49, eyeDX: 0.25, eyeScale: 0.98, mouthY: 0.285, mouthW: 0.8, cheekDX: 0.35, cheekDY: 6.5 },
   feet: { toes: true },
   arms: { scale: 0.95 },
   reach: [21, 21],

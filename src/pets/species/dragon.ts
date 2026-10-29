@@ -25,7 +25,7 @@ export const dragon: SpeciesDef = {
   base: makeBase({ top: "#A0E6C4", bottom: "#3DAD86", belly: "#FFF1C6", mark: "#2C8C6A", accent: "#FFE3A3", inner: "#FFB48A" }),
   w: 80,
   h: 66,
-  face: { eyeY: 0.47, eyeDX: 0.19, mouthY: 0.21 },
+  face: { eyeY: 0.52, eyeDX: 0.19, mouthY: 0.17 },
   feet: { w: 15, h: 8.5 },
   arms: { scale: 0.92 },
   reach: [32, 26],
@@ -83,7 +83,8 @@ export const dragon: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 0.82 },
     bow: { x: c.cx + c.bw * 0.31, y: c.top + 9 },
-    neck: { y: c.by - c.bh * 0.4, w: c.bw, sag: c.bh * 0.14 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.3, arch: c.bh * 0.22 },
   }),
 };

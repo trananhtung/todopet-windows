@@ -23,7 +23,7 @@ export const penguin: SpeciesDef = {
   }),
   w: 70,
   h: 76,
-  face: { eyeY: 0.4, eyeDX: 0.16, eyeScale: 0.95, mouth: "beak", mouthY: 0.14, cheekDX: 0.28, cheekDY: 4.4 },
+  face: { eyeY: 0.45, eyeDX: 0.16, eyeScale: 1.03, mouth: "beak", mouthY: 0.13, cheekDX: 0.28, cheekDY: 5 },
   feet: { color: "accent", w: 16, h: 8, toes: true },
   arms: { style: "flipper", color: "mark" },
   highlight: [-0.2, 0.14, 0.1, 0.06],

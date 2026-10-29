@@ -60,7 +60,7 @@ export const redpanda: SpeciesDef = {
   base: makeBase({ top: "#F79A55", bottom: "#D45A2A", belly: "#FFFBF5", mark: "#76291A", accent: "#2B1B14", inner: "#B4452A" }),
   w: 80,
   h: 66,
-  face: { eyeY: 0.5, eyeDX: 0.19, mouthY: 0.2, cheekDX: 0.33, cheekDY: 7.5 },
+  face: { eyeY: 0.54, eyeDX: 0.19, mouthY: 0.165, cheekDX: 0.32, cheekDY: 6.5 },
   feet: { color: "mark" },
   arms: { color: "mark", scale: 0.95 },
   reach: [40, 10],

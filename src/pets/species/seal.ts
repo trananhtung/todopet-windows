@@ -1,5 +1,5 @@
 // Seal pup: a fluffy white harp-seal teardrop with huge glossy eyes, a puffy whisker muzzle and a fanned tail.
-import { U, moodTable, type SpeciesDef } from "../kit";
+import { moodTable, type SpeciesDef } from "../kit";
 import { makeBase } from "../palette";
 import { blob, nose } from "../shapes";
 import { circle, ell, fs, p, path, r, st } from "../svg";
@@ -33,7 +33,7 @@ export const seal: SpeciesDef = {
   }),
   w: 80,
   h: 68,
-  face: { eyeY: 0.47, eyeDX: 0.205, eyeScale: 1.45, mouthY: 0.22, mouthW: 0.7, cheekDX: 0.36, cheekDY: 7.5 },
+  face: { eyeY: 0.52, eyeDX: 0.205, eyeScale: 1.36, mouthY: 0.2, mouthW: 0.7, cheekDX: 0.36, cheekDY: 8 },
   feet: { w: 13, h: 6.5, dx: 0.22, color: "inner" },
   arms: { style: "flipper", color: "inner", scale: 1.05 },
   highlight: [-0.19, 0.16, 0.11, 0.07],
@@ -79,7 +79,7 @@ export const seal: SpeciesDef = {
     return out;
   },
   front(c) {
-    const { fx, my, mood } = c;
+    const { fx, my } = c;
     const y = my - 4.4;
     const tilt = c.mv(WHISK);
     let w = "";
@@ -89,19 +89,8 @@ export const seal: SpeciesDef = {
         w += `M${p(x0, y + dy)}L${p(x0 + s * len, y + dy + lift + tilt * (len / 10))}`;
       }
     }
-    let out = path(w, `${st(c.pal.line, 1.1)} stroke-opacity="0.5"`) + nose(fx, my - 10, 6.2, 4.3, c.pal.accent, c.pal.accent);
-    // Extra wet shine on the big round eyes.
-    const blink = c.t % 4.3 < 0.13;
-    if (!c.held && !blink && ((mood === "normal" && !c.petted) || mood === "focus")) {
-      const s = U * (c.def.face.eyeScale ?? 1);
-      const h = mood === "focus" ? 8 : 10;
-      for (const side of [-1, 1]) {
-        const ex = fx + side * c.ex + c.lookX * 1.3 * s;
-        const ey = c.ey + c.lookY * 1.5 * s;
-        out += circle(ex + 1.9 * s, ey + (h / 2 - 2.6) * s, 0.95 * s, `fill="#fff" fill-opacity="0.9"`);
-      }
-    }
-    return out;
+    // (The big round eyes get their wet second shine from the shared eyes now.)
+    return path(w, `${st(c.pal.line, 1.1)} stroke-opacity="0.5"`) + nose(fx, my - 10, 6.2, 4.3, c.pal.accent, c.pal.accent);
   },
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 0.88 },

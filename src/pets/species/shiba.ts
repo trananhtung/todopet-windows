@@ -19,7 +19,7 @@ export const shiba: SpeciesDef = {
   base: makeBase({ top: "#F9BE7F", bottom: "#E5883F", belly: "#FFF7EA", mark: "#C9692A", accent: "#2B1B14", inner: "#FFE6CC" }),
   w: 80,
   h: 68,
-  face: { eyeY: 0.47, eyeDX: 0.19, mouthY: 0.22 },
+  face: { eyeY: 0.52, eyeDX: 0.19, mouthY: 0.18 },
   reach: [20, 9],
   headroom: (c) => c.bh * 0.26 * c.mv(EAR) + 3,
   body: (c) => blob(c),
@@ -63,7 +63,8 @@ export const shiba: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 0.95 },
     bow: { x: c.cx + c.bw * 0.29, y: c.top + 7 },
-    neck: { y: c.by - c.bh * 0.4, w: c.bw, sag: c.bh * 0.14 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.28, arch: c.bh * 0.2 },
   }),
 };

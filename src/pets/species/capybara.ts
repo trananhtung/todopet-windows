@@ -17,7 +17,7 @@ export const capybara: SpeciesDef = {
   base: makeBase({ top: "#D2AA80", bottom: "#A47850", belly: "#DCC29F", mark: "#7A5538", accent: "#FFC234", inner: "#8E6646" }),
   w: 92,
   h: 62,
-  face: { eyeY: 0.34, eyeDX: 0.2, eyeScale: 0.85, mouthY: 0.34, mouthW: 0.75, cheekDX: 0.34, cheekDY: 7, relaxed: true },
+  face: { eyeY: 0.39, eyeDX: 0.2, eyeScale: 0.9, mouthY: 0.31, mouthW: 0.75, cheekDX: 0.32, cheekDY: 6, relaxed: true },
   feet: { color: "mark", w: 18, h: 8 },
   arms: { scale: 0.9 },
   highlight: [-0.2, 0.14, 0.12, 0.06],
@@ -43,9 +43,9 @@ export const capybara: SpeciesDef = {
   },
   over(c) {
     const { fx, ey, bw, bh } = c;
-    const sy = ey + bh * 0.24;
+    const sy = ey + bh * 0.22;
     return (
-      ell(fx, sy, bw * 0.23, bh * 0.15, fs(c.pal.inner, c.pal.line, 1.8)) +
+      ell(fx, sy, bw * 0.23, bh * 0.15, fs(c.pal.inner, c.pal.line, 1.6)) +
       ell(fx - bw * 0.07, sy - bh * 0.08, bw * 0.07, bh * 0.03, `fill="#fff" fill-opacity="0.2"`) +
       // Broad dark nose pad with two nostrils.
       ell(fx, sy - bh * 0.055, bw * 0.1, bh * 0.045, `fill="${c.pal.mark}"`) +
@@ -73,7 +73,8 @@ export const capybara: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 1 },
     bow: { x: c.cx + c.bw * 0.27, y: c.top + 5 },
-    neck: { y: c.by - c.bh * 0.34, w: c.bw, sag: c.bh * 0.12 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.2, arch: c.bh * 0.12 },
   }),
 };

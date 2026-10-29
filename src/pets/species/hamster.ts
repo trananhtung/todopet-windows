@@ -16,7 +16,7 @@ export const hamster: SpeciesDef = {
   base: makeBase({ top: "#FFFDF8", bottom: "#F1DEC8", belly: "#FFFFFF", mark: "#F4A05A", accent: "#FF8FA3", inner: "#FFC0CC", line: "#7A4A2A" }),
   w: 86,
   h: 66,
-  face: { eyeY: 0.44, eyeDX: 0.17, eyeScale: 0.9, mouthY: 0.19, mouthW: 0.8, cheekDX: 0.31, cheekDY: 9 },
+  face: { eyeY: 0.5, eyeDX: 0.17, eyeScale: 0.97, mouthY: 0.16, mouthW: 0.8, cheekDX: 0.3, cheekDY: 7 },
   feet: { w: 14, h: 8, color: "inner" },
   arms: { scale: 0.72 },
   reach: [12, 12],
@@ -58,7 +58,8 @@ export const hamster: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 0.95 },
     bow: { x: c.cx + c.bw * 0.33, y: c.top + 9 },
-    neck: { y: c.by - c.bh * 0.36, w: c.bw, sag: c.bh * 0.12 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.28, arch: c.bh * 0.2 },
   }),
 };

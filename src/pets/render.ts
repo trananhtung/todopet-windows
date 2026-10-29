@@ -34,6 +34,8 @@ function palettes(def: SpeciesDef): { moods: Record<Mood, Base>; gold: Base } {
 }
 
 const num = (v: number, fallback: number): number => (Number.isFinite(v) ? v : fallback);
+/** Share of a head tilt done by leaning the whole body; the face turns the rest. */
+const TILT_LEAN = 0.35;
 const PAD = 2;
 
 /** Frame layout shared by the renderer and the bounds test. */
@@ -63,8 +65,10 @@ export function layout(def: SpeciesDef, pose: PetPose, idPrefix: string): Layout
   const dyn = dynamics(safe, def.info.gait, mood);
 
   const thin = pose.hungry && !celebrating ? 0.9 : 1;
-  const bw = def.w * (1 + dyn.squash) * thin;
-  const bh = def.h * (1 - dyn.squash) * (1 + dyn.breathe);
+  // Squash and stretch keep the volume: a landing at 0.82 of the height spreads to 1.22 of the width.
+  const sy = 1 - clamp(dyn.squash, -0.3, 0.3);
+  const bw = (def.w / sy) * thin;
+  const bh = def.h * sy * (1 + dyn.breathe);
   const cx = CENTER_X + dyn.shakeX;
   const by = GROUND - 5.5 - dyn.jump - dyn.hover;
   const top = by - bh;
@@ -74,8 +78,11 @@ export function layout(def: SpeciesDef, pose: PetPose, idPrefix: string): Layout
   const lookY = clamp(num(pose.lookY, 0), -1, 1);
   const fx = cx + look * bw * (f.shift ?? 0.07);
   const ey = top + bh * f.eyeY + lookY * bh * 0.03;
-  const my = ey + bh * (f.mouthY ?? 0.21);
+  const my = ey + bh * (f.mouthY ?? 0.17);
   const prevEff: Mood = held ? "normal" : prev;
+  // + tilts toward where the pet faces (local space is already mirrored, so the face turn needs no sign).
+  const tiltDeg = held ? 0 : clamp(num(pose.headTilt ?? 0, 0), -20, 20);
+  const faceDeg = tiltDeg * (1 - TILT_LEAN);
   const feed = pose.food && pose.foodT >= 0 && pose.foodT < 1.8 ? Math.min(1, pose.foodT / 0.5) * (pose.foodT > 1.4 ? (1.8 - pose.foodT) / 0.4 : 1) : 0;
 
   const ctx: Ctx = {
@@ -105,13 +112,21 @@ export function layout(def: SpeciesDef, pose: PetPose, idPrefix: string): Layout
     feed,
     grad: `url(#${idPrefix}-b)`,
     clip: `url(#${idPrefix}-c)`,
+    faceTurn: faceDeg ? ` transform="rotate(${r(faceDeg)} ${r(fx)} ${r((ey + my) / 2)})"` : "",
     mv: (tb: MoodTable) => tb[prevEff] + (tb[mood] - tb[prevEff]) * (held ? 1 : k),
   };
 
   // Body transform: lean/waddle around the feet, then flip/spin/mirror around the body middle.
   const midY = by - bh / 2;
   const inner = about(mul(rotate(dyn.flip * -facing), scale(facing * (Math.abs(dyn.spin) < 0.12 ? 0.12 * Math.sign(dyn.spin || 1) : dyn.spin), 1)), cx, midY);
-  const body = mul(about(rotate(dyn.tilt * facing), cx, GROUND), inner);
+  let body = mul(about(rotate(dyn.tilt * facing), cx, GROUND), inner);
+  // Head tilt: the head is the body, so the pet leans a little onto one foot (that foot stays planted, the
+  // other lifts) and the face turns the rest of the way on the round body. A full-body lean would push tails
+  // and ears out of the view and make the pet shrink to fit while it tilts.
+  if (tiltDeg !== 0) {
+    const a = ((tiltDeg * TILT_LEAN * Math.PI) / 180) * facing;
+    body = mul(about(rotate(a), cx + Math.sign(a) * bw * (def.feet?.dx ?? 0.236), GROUND), body);
+  }
 
   // Keep everything inside the view: shift down while airborne, else shrink a little around the feet.
   const an = def.anchors(ctx);
@@ -175,11 +190,11 @@ export function renderSpecies(def: SpeciesDef, pose: PetPose, opts: PetRenderOpt
   if (def.markings) g += `<g clip-path="${c.clip}">${def.markings(c)}</g>`;
   const hl = def.highlight === undefined ? ([-0.17, 0.18, 0.13, 0.08] as const) : def.highlight;
   if (hl) g += ell(c.cx + c.bw * hl[0], c.top + c.bh * hl[1], c.bw * hl[2], c.bh * hl[3], `fill="#fff" fill-opacity="0.45"`);
-  g += path(bodyD, `fill="none" stroke="${c.pal.line}" stroke-width="2.6"`);
+  g += path(bodyD, `fill="none" stroke="${c.pal.line}" stroke-width="2.4"`);
   if (def.over) g += def.over(c);
   if (c.mood === "focus" && !c.held) g += headband(c, an.band);
-  g += face(c);
-  if (def.front) g += def.front(c);
+  const faceParts = face(c) + (def.front ? def.front(c) : "");
+  g += c.faceTurn ? `<g${c.faceTurn}>${faceParts}</g>` : faceParts;
   g += arms(c);
   if (def.top) g += def.top(c);
   g += sprouts(c, an);
@@ -208,6 +223,9 @@ export function renderSpecies(def: SpeciesDef, pose: PetPose, opts: PetRenderOpt
     `<radialGradient id="${id}-s"><stop offset="0" stop-color="#3a2a1e" stop-opacity="${shadowA}"/>` +
     `<stop offset="0.65" stop-color="#3a2a1e" stop-opacity="${Math.round(shadowA * 60) / 100}"/><stop offset="1" stop-color="#3a2a1e" stop-opacity="0"/></radialGradient>` +
     `<clipPath id="${id}-c"><path d="${bodyD}"/></clipPath>` +
+    // Soft round blush (spec rule 4): full color in the middle, fading out, no edge.
+    `<radialGradient id="${id}-k"><stop offset="0" stop-color="${c.pal.cheek}"/>` +
+    `<stop offset="0.5" stop-color="${c.pal.cheek}" stop-opacity="0.72"/><stop offset="1" stop-color="${c.pal.cheek}" stop-opacity="0"/></radialGradient>` +
     `</defs>` +
     `<g${matAttr(about(scale(scaleNow, scaleNow), CENTER_X, GROUND))}>${ell(CENTER_X, GROUND, shW / 2, 4.6, `fill="url(#${id}-s)"`)}</g>` +
     `<g${matAttr(outer)} stroke-linecap="round" stroke-linejoin="round">` +

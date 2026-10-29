@@ -11,9 +11,12 @@ function flick(t: number, period: number, offset: number): number {
   return ph < 0.12 ? Math.sin((ph / 0.12) * Math.PI * 2) * 26 : 0;
 }
 
+/** Muzzle center, fraction of the body height (a touch lower than before so the lowered eyes clear it). */
+const MUZZLE_Y = 0.685;
+
 function muzzle(c: Ctx): string {
   const { fx, top, bw, bh } = c;
-  const x = fx, y = top + bh * 0.66;
+  const x = fx, y = top + bh * MUZZLE_Y;
   const w = bw * 0.41, h = bh * 0.23;
   return (
     `M${p(x - w, y)}C${p(x - w, y - h * 0.8)} ${p(x - w * 0.64, y - h * 1.06)} ${p(x - w * 0.3, y - h)}` +
@@ -45,7 +48,7 @@ export const hippo: SpeciesDef = {
   }),
   w: 94,
   h: 68,
-  face: { eyeY: 0.35, eyeDX: 0.19, eyeScale: 0.92, mouth: "wide", mouthY: 0.39, mouthW: 1.25, cheekDX: 0.37, cheekDY: 9.5 },
+  face: { eyeY: 0.38, eyeDX: 0.19, eyeScale: 0.98, mouth: "wide", mouthY: 0.36, mouthW: 1.45, cheekDX: 0.34, cheekDY: 8 },
   feet: { w: 19, h: 8.5, toes: true },
   arms: { scale: 0.9 },
   highlight: [-0.2, 0.13, 0.15, 0.065],
@@ -76,9 +79,9 @@ export const hippo: SpeciesDef = {
   },
   over(c) {
     const { fx, top, bw, bh } = c;
-    const ny = top + bh * 0.66 - bh * 0.23 * 0.62;
-    let out = path(muzzle(c), fs(c.pal.belly, c.pal.line, 2.1));
-    out += ell(fx - bw * 0.2, top + bh * 0.58, bw * 0.06, bh * 0.025, `fill="#fff" fill-opacity="0.5"`);
+    const ny = top + bh * MUZZLE_Y - bh * 0.23 * 0.62;
+    let out = path(muzzle(c), fs(c.pal.belly, c.pal.line, 1.7));
+    out += ell(fx - bw * 0.2, top + bh * (MUZZLE_Y - 0.08), bw * 0.06, bh * 0.025, `fill="#fff" fill-opacity="0.5"`);
     for (const side of [-1, 1]) {
       const x = fx + side * bw * 0.11;
       out += ell(x, ny, 2.3, 1.6, `fill="${c.pal.mark}" transform="rotate(${side * 22} ${r(x)} ${r(ny)})"`);

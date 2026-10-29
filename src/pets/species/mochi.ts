@@ -31,7 +31,7 @@ export const mochi: SpeciesDef = {
   },
   w: 80,
   h: 66,
-  face: { eyeY: 0.48, eyeDX: 0.185 },
+  face: { eyeY: 0.53, eyeDX: 0.185 },
   reach: [9, 9],
   headroom: (c) => c.bh * 0.22 * c.mv(EAR) + 3,
   body: (c) => blob(c),
@@ -55,7 +55,8 @@ export const mochi: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 1 },
     bow: { x: c.cx + c.bw * 0.3, y: c.top + 6 },
-    neck: { y: c.by - c.bh * 0.4, w: c.bw, sag: c.bh * 0.14 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.3, arch: c.bh * 0.22 },
   }),
 };

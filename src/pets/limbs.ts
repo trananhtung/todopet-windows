@@ -2,6 +2,9 @@
 import { U, color, type Ctx } from "./kit";
 import { DEG, ell, fs, p, path, r, st } from "./svg";
 
+/** Inner strokes (limbs, toes) are thinner than the 2.4 px body outline (spec rule 5). */
+const LIMB_LINE = 1.8;
+
 export function feet(c: Ctx): string {
   const spec = c.def.feet ?? {};
   const fill = color(c, spec.color ?? "foot");
@@ -15,9 +18,9 @@ export function feet(c: Ctx): string {
     const swing = c.held ? Math.sin(c.t * 10 + side * 17) * 2.2 : 0;
     const x = c.cx + side * dx + swing;
     const y = c.by + 1.65 - lift + dangle;
-    out += ell(x, y, w / 2, h / 2, fs(fill, line, 2.2));
+    out += ell(x, y, w / 2, h / 2, fs(fill, line, LIMB_LINE));
     if (spec.toes) {
-      out += path(`M${p(x - w * 0.16, y + h * 0.5)}l0 ${r(-h * 0.38)}M${p(x + w * 0.16, y + h * 0.5)}l0 ${r(-h * 0.38)}`, st(line, 1.2));
+      out += path(`M${p(x - w * 0.16, y + h * 0.5)}l0 ${r(-h * 0.38)}M${p(x + w * 0.16, y + h * 0.5)}l0 ${r(-h * 0.38)}`, st(line, 1));
     }
   }
   return out;
@@ -30,7 +33,7 @@ function limb(c: Ctx, x: number, y: number, angle: number, side: number): string
   const sc = (spec.scale ?? 1) * U;
   const fill = color(c, spec.color ?? "arm");
   const tr = `transform="rotate(${r(angle * DEG)} ${r(x)} ${r(y)})"`;
-  const attrs = `${fs(fill, c.pal.line, 2.2)} ${tr}`;
+  const attrs = `${fs(fill, c.pal.line, LIMB_LINE)} ${tr}`;
   if (style === "flipper") {
     const w = 4.6 * sc, h = 13 * sc;
     return path(`M${p(x - w, y - h * 0.55)}Q${p(x, y - h * 0.8)} ${p(x + w, y - h * 0.55)}Q${p(x + w * 0.6, y + h * 0.6)} ${p(x, y + h)}Q${p(x - w * 0.9, y + h * 0.5)} ${p(x - w, y - h * 0.55)}Z`, attrs);
@@ -83,27 +86,20 @@ export function arms(c: Ctx): string {
         arm(cx + bw * 0.52, top + bh * 0.3, -2.3 + Math.sin(t * 8) * 0.45, 1);
       }
       break;
-    case "annoyed":
-      if (!c.pose.walking && style === "nub") {
-        // Crossed arms.
-        const fill = color(c, c.def.arms?.color ?? "arm");
-        const sc = (c.def.arms?.scale ?? 1) * U;
-        for (const side of [-1, 1]) {
-          const d = `M${p(cx + side * bw * 0.38, by - bh * 0.14)}L${p(cx - side * bw * 0.14, by - bh * 0.05)}`;
-          out.push(path(d, st(c.pal.line, 12 * sc)) + path(d, st(fill, 8 * sc)));
-        }
-        break;
-      }
-      arm(cx - bw * 0.5, shoulderY + 2, 0.15, -1);
-      arm(cx + bw * 0.5, shoulderY + 2, -0.15, 1);
+    case "annoyed": {
+      // Worried: arms hang straight down, tucked in a little (never crossed).
+      const sw = c.pose.walking ? Math.sin(c.pose.walkPhase) * 0.25 : 0;
+      arm(cx - bw * 0.48, shoulderY + 3, 0.08 + sw, -1);
+      arm(cx + bw * 0.48, shoulderY + 3, -0.08 + sw, 1);
       break;
+    }
     case "angry":
       for (const side of [-1, 1]) {
         const shake = Math.sin(t * 20 + side) * 2;
         const y = top + bh * 0.52 + shake;
         if (style === "nub") {
           const sc = (c.def.arms?.scale ?? 1) * U;
-          out.push(ell(cx + side * bw * 0.5, y, 6 * sc, 6 * sc, fs(color(c, c.def.arms?.color ?? "arm"), c.pal.line, 2.2)));
+          out.push(ell(cx + side * bw * 0.5, y, 6 * sc, 6 * sc, fs(color(c, c.def.arms?.color ?? "arm"), c.pal.line, LIMB_LINE)));
         } else {
           arm(cx + side * bw * 0.5, y, side * (1.2 + shake * 0.1), side);
         }

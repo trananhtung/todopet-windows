@@ -30,7 +30,7 @@ export const owl: SpeciesDef = {
   }),
   w: 80,
   h: 70,
-  face: { eyeY: 0.44, eyeDX: 0.2, eyeScale: 1.24, mouth: "beak", mouthY: 0.13, mouthW: 0.9, cheekDX: 0.36, cheekDY: 8.5 },
+  face: { eyeY: 0.48, eyeDX: 0.2, eyeScale: 1.16, mouth: "beak", mouthY: 0.12, mouthW: 0.9, cheekDX: 0.35, cheekDY: 7.5 },
   feet: { color: "accent", w: 13, h: 7.5, dx: 0.2, toes: true },
   arms: { style: "wing", color: "arm" },
   highlight: [-0.24, 0.12, 0.09, 0.05],
@@ -78,14 +78,14 @@ export const owl: SpeciesDef = {
     let out = "";
     for (const side of [-1, 1]) {
       const x = cx + side * bw * 0.45, y = by - bh * 0.36;
-      out += ell(x, y, 6.6, 13, `${fs(c.pal.arm, c.pal.line, 2.2)} transform="rotate(${side * -12} ${r(x)} ${r(y)})"`);
+      out += ell(x, y, 6.6, 13, `${fs(c.pal.arm, c.pal.line, 1.8)} transform="rotate(${side * -12} ${r(x)} ${r(y)})"`);
     }
     return out;
   },
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3.5, s: 0.84 },
     bow: { x: c.cx + c.bw * 0.27, y: c.top + 9, rot: 20 },
-    neck: { y: c.by - c.bh * 0.34, w: c.bw, sag: c.bh * 0.1 },
+    neck: { y: c.my + 3, w: c.bw, sag: c.bh * 0.22 },
     band: { y: c.top + c.bh * 0.2, arch: c.bh * 0.12 },
     glasses: 1.15,
   }),

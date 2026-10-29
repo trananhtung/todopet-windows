@@ -30,7 +30,7 @@ function shell(c: Ctx): string {
 
 /** A little paw (same size and style as the shared nub arms). */
 const paw = (c: Ctx, x: number, y: number, deg: number): string =>
-  ell(x, y, 5, 6.4, `${fs(c.pal.arm, c.pal.line, 2.2)} transform="rotate(${r(deg)} ${r(x)} ${r(y)})"`);
+  ell(x, y, 5, 6.4, `${fs(c.pal.arm, c.pal.line, 1.8)} transform="rotate(${r(deg)} ${r(x)} ${r(y)})"`);
 
 export const otter: SpeciesDef = {
   info: {
@@ -43,7 +43,7 @@ export const otter: SpeciesDef = {
   base: makeBase({ top: "#B4835F", bottom: "#7C5036", belly: "#F6EBDC", mark: "#3B2820", accent: "#FF9DB6", inner: "#E0607F" }),
   w: 82,
   h: 70,
-  face: { eyeY: 0.4, eyeDX: 0.2, eyeScale: 0.92, mouthY: 0.18, mouthW: 0.85, cheekDX: 0.33, cheekDY: 6.5 },
+  face: { eyeY: 0.46, eyeDX: 0.2, eyeScale: 1, mouthY: 0.16, mouthW: 0.85, cheekDX: 0.32, cheekDY: 6 },
   feet: { w: 15, h: 8, toes: true },
   // The paws are drawn with the shell (see `last`), so the shared arms are hidden.
   arms: { scale: 0 },
@@ -130,7 +130,8 @@ export const otter: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 0.95 },
     bow: { x: c.cx + c.bw * 0.3, y: c.top + 7 },
-    neck: { y: c.by - c.bh * 0.34, w: c.bw, sag: c.bh * 0.1 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.24, arch: c.bh * 0.18 },
   }),
 };

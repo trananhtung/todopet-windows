@@ -21,7 +21,7 @@ export const axolotl: SpeciesDef = {
   base: makeBase({ top: "#FFD6E5", bottom: "#F59BC1", belly: "#FFEAF2", mark: "#E8679D", accent: "#C93A75", inner: "#FFC7DD" }),
   w: 84,
   h: 60,
-  face: { eyeY: 0.46, eyeDX: 0.27, eyeScale: 0.85, mouth: "wide", mouthW: 1.25, mouthY: 0.18, cheekDX: 0.34 },
+  face: { eyeY: 0.51, eyeDX: 0.27, eyeScale: 0.9, mouth: "wide", mouthW: 1.45, mouthY: 0.15, cheekDX: 0.36 },
   feet: { w: 11, h: 7, dx: 0.2 },
   arms: { scale: 0.7 },
   reach: [22, 14],
@@ -64,7 +64,8 @@ export const axolotl: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 1 },
     bow: { x: c.cx + c.bw * 0.27, y: c.top + 6 },
-    neck: { y: c.by - c.bh * 0.38, w: c.bw, sag: c.bh * 0.12 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.3, arch: c.bh * 0.2 },
   }),
 };

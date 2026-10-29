@@ -20,7 +20,7 @@ export const fox: SpeciesDef = {
   base: makeBase({ top: "#FFAE6A", bottom: "#EE7536", belly: "#FFF8EF", mark: "#5B3022", accent: "#2B1B14", inner: "#FFE2CC" }),
   w: 76,
   h: 64,
-  face: { eyeY: 0.5, eyeDX: 0.19, mouthY: 0.2 },
+  face: { eyeY: 0.54, eyeDX: 0.19, mouthY: 0.165 },
   feet: { color: "mark" },
   arms: { scale: 0.95 },
   reach: [33, 12],
@@ -80,7 +80,8 @@ export const fox: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 0.92 },
     bow: { x: c.cx + c.bw * 0.27, y: c.top + 8 },
-    neck: { y: c.by - c.bh * 0.38, w: c.bw, sag: c.bh * 0.14 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.3, arch: c.bh * 0.22 },
   }),
 };

@@ -73,7 +73,7 @@ function scarf(c: Ctx, an: Anchors): string {
 
 function sunglasses(c: Ctx, an: Anchors): string {
   const g = U * (an.glasses ?? 1);
-  const w = 14 * g, h = 9 * g;
+  const w = 14 * g, h = 10 * g; // tall enough to cover the (bigger) eyes
   let out = "";
   for (const side of [-1, 1]) {
     const x = c.fx + side * c.ex;
@@ -101,7 +101,9 @@ export function accessories(c: Ctx, an: Anchors): string {
   if (wearing.length === 0) return "";
   let out = "";
   if (wearing.includes("scarf")) out += scarf(c, an);
-  if (wearing.includes("sunglasses") && c.mood !== "sleeping" && !c.held) out += sunglasses(c, an);
+  if (wearing.includes("sunglasses") && c.mood !== "sleeping" && !c.held) {
+    out += c.faceTurn ? `<g${c.faceTurn}>${sunglasses(c, an)}</g>` : sunglasses(c, an);
+  }
   if (wearing.includes("bow")) out += place(an.bow.x, an.bow.y, U * (an.bow.s ?? 1), an.bow.rot ?? 0, BOW);
   for (const a of ["gradcap", "tophat", "crown"] as const) {
     if (!wearing.includes(a)) continue;

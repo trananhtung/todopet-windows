@@ -16,7 +16,7 @@ const CARD = Math.min(400, Math.max(64, Number(params.get("size")) || 128));
 const MOOD_LABEL: Record<string, string> = {
   happy: "Happy",
   normal: "Chill",
-  annoyed: "Annoyed",
+  annoyed: "Worried",
   angry: "Grumpy",
   sleeping: "Sleeping",
   focus: "Focus",
@@ -50,7 +50,9 @@ function shotsFor(): { title: string; note?: string; shots: Shot[] }[] {
         { label: "Look up-right", pose: { lookX: 1, lookY: -1 } },
         { label: "Facing left", pose: { facing: -1, walking: true, walkPhase: 1 } },
         { label: "Calm, walking", pose: { calm: true, walking: true, walkPhase: 1.2 } },
-        { label: "Blend annoyed→happy", pose: { prevMood: "annoyed", mood: "happy", blend: 0.5 } },
+        { label: "Blend worried→happy", pose: { prevMood: "annoyed", mood: "happy", blend: 0.5 } },
+        { label: "Head tilt 12°", pose: { headTilt: 12 } },
+        { label: "Head tilt −12°, petted", pose: { headTilt: -12, hovered: true } },
       ],
     },
     { title: "Growth", shots: STAGES.map((s, i) => ({ label: s, pose: { stage: i as PetPose["stage"] } })) },
@@ -94,15 +96,19 @@ function shotsFor(): { title: string; note?: string; shots: Shot[] }[] {
   ];
 }
 
-/** `?matrix=moods|life|wear|party` shows every species against one set of poses (for side-by-side review). */
+/** `?matrix=moods|life|wear|tilt|party` shows every species against one set of poses (for side-by-side review). */
 const MATRICES: Record<string, Shot[]> = {
   idle: [
     { label: "Chill", pose: {} },
     { label: "Happy", pose: { mood: "happy" } },
-    { label: "Annoyed", pose: { mood: "annoyed" } },
+    { label: "Worried", pose: { mood: "annoyed" } },
     { label: "Sleeping", pose: { mood: "sleeping" } },
   ],
-  moods: [...MOODS.map((m) => ({ label: MOOD_LABEL[m], pose: { mood: m } })), { label: "Held", pose: { held: true } }],
+  moods: [
+    // Celebrating mid-jump (at t = 1.3 it would be landing, squashed; see the party matrix for that).
+    ...MOODS.map((m) => ({ label: MOOD_LABEL[m], pose: m === "celebrating" ? { mood: m, t: CELEBRATION_T.jump } : { mood: m } })),
+    { label: "Held", pose: { held: true } },
+  ],
   life: [
     { label: "Baby", pose: { stage: 0 } },
     { label: "Kid", pose: { stage: 1 } },
@@ -116,9 +122,18 @@ const MATRICES: Record<string, Shot[]> = {
     ...ACCESSORIES.map((a) => ({ label: a, pose: { wearing: [a] } })),
     { label: "combo", pose: { wearing: ["scarf", "sunglasses", "tophat"] } },
   ],
+  tilt: [
+    { label: "Upright", pose: {} },
+    { label: "Tilt 12°", pose: { headTilt: 12 } },
+    { label: "Tilt −12°, petted", pose: { headTilt: -12, hovered: true } },
+    { label: "Tilt 15°, facing left", pose: { headTilt: 15, facing: -1 } },
+    { label: "Tilt 10°, worried", pose: { headTilt: 10, mood: "annoyed" } },
+  ],
   party: [
     ...CELEBRATIONS.map((k) => ({ label: k, pose: { mood: "celebrating" as const, celebration: k, t: CELEBRATION_T[k] } })),
     { label: "golden", pose: { mood: "celebrating", golden: true, t: 1.136 } },
+    // 50 ms after touchdown: squashed to ~0.82 of the height and ~1.22 of the width (volume kept).
+    { label: "landing", pose: { mood: "celebrating", celebration: "jump", t: 0.391 } },
     { label: "treat", pose: { mood: "celebrating", celebration: "dance", food: "🍙", foodT: 0.6 } },
   ],
 };

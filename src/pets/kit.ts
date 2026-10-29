@@ -33,12 +33,12 @@ export interface FaceSpec {
   /** Half the distance between the eyes, as a fraction of the body width. */
   eyeDX: number;
   eyeScale?: number;
-  /** Mouth line below the eyes, as a fraction of the body height (default 0.21). */
+  /** Mouth line below the eyes, as a fraction of the body height (default 0.17). */
   mouthY?: number;
   mouth?: MouthKind;
   /** Horizontal mouth/beak scale (default 1). */
   mouthW?: number;
-  /** Cheek blush distance from the face center (fraction of body width, default 0.31) and offset below the eyes (px). */
+  /** Cheek blush distance from the face center (fraction of body width, default 0.3) and offset below the eyes (px, default 6). */
   cheekDX?: number;
   cheekDY?: number;
   /** A light ring behind eye strokes, for eyes drawn on dark patches (panda). */
@@ -49,6 +49,8 @@ export interface FaceSpec {
   teeth?: boolean;
   /** Chill eyes: half-closed lids in the normal mood (capybara). */
   relaxed?: boolean;
+  /** How far the worried brows rise above the eyes (default 1; less when the eyes sit on bumps, frog). */
+  browLift?: number;
 }
 
 export interface FeetSpec {
@@ -119,6 +121,8 @@ export interface Ctx {
   grad: string;
   /** `url(#…)` of the body clip path. */
   clip: string;
+  /** ` transform="rotate(…)"` turning the face for a head tilt (eyes, mouth, nose, glasses), or "". */
+  faceTurn: string;
   /** Blends a per-mood value with the same easing as the colors. */
   mv(table: MoodTable): number;
 }
@@ -148,7 +152,7 @@ export interface SpeciesDef {
   markings?(c: Ctx): string;
   /** Over the body outline, under the face: snouts, cheek pouches, eye bumps. */
   over?(c: Ctx): string;
-  /** Over the face: noses, whiskers, fangs. */
+  /** Over the face: noses, whiskers, fangs (turns with the face on a head tilt). */
   front?(c: Ctx): string;
   /** After arms: front ears, manes, gills. */
   top?(c: Ctx): string;

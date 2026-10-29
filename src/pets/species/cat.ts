@@ -20,7 +20,7 @@ export const cat: SpeciesDef = {
   base: makeBase({ top: "#F4F5F9", bottom: "#AEB7C8", mark: "#76819A", belly: "#FFFFFF", accent: "#FF9FB2", inner: "#FFB8C6" }),
   w: 78,
   h: 68,
-  face: { eyeY: 0.5, eyeDX: 0.19, mouthY: 0.2 },
+  face: { eyeY: 0.54, eyeDX: 0.19, mouthY: 0.165 },
   reach: [28, 9],
   headroom: (c) => c.bh * 0.3 * c.mv(EAR) + 3,
   body: (c) => blob(c, { tw: 0.38 }),
@@ -81,7 +81,8 @@ export const cat: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 0.95 },
     bow: { x: c.cx + c.bw * 0.27, y: c.top + 7 },
-    neck: { y: c.by - c.bh * 0.4, w: c.bw, sag: c.bh * 0.14 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.3, arch: c.bh * 0.22 },
   }),
 };

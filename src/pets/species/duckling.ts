@@ -21,7 +21,7 @@ export const duckling: SpeciesDef = {
   base: makeBase({ top: "#FFF3AA", bottom: "#FFCD3C", belly: "#FFF9DC", mark: "#F2B320", accent: "#FF9E2C", inner: "#FF7A1A" }),
   w: 72,
   h: 64,
-  face: { eyeY: 0.42, eyeDX: 0.19, mouth: "bill", mouthY: 0.17, mouthW: 0.95, cheekDX: 0.33, cheekDY: 4.4 },
+  face: { eyeY: 0.47, eyeDX: 0.19, mouth: "bill", mouthY: 0.15, mouthW: 0.95, cheekDX: 0.32, cheekDY: 5.5 },
   feet: { color: "accent", w: 17, h: 8, toes: true },
   arms: { style: "wing" },
   reach: [10, 10],

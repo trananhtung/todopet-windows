@@ -17,7 +17,7 @@ export const frog: SpeciesDef = {
   base: makeBase({ top: "#AEE282", bottom: "#5FAF48", belly: "#F4F7CF", mark: "#3F8A33", accent: "#FF7A8A", inner: "#FFFFFF" }),
   w: 90,
   h: 56,
-  face: { eyeY: -0.02, eyeDX: 0.25, eyeScale: 1.1, mouth: "wide", mouthW: 1.75, mouthY: 0.52, cheekDX: 0.34, cheekDY: 24 },
+  face: { eyeY: -0.02, eyeDX: 0.25, eyeScale: 1.1, mouth: "wide", mouthW: 2, mouthY: 0.47, cheekDX: 0.34, cheekDY: 21.5, browLift: 0.45 },
   feet: { w: 21, h: 9, dx: 0.3, toes: true },
   arms: { scale: 0.9 },
   highlight: [-0.2, 0.3, 0.1, 0.07],

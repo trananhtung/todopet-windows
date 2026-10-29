@@ -37,7 +37,7 @@ export const bunny: SpeciesDef = {
   base: makeBase({ top: "#FFFFFF", bottom: "#E5D6D2", belly: "#FFFFFF", mark: "#D8C5C0", accent: "#FF9FB2", inner: "#FF8FA3", line: "#6B4E48" }),
   w: 74,
   h: 64,
-  face: { eyeY: 0.5, eyeDX: 0.2, mouthY: 0.2, teeth: true },
+  face: { eyeY: 0.54, eyeDX: 0.2, mouthY: 0.165, teeth: true },
   feet: { w: 21, h: 9, dx: 0.24 },
   reach: [20, 20],
   headroom(c) {
@@ -77,7 +77,8 @@ export const bunny: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3.5, s: 0.8 },
     bow: { x: c.cx + c.bw * 0.25, y: c.top + 6, rot: 18 },
-    neck: { y: c.by - c.bh * 0.4, w: c.bw, sag: c.bh * 0.14 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.3, arch: c.bh * 0.22 },
   }),
 };

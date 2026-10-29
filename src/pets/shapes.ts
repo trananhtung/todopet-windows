@@ -33,6 +33,18 @@ export function tube(d: string, width: number, fill: string, line: string, extra
   return path(d, st(line, width + 4.4)) + path(d, `${st(fill, width)}${extra}`);
 }
 
+type Pt = readonly [number, number];
+
+/** A triangle whose tip is rounded off over `d` px along each edge (no needle-sharp points, spec rule 6). */
+function softTri(b1: Pt, tip: Pt, b2: Pt, d: number): string {
+  const cut = (q: Pt): string => {
+    const dx = q[0] - tip[0], dy = q[1] - tip[1];
+    const k = Math.min(d, Math.hypot(dx, dy) * 0.3) / (Math.hypot(dx, dy) || 1);
+    return p(tip[0] + dx * k, tip[1] + dy * k);
+  };
+  return `M${p(b1[0], b1[1])}L${cut(b1)}Q${p(tip[0], tip[1])} ${cut(b2)}L${p(b2[0], b2[1])}Z`;
+}
+
 /** Triangle ear with a rounded tip, plus an inner triangle pulled toward its center. */
 export function triEar(
   c: Ctx,
@@ -44,10 +56,10 @@ export function triEar(
   innerScale = 0.5,
 ): string {
   const ccx = (b1[0] + b2[0] + tip[0]) / 3, ccy = (b1[1] + b2[1] + tip[1]) / 3;
-  const inw = (q: readonly [number, number]): string => p(ccx + (q[0] - ccx) * innerScale, ccy + (q[1] - ccy) * innerScale + 2.2);
+  const inw = (q: readonly [number, number]): [number, number] => [ccx + (q[0] - ccx) * innerScale, ccy + (q[1] - ccy) * innerScale + 2.2];
   return (
-    path(`M${p(b1[0], b1[1])}L${p(tip[0], tip[1])}L${p(b2[0], b2[1])}Z`, fs(fill, c.pal.line, 2.4)) +
-    path(`M${inw(b1)}L${inw(tip)}L${inw(b2)}Z`, `fill="${innerFill}"`)
+    path(softTri(b1, tip, b2, 5), fs(fill, c.pal.line, 2.4)) +
+    path(softTri(inw(b1), inw(tip), inw(b2), 2.6), `fill="${innerFill}"`)
   );
 }
 

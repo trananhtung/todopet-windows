@@ -51,7 +51,7 @@ export const piglet: SpeciesDef = {
   }),
   w: 84,
   h: 66,
-  face: { eyeY: 0.4, eyeDX: 0.22, mouthY: 0.3, mouthW: 0.62, cheekDX: 0.34, cheekDY: 8 },
+  face: { eyeY: 0.46, eyeDX: 0.22, mouthY: 0.285, mouthW: 0.62, cheekDX: 0.34, cheekDY: 6.5 },
   feet: { w: 14, h: 8.5, dx: 0.23, color: "mark" },
   arms: { scale: 0.85 },
   highlight: [-0.2, 0.15, 0.11, 0.06],
@@ -96,11 +96,11 @@ export const piglet: SpeciesDef = {
   over(c) {
     // The snout: a big deeper-pink oval with two nostrils (they flare when grumpy).
     const { fx, ey, bw, bh } = c;
-    const y = ey + bh * 0.165, rx = bw * 0.165, ry = bh * 0.12;
+    const y = ey + bh * 0.15, rx = bw * 0.165, ry = bh * 0.12;
     const flare = c.mood === "angry" ? 1 + Math.abs(Math.sin(c.t * 7)) * 0.35 : 1;
     const nos = `fill="${c.pal.line}" fill-opacity="0.75"`;
     return (
-      ell(fx, y, rx, ry, fs(c.pal.accent, c.pal.line, 2)) +
+      ell(fx, y, rx, ry, fs(c.pal.accent, c.pal.line, 1.7)) +
       ell(fx - rx * 0.3, y - ry * 0.5, rx * 0.36, ry * 0.2, `fill="#fff" fill-opacity="0.35"`) +
       ell(fx - rx * 0.36, y + 0.6, 1.7 * flare, 2.7 * flare, nos) +
       ell(fx + rx * 0.36, y + 0.6, 1.7 * flare, 2.7 * flare, nos)

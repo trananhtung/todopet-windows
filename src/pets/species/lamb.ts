@@ -58,7 +58,7 @@ export const lamb: SpeciesDef = {
   }),
   w: 86,
   h: 68,
-  face: { eyeY: 0.48, eyeDX: 0.165, eyeScale: 0.95, mouthY: 0.2, mouthW: 0.75, cheekDX: 0.25, cheekDY: 6.5 },
+  face: { eyeY: 0.53, eyeDX: 0.165, eyeScale: 1, mouthY: 0.165, mouthW: 0.75, cheekDX: 0.26, cheekDY: 6 },
   feet: { w: 14, h: 8.5, dx: 0.22, color: "mark" },
   arms: { scale: 0.82 },
   highlight: [-0.2, 0.16, 0.1, 0.06],
@@ -87,7 +87,7 @@ export const lamb: SpeciesDef = {
         ell(12, 0.4, 7.4, 3, `fill="${c.pal.inner}"`) +
         `</g>`;
     }
-    out += ell(x, y, rx, ry, fs(c.pal.belly, c.pal.line, 2));
+    out += ell(x, y, rx, ry, fs(c.pal.belly, c.pal.line, 1.7));
     // Forehead curls, overlapping the top of the face.
     const ty = y - ry + 1.5;
     const wool = fs(c.grad, c.pal.line, 1.9);

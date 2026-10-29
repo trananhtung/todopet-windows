@@ -25,7 +25,7 @@ export const panda: SpeciesDef = {
   }),
   w: 84,
   h: 68,
-  face: { eyeY: 0.49, eyeDX: 0.2, eyeScale: 0.95, mouthY: 0.22, eyeHalo: "#FFFFFF" },
+  face: { eyeY: 0.53, eyeDX: 0.2, eyeScale: 1, mouthY: 0.18, eyeHalo: "#FFFFFF" },
   feet: { color: "mark" },
   arms: { color: "mark" },
   reach: [9, 9],
@@ -55,7 +55,8 @@ export const panda: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 0.95 },
     bow: { x: c.cx + c.bw * 0.22, y: c.top + 5 },
-    neck: { y: c.by - c.bh * 0.4, w: c.bw, sag: c.bh * 0.14 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.28, arch: c.bh * 0.2 },
   }),
 };

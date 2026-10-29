@@ -20,7 +20,7 @@ export const unicorn: SpeciesDef = {
   base: makeBase({ top: "#FFFFFF", bottom: "#EFE0FA", belly: "#FFFFFF", mark: "#C3ABEE", accent: "#FFD36B", inner: "#FFB6D1", line: "#5B4677" }),
   w: 76,
   h: 68,
-  face: { eyeY: 0.5, eyeDX: 0.19, mouthY: 0.2 },
+  face: { eyeY: 0.54, eyeDX: 0.19, mouthY: 0.165 },
   feet: { color: "mark" },
   reach: [24, 10],
   headroom: () => 26,
@@ -69,7 +69,8 @@ export const unicorn: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx - c.bw * 0.16, y: c.top + 5, s: 0.82, rot: -14 },
     bow: { x: c.cx - c.bw * 0.3, y: c.top + 9, rot: -20 },
-    neck: { y: c.by - c.bh * 0.4, w: c.bw, sag: c.bh * 0.14 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.3, arch: c.bh * 0.22 },
   }),
 };

@@ -61,7 +61,7 @@ export const hedgehog: SpeciesDef = {
   base: makeBase({ top: "#FCEBD6", bottom: "#EDCBA4", belly: "#FFF8EE", mark: "#8E5C3B", accent: "#3A2820", inner: "#FFB0BF", line: "#5A3A26" }),
   w: 80,
   h: 64,
-  face: { eyeY: 0.52, eyeDX: 0.19, eyeScale: 0.92, mouthY: 0.2, mouthW: 0.8, cheekDX: 0.3, cheekDY: 7 },
+  face: { eyeY: 0.55, eyeDX: 0.19, eyeScale: 0.98, mouthY: 0.17, mouthW: 0.8, cheekDX: 0.3, cheekDY: 6 },
   feet: { color: "inner", w: 13, h: 7.5 },
   arms: { color: "inner", scale: 0.74 },
   highlight: null,

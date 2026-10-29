@@ -36,10 +36,11 @@ export function LivePreview({ species, onSpecies, frozen }: Props) {
   const [celebration, setCelebration] = useState<CelebrationKind>("jump");
   const [wearing, setWearing] = useState<Accessory[]>([]);
   const [lang, setLang] = useState<"en" | "vi">("en");
+  const [headTilt, setHeadTilt] = useState(0);
 
   // Values the animation loop reads without restarting.
   const live = useRef({ mood, prevMood: mood as Mood, moodAt: -10, foodAt: -10, food: null as string | null });
-  const state = { species, walking, calm, held, hovered, facing, stage, dirt, hungry, golden, celebration, wearing, lang };
+  const state = { species, walking, calm, held, hovered, facing, stage, dirt, hungry, golden, celebration, wearing, lang, headTilt };
   const latest = useRef(state);
   latest.current = state;
   // When time is frozen there is no animation loop, so redraw whenever a knob changes.
@@ -90,6 +91,7 @@ export function LivePreview({ species, onSpecies, frozen }: Props) {
             golden: s.golden,
             celebration: s.celebration,
             wearing: s.wearing,
+            headTilt: s.headTilt,
             food: sec - L.foodAt < 2 ? L.food : null,
             foodT: sec - L.foodAt,
             lookX: s.walking ? 0 : Math.sin(t * 0.7) * 0.8,
@@ -127,7 +129,7 @@ export function LivePreview({ species, onSpecies, frozen }: Props) {
         <div className="g-chips" role="group" aria-label="Mood">
           {MOODS.map((m) => (
             <button key={m} type="button" className={m === mood ? "is-on" : ""} onClick={() => changeMood(m)}>
-              {m}
+              {m === "annoyed" ? "worried" : m}
             </button>
           ))}
         </div>
@@ -166,6 +168,10 @@ export function LivePreview({ species, onSpecies, frozen }: Props) {
         <label className="g-range">
           Stage <input type="range" min={0} max={4} value={stage} onChange={(e) => setStage(Number(e.target.value) as StageIndex)} />
           <output>{["Baby", "Kid", "Teen", "Grown-up", "Master"][stage]}</output>
+        </label>
+        <label className="g-range">
+          Head tilt <input type="range" min={-20} max={20} value={headTilt} onChange={(e) => setHeadTilt(Number(e.target.value))} />
+          <output>{headTilt}°</output>
         </label>
         <label className="g-range">
           Dirt <input type="range" min={0} max={3} value={dirt} onChange={(e) => setDirt(Number(e.target.value))} />

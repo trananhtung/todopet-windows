@@ -49,7 +49,7 @@ export const bee: SpeciesDef = {
   }),
   w: 78,
   h: 70,
-  face: { eyeY: 0.39, eyeDX: 0.2, mouthY: 0.17, mouthW: 0.75, cheekDX: 0.33, cheekDY: 6 },
+  face: { eyeY: 0.45, eyeDX: 0.2, mouthY: 0.15, mouthW: 0.75, cheekDX: 0.32, cheekDY: 6 },
   feet: { w: 11, h: 7, dx: 0.2, color: "mark" },
   arms: { scale: 0.72 },
   reach: [11, 9],
@@ -97,7 +97,8 @@ export const bee: SpeciesDef = {
   anchors: (c) => ({
     head: { x: c.cx, y: c.top + 3, s: 0.88 },
     bow: { x: c.cx + c.bw * 0.27, y: c.top + 8, rot: 16 },
-    neck: { y: c.by - c.bh * 0.4, w: c.bw, sag: c.bh * 0.1 },
+    // Under the mouth, curving up toward the cheeks so it never covers the face.
+    neck: { y: c.my + 1, w: c.bw, sag: c.bh * 0.28 },
     band: { y: c.top + c.bh * 0.26, arch: c.bh * 0.16 },
   }),
 };
