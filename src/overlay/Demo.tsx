@@ -44,6 +44,9 @@ const isDemoBackend = (b: Backend): b is DemoBackend => "demo" in b;
 /** Demo controls: fake what Windows would report and trigger the pet's stunts right away. */
 const YOUTUBE = { name: "Google Chrome", exe: "chrome.exe", title: "Funny cats - YouTube - Google Chrome" };
 const YOUTUBE_URL = "https://www.youtube.com/watch?v=cats";
+const FIGMA = { name: "Figma", exe: "figma.exe", title: "Landing page - Figma" };
+const DOCS = { name: "Google Chrome", exe: "chrome.exe", title: "Q4 plan - Google Docs - Google Chrome" };
+const DOCS_URL = "https://docs.google.com/document/d/q4-plan/edit#heading=h.1";
 
 export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }) {
   const s = useSyncExternalStore(brain.subscribe, brain.getSnapshot);
@@ -82,6 +85,25 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
                 </button>
               </>
             )}
+            {fake && (
+              <button className="btn" title={L("Giả vờ mở Figma (để thử “Bắt đầu khi mở…”)", "Pretend Figma comes to the front (to try “Start when I open…”)")} onClick={() => fake.setForeground(FIGMA)}>
+                🎨 Figma
+              </button>
+            )}
+            {fake && (
+              <button className="btn" title={L("Giả vờ đang mở một trang Google Docs (để thấy nút Mở lại)", "Pretend a Google Docs page is in front (to see Reopen)")} onClick={() => fake.setForeground(DOCS, DOCS_URL)}>
+                🌐 Docs
+              </button>
+            )}
+            <button className="btn" title={L("Giả vờ bạn vừa rời máy 8 phút và quay lại: thẻ “bạn đang làm gì”", "Pretend you were away for 8 minutes and are back: the resume card")} onClick={() => brain.demoComeBack()}>
+              ↩ {L("Quay lại", "Come back")}
+            </button>
+            <button className="btn" title={L("Cuộc họp sắp bắt đầu, kèm việc liên quan", "A meeting starting soon, with its related tasks")} onClick={() => brain.demoMeetingSoon()}>
+              📅 {L("Sắp họp", "Meeting soon")}
+            </button>
+            <button className="btn" title={L("Cuộc họp vừa kết thúc, họp tiếp sau 12 phút", "A meeting just ended; the next one is in 12 minutes")} onClick={() => brain.demoMeetingEnds()}>
+              📅 {L("Họp xong", "Meeting ends")}
+            </button>
             <button className="btn" onClick={() => brain.demoAntic("parade")}>
               📢 {L("Diễu hành", "Parade")}
             </button>

@@ -977,6 +977,18 @@ body.overlay {
   gap: 5px;
   color: var(--ink-2);
 }
+.sec-head .btn.pin {
+  gap: 5px;
+  color: var(--ink-2);
+}
+.sec-head .btn.pin.compact {
+  padding: 0 7px;
+}
+.sec-head .btn.pin[data-pinned="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
 .sec-head .day-off[aria-pressed="true"] {
   background: var(--good-soft);
   border-color: var(--good);
@@ -1121,6 +1133,10 @@ body.overlay {
   background: var(--good-soft);
   color: var(--good-ink);
 }
+.board .chip.plan {
+  background: var(--info-soft);
+  color: var(--p3-ink);
+}
 /* Row actions float over the right edge on hover/focus instead of reserving width. */
 .t-actions {
   position: absolute;
@@ -1213,6 +1229,59 @@ body.overlay {
 }
 .popover.menu .icon {
   color: var(--muted);
+}
+.popover.menu .menu-body {
+  display: flex;
+  flex-direction: column;
+  max-height: min(340px, 60vh);
+  overflow-y: auto;
+}
+.popover.menu .menu-title {
+  padding: 6px 10px 4px;
+  font: 700 11px/1 var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.popover.menu .menu-end {
+  margin-left: auto;
+  padding-left: 8px;
+  box-sizing: content-box;
+}
+.popover.menu .turn {
+  transform: rotate(-90deg);
+}
+.popover.menu button[aria-current="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.popover.menu .menu-form {
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px 6px;
+}
+.popover.menu .menu-form .field {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  font-size: 12.5px;
+}
+.popover.menu .menu-form .btn {
+  flex: none;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+.popover.menu .menu-form .btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.popover.confirm.pin-form {
+  width: 288px;
+}
+.popover.pin-form .field {
+  margin: 0 0 10px;
 }
 .popover.confirm {
   width: 264px;

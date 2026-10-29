@@ -38,8 +38,22 @@ import {
 } from "./models";
 import { defaultMoodInputs, evaluateMood, moodEmoji, moodLabel, type MoodReason } from "./mood";
 import { effectiveClaudeModel, effectiveFilter, isRestDay, isWorkday, prefsFromJson, type Prefs } from "./prefs";
+import { relatedTasks } from "./related";
+import { isConferencing, isNotWorkApp, resumeSummary, shouldOfferResume, snapshot, withNote, workUrl, type WorkContext } from "./resume";
 import { appRules, currentDistraction, siteRules } from "./sites";
 import { findStuck, pretendSeen, recordSeen, type SeenLog, type StuckTask } from "./stuck";
+import {
+  clearTrigger,
+  dueTriggers,
+  markFired,
+  pruneTriggers,
+  setTrigger,
+  triggerChoices,
+  triggersFromJson,
+  triggersToJson,
+  type StartTrigger,
+  type TaskTrigger,
+} from "./triggers";
 import { EVERY_KINDS, REMINDER_KINDS, type Accessory, type CelebrationKind, type Lang, type Mood, type ReminderKind, type SpeciesId } from "./types";
 
 const MIN = 60_000;
@@ -75,6 +89,18 @@ const LATER = "later";
 const HOLD_AFTER = 3;
 const HOLD_MINUTES = 60;
 const budgetLeft = (s: { prefs: Prefs; life: life.LifeState }) => Math.max(0, s.prefs.nudgeBudget - s.life.dayNudges);
+/** The place you pinned outlives the automatic snapshots for this long. */
+const PIN_KEEPS = 3 * 60 * MIN;
+/** A resume card is offered within this long of coming back; after that it is dropped. */
+const RESUME_WINDOW = 10 * MIN;
+/** "Anything to capture?" asks about meetings that ran this long, within this long of their end. */
+const BOOKEND_MIN_LENGTH = 15 * MIN;
+const BOOKEND_WINDOW = 10 * MIN;
+/** The next meeting this close makes the pet suggest a breather. */
+const BREATHER_IF_NEXT_WITHIN = 15 * MIN;
+const BREATHER_MINUTES = 5;
+const STARTER_MINUTES = 2;
+const MAX_RECENT_APPS = 8;
 
 export interface BubbleAction {
   title: string;
@@ -103,6 +129,8 @@ export interface FocusSession {
   end: number;
   isBreak: boolean;
   minutes: number;
+  /** The 2-minute "just open it" starter: when it ends the pet offers a full session or lets you stop. */
+  starter?: boolean;
 }
 
 export interface CelebrationEvent {
@@ -162,19 +190,29 @@ export interface BrainState {
   nudgesLeft: number;
   /** After three dismissed reminders in a row, non-urgent ones wait until then (epoch ms); kept in `life`. */
   nudgeHoldUntil: number | null;
+  /** Today's "start when…" plans (kept in storage for the day). */
+  triggers: TaskTrigger[];
+  /** You pinned your place and the resume card will show it (the place itself is never stored or exposed). */
+  pinned: boolean;
 }
 
 /**
  * What `say` takes besides the bubble. `why` marks an unsolicited reminder (the reason goes in the diary); `kind`
  * makes it count against today's budget, and needs a `why`.
  */
-type SayOptions = { chime?: Chime; antic?: boolean } & ({ why: string; kind: ReminderKind } | { why?: string; kind?: undefined });
+type SayOptions = {
+  chime?: Chime;
+  antic?: boolean;
+  /** What the diary (which is on disk) records instead of the bubble's text, for bubbles that name the app or page you were on. */
+  diaryText?: string;
+} & ({ why: string; kind: ReminderKind } | { why?: string; kind?: undefined });
 
 /** What the UI provides: sounds, speech and opening views. All optional. */
 export interface BrainEffects {
   chime?(c: Chime): void;
   speak?(text: string, lang: Lang): void;
-  openBoard?(focusAdd: boolean): void;
+  /** `prefill` is put in the add field ("Team sync: "). */
+  openBoard?(focusAdd: boolean, prefill?: string): void;
   openSplit?(task: TodoTask): void;
 }
 
@@ -222,6 +260,21 @@ export class Brain {
   private lastStatsAt = NEVER;
   private lastCalendarAt = NEVER;
   private awaySince: number | null = null;
+  /**
+   * "Where was I?" (SPEC v0.4 §1): kept in memory only, never saved or written to the diary, and dropped at the day
+   * change. `lastWork` is the latest sample on a work app (not a distraction, the pet's own window or a call).
+   */
+  private workContext: WorkContext | null = null;
+  private pinned = false;
+  private lastWork: SystemSample | null = null;
+  private lastActedId: string | null = null;
+  private pendingResume: { reason: lines.ResumeReason; at: number } | null = null;
+  /** Apps recently in front (names only), newest first: the choices of "Start when I open…". */
+  private recentApps: ForegroundApp[] = [];
+  /** Meetings seen ending today. */
+  private endedEventIds: string[] = [];
+  /** False after a failed read of the plans: never overwrite what's on disk with an empty list. */
+  private persistTriggers = true;
   private distractionSnoozedUntil = NEVER;
   private anticSnoozedUntil = NEVER;
   private engagedSince: Date | null = null;
@@ -321,16 +374,19 @@ export class Brain {
       prefs,
       nudgesLeft: budgetLeft({ prefs, life: lifeState }),
       nudgeHoldUntil: lifeState.nudgeHoldUntil,
+      triggers: [],
+      pinned: false,
     };
   }
 
   /** Loads prefs, the pet's life and the postponed-task log, then picks the language. */
   static async create(backend: Backend, opts: BrainOptions = {}): Promise<Brain> {
     const now = (opts.now ?? Date.now)();
-    const [p, l, st, locale] = await Promise.all([
+    const [p, l, st, tr, locale] = await Promise.all([
       loadRetrying<unknown>(backend, "prefs"),
       loadRetrying<unknown>(backend, "life"),
       loadRetrying<SeenLog>(backend, "stuck"),
+      loadRetrying<unknown>(backend, "triggers"),
       backend.system.systemLocale().catch(() => "en"),
     ]);
     const prefs = prefsFromJson(p.ok ? p.value : null, now, now);
@@ -342,6 +398,8 @@ export class Brain {
     const seen = !opts.demo && st.ok && st.value && typeof st.value === "object" ? st.value : {};
     const brain = new Brain(backend, prefs, lifeState, seen, opts);
     brain.persistLife = l.ok;
+    brain.persistTriggers = tr.ok;
+    brain.state.triggers = pruneTriggers(triggersFromJson(tr.ok ? tr.value : null), dayKey(new Date(now)));
     if (!p.ok || !l.ok) {
       brain.diary.add("system", L("Không đọc được dữ liệu đã lưu — phiên này sẽ không ghi đè lên nó", "Couldn't read saved data — this session won't overwrite it"));
     }
@@ -570,11 +628,71 @@ export class Brain {
     this.sample = s;
     if (prev.fullscreen !== s.fullscreen) this.set({ fullscreen: s.fullscreen });
     const label = this.currentDistractionLabel();
-    if (label !== (this.distractionSince?.label ?? null)) {
+    if (label === null) this.noteWorkApp(s);
+    const was = this.distractionSince;
+    if (label !== (was?.label ?? null)) {
+      // Onto a distraction from work: remember the work. Off one after 2+ minutes: offer it back.
+      if (label && !was) this.takeSnapshot(now);
+      if (!label && was && shouldOfferResume({ leftDistractionMinutes: (now - was.since) / MIN })) this.pendingResume = { reason: "distraction", at: now };
       this.distractionSince = label ? { label, since: now } : null;
     }
     const calmMotion = this.computeCalmMotion();
     if (calmMotion !== this.state.calmMotion) this.set({ calmMotion });
+  }
+
+  /** Remembers the work app in front (for the place to come back to) and the apps used lately (names only). */
+  private noteWorkApp(s: SystemSample): void {
+    const app = s.app;
+    if (!app || isNotWorkApp(app)) return;
+    this.recentApps = [{ name: app.name, exe: app.exe, title: "" }, ...this.recentApps.filter((a) => a.name.toLowerCase() !== app.name.toLowerCase())].slice(0, MAX_RECENT_APPS);
+    if (!isConferencing(app, s.url)) this.lastWork = s;
+  }
+
+  private readonly isDistractingNow = (app: ForegroundApp | null, url: string | null): boolean => {
+    const p = this.state.prefs;
+    return currentDistraction(app, url, siteRules(p.distractionSites), appRules(p.distractionApps), p.watchBrowsers) !== null;
+  };
+
+  /** The task to remember: the one being focused on, else the one last worked on from the board, else the next one. */
+  private contextTask(): TodoTask | null {
+    const open = openTasks(this.state.day);
+    const f = this.state.focus;
+    const focused = f && !f.isBreak && f.task ? open.find((t) => t.id === f.task?.id) : undefined;
+    const acted = this.lastActedId ? open.find((t) => t.id === this.lastActedId) : undefined;
+    return focused ?? acted ?? this.state.next;
+  }
+
+  private setPinned(pinned: boolean): void {
+    this.pinned = pinned;
+    this.patchState({ pinned });
+  }
+
+  /** Remembers where you are (you went idle, a meeting started, you moved onto a distraction). A recent pin stays. */
+  private takeSnapshot(nowMs: number): void {
+    if (this.pinned && this.workContext && nowMs - this.workContext.at < PIN_KEEPS) return;
+    const ctx = snapshot(this.lastWork ?? this.sample, this.contextTask(), this.isDistractingNow, nowMs);
+    if (!ctx) return;
+    this.workContext = ctx;
+    this.setPinned(false);
+  }
+
+  /** **📌 Pin my place**: remembers the place now, with an optional one-line next step the resume card shows. */
+  pinPlace(note: string | null = null): boolean {
+    const nowMs = this.now();
+    const base = snapshot(this.lastWork ?? this.sample, this.contextTask(), this.isDistractingNow, nowMs);
+    const empty: WorkContext = { taskId: null, taskTitle: null, app: null, windowTitle: null, url: null, note: null, at: nowMs };
+    const ctx = withNote(base ?? empty, note);
+    if (!base && !ctx.note) return false;
+    this.workContext = ctx;
+    this.setPinned(true);
+    this.diary.add("system", L("Bạn ghim chỗ đang làm", "You pinned your place") + (ctx.note ? L(" (kèm bước tiếp theo)", " (with a next step)") : ""));
+    return true;
+  }
+
+  unpinPlace(): void {
+    if (!this.pinned) return;
+    this.workContext = null;
+    this.setPinned(false);
   }
 
   private secondsSinceAppSwitch(): number {
@@ -779,6 +897,16 @@ export class Brain {
     this.didLoadOnce = false;
     this.verifiedToday = false;
     this.completed = [];
+    // The place you were at never outlives the day; the plans of earlier days are dropped.
+    this.workContext = null;
+    this.lastWork = null;
+    this.lastActedId = null;
+    this.pendingResume = null;
+    this.recentApps = [];
+    this.endedEventIds = [];
+    this.setPinned(false);
+    const kept = pruneTriggers(this.state.triggers, this.dayKey);
+    if (kept.length !== this.state.triggers.length) this.setTriggers(kept);
   }
 
   // ---------- Mood ----------
@@ -1082,7 +1210,7 @@ export class Brain {
       });
     }
     this.play(opts.chime ?? "chatter");
-    const quote = `“${shortText(b.text.replace(/\n/g, " "), 90)}”`;
+    const quote = `“${shortText((opts.diaryText ?? b.text).replace(/\n/g, " "), 90)}”`;
     const left = opts.kind ? L(` (còn ${this.state.nudgesLeft} lượt nhắc hôm nay)`, ` (${this.state.nudgesLeft} left today)`) : "";
     if (opts.why !== undefined) this.diary.add(opts.antic ? "antic" : "bubble", `${quote} — ${L("vì ", "because ")}${opts.why}${left}`);
     else this.diary.add("system", L("Pet nói ", "Pet said ") + quote);
@@ -1432,6 +1560,7 @@ export class Brain {
   runRules(nowMs: number): void {
     const now = new Date(nowMs);
     const s = this.state;
+    this.trackMeetings(nowMs, now);
     if (s.quietUntil !== null && nowMs < s.quietUntil) return;
     if (s.quietUntil !== null) this.set({ quietUntil: null });
 
@@ -1439,6 +1568,7 @@ export class Brain {
     if (idle > 300) {
       if (this.awaySince === null) {
         this.awaySince = nowMs - idle * 1000;
+        this.takeSnapshot(this.awaySince);
         this.diary.add("system", L(`Bạn rời máy từ ${timeString(new Date(this.awaySince))} — pet không nhắc gì`, `You stepped away at ${timeString(new Date(this.awaySince))} — no reminders`));
       }
       return;
@@ -1456,7 +1586,7 @@ export class Brain {
         }
         actions.push({ title: "OK", run: () => undefined });
         this.say(
-          { text: lines.meetingSoon(upcoming, Math.max(1, Math.ceil(mins))), actions, seconds: 90, urgent: true },
+          { text: lines.meetingSoon(upcoming, Math.max(1, Math.ceil(mins)), relatedTasks(upcoming.title, openTasks(s.day), 2)), actions, seconds: 90, urgent: true },
           { chime: "important", why: L(`họp lúc ${timeString(upcoming.start)}`, `meeting at ${timeString(upcoming.start)}`) },
         );
         return;
@@ -1485,8 +1615,10 @@ export class Brain {
       const minutes = Math.trunc((nowMs - this.awaySince) / MIN);
       this.awaySince = null;
       this.diary.add("system", L(`Bạn quay lại sau ${minutes} phút`, `You came back after ${minutes} minutes`));
+      // With a place to come back to, the resume card (a check-in) takes the welcome's place.
+      if (this.workContext && shouldOfferResume({ awayMinutes: minutes })) this.pendingResume = { reason: "away", at: nowMs };
       // Not while the pet is out of the way (nobody would see it), nor on a stale list of tasks.
-      if (minutes > 15 && ctx.inWork && next && !this.outOfTheWay && this.snapshotFresh && this.mayRemind("welcome")) {
+      else if (minutes > 15 && ctx.inWork && next && !this.outOfTheWay && this.snapshotFresh && this.mayRemind("welcome")) {
         this.say(
           { text: lines.welcomeBack(next), actions: [this.focusAction(next), this.laterAction()], seconds: 30 },
           { why: L(`bạn vừa quay lại sau ${minutes} phút`, `you just came back after ${minutes} minutes`), kind: "welcome" },
@@ -1520,6 +1652,12 @@ export class Brain {
     if (this.state.bubble) return;
     // Everything below is counted or a check-in: not on yesterday's tasks or a list older than the sync in flight.
     if (!this.snapshotFresh) return;
+
+    // Check-ins and the plans you asked for: never counted, never held back by the budget. In this order: the
+    // question after a long meeting, a "start when…" plan that has come true, then the place you were at.
+    if (this.offerAfterMeeting(nowMs)) return;
+    if (this.fireTriggers(nowMs, open)) return;
+    if (this.offerResume(nowMs, open)) return;
 
     // Distracting apps and sites come first: there's no concentration to protect right then.
     // Grumpy and on one for 5+ minutes, the stunts start: a parade with the next task on a sign (never while you're
@@ -1664,6 +1802,7 @@ export class Brain {
           text: lines.stuck(stuck, s.mood),
           actions: [
             { title: L("✂️ Chia nhỏ", "✂️ Split it"), primary: true, run: () => this.effects.openSplit?.(stuck.task) },
+            { title: L("▶ Thử 2 phút", "▶ Try 2 minutes"), run: () => this.startTwoMinutes(stuck.task) },
             { title: L("Bỏ khỏi kế hoạch", "Drop from plan"), run: () => void this.unplan(stuck.task) },
             this.laterAction(),
           ],
@@ -1791,6 +1930,155 @@ export class Brain {
     if (ctx.inWork && (s.mood === "happy" || s.mood === "normal") && nowMs - this.lastBubbleAt > 40 * MIN && this.remindEvery("tip", 150)) {
       this.say({ text: lines.tip(), seconds: 14 }, { why: L("pet đang vui và đã im lặng 40 phút", "the pet is in a good mood and quiet for 40 min"), kind: "tip" });
     }
+  }
+
+  // ---------- Meeting bookends, plans and the resume card (SPEC v0.4) ----------
+
+  /**
+   * Notes meetings that just ended (a short one leaves the place to come back to; the long ones get a question first)
+   * and the one in progress (its start is a moment to remember where you were). Runs even while muted or away.
+   */
+  private trackMeetings(nowMs: number, now: Date): void {
+    for (const e of this.state.events) {
+      if (e.end.getTime() > nowMs || this.endedEventIds.includes(e.id)) continue;
+      this.endedEventIds.push(e.id);
+      // A meeting from earlier (the pet just started, a calendar that loaded late) is old news.
+      if (nowMs - e.end.getTime() <= RESUME_WINDOW && shouldOfferResume({ afterMeeting: true })) this.pendingResume = { reason: "meeting", at: nowMs };
+    }
+    const current = currentEvent(this.state.events, now);
+    if (current && this.once(`context-${current.id}`)) this.takeSnapshot(nowMs);
+  }
+
+  private setTriggers(list: TaskTrigger[]): void {
+    this.set({ triggers: list });
+    if (!this.persistTriggers) return;
+    this.backend.storage.save("triggers", triggersToJson(list)).catch(() => undefined);
+  }
+
+  /** Marks the plan as spent, whether it spoke or the task was already gone. */
+  private finishTrigger(t: TaskTrigger): void {
+    this.setTriggers(markFired(this.state.triggers, t.taskId, t.day));
+  }
+
+  /** "“Team sync” is over. Anything to capture?" once after a meeting of 15+ minutes, if you are here to hear it. */
+  private offerAfterMeeting(nowMs: number): boolean {
+    const s = this.state;
+    const over = s.events
+      .filter((e) => {
+        const ago = nowMs - e.end.getTime();
+        return ago >= 0 && ago <= BOOKEND_WINDOW && e.end.getTime() - e.start.getTime() >= BOOKEND_MIN_LENGTH && this.firedAt(`aftermeeting-${e.id}-${this.dayKey}`) === undefined;
+      })
+      .sort((a, b) => b.end.getTime() - a.end.getTime())[0];
+    if (!over || !this.once(`aftermeeting-${over.id}-${this.dayKey}`)) return false;
+    const next = nextEvent(s.events, new Date(nowMs));
+    const soon = next && next.start.getTime() - nowMs <= BREATHER_IF_NEXT_WITHIN ? next : null;
+    const actions: BubbleAction[] = [
+      {
+        title: L("＋ Bước tiếp theo", "＋ Next step"),
+        primary: true,
+        run: () => {
+          // You are capturing, so the "where was I" card would only pile on.
+          this.pendingResume = null;
+          this.effects.openBoard?.(true, `${shortText(over.title, 60)}: `);
+        },
+      },
+    ];
+    if (soon) actions.push({ title: L("☕ Nghỉ 5 phút", "☕ 5-min breather"), run: () => this.startBreak(BREATHER_MINUTES) });
+    actions.push({ title: L("Không có gì", "Nothing"), run: () => undefined });
+    this.say(
+      { text: lines.meetingOver(over, soon), actions, seconds: 60 },
+      { why: L(`họp “${shortText(over.title, 30)}” vừa kết thúc`, `“${shortText(over.title, 30)}” just ended`) },
+    );
+    return true;
+  }
+
+  /** Starts a plan that has come true ("As planned: …"); a plan for a task that is gone is simply spent. */
+  private fireTriggers(nowMs: number, open: TodoTask[]): boolean {
+    const s = this.state;
+    const due = dueTriggers(s.triggers, { day: dayKey(new Date(nowMs)), now: nowMs, events: s.events, app: this.sample.app, endedEventIds: this.endedEventIds });
+    for (const t of due) {
+      const task = open.find((x) => x.id === t.taskId);
+      if (!task) {
+        this.finishTrigger(t);
+        continue;
+      }
+      // Not in the middle of typing or in the zone: it waits for a pause (the plan stays).
+      if (s.flow || !calm.atBreakpoint(this.sample.secondsSinceKey, this.secondsSinceAppSwitch())) return false;
+      this.finishTrigger(t);
+      // The plan says what to do now; the "where was I" card would only second-guess it.
+      this.pendingResume = null;
+      this.say(
+        { text: lines.asPlanned(task), actions: [{ title: L("▶ Bắt đầu ngay", "▶ Focus now"), primary: true, run: () => this.startFocus(task) }, this.laterAction()], seconds: 45 },
+        { why: L(`kế hoạch bạn đặt: ${lines.triggerChoice(t.trigger, s.events)}`, `your plan: ${lines.triggerChoice(t.trigger, s.events)}`) },
+      );
+      return true;
+    }
+    return false;
+  }
+
+  /** The resume card: "You were on: ⟨task⟩ · in ⟨app — title⟩" with Reopen ↗ (http/https only), Focus and Something else. */
+  private offerResume(nowMs: number, open: TodoTask[]): boolean {
+    const pending = this.pendingResume;
+    if (!pending) return false;
+    if (nowMs - pending.at > RESUME_WINDOW) {
+      this.pendingResume = null;
+      return false;
+    }
+    const ctx = this.workContext;
+    if (!ctx) {
+      this.pendingResume = null;
+      return false;
+    }
+    if (this.state.flow || !calm.atBreakpoint(this.sample.secondsSinceKey, this.secondsSinceAppSwitch())) return false;
+    // A task finished meanwhile is no longer where you were.
+    const task = ctx.taskId ? open.find((t) => t.id === ctx.taskId) ?? null : null;
+    const sum = resumeSummary(ctx);
+    const shown = { ...sum, task: task ? sum.task : null };
+    this.pendingResume = null;
+    this.workContext = null;
+    this.setPinned(false);
+    if (!shown.task && !shown.where && !shown.note) return false;
+    const actions: BubbleAction[] = [];
+    const url = workUrl(ctx.url);
+    if (url) actions.push({ title: L("Mở lại ↗", "Reopen ↗"), primary: true, run: () => void this.backend.system.openUrl(url).catch(() => undefined) });
+    const target = task ?? this.state.next;
+    // One primary button: Reopen when there is a page to go back to, else Focus.
+    if (target) actions.push({ ...this.focusAction(target), primary: url === null });
+    actions.push({ title: L("Việc khác", "Something else"), run: () => this.effects.openBoard?.(false) });
+    this.say(
+      { text: lines.resumeCard(shown, pending.reason), actions, seconds: 45 },
+      { why: L("bạn vừa quay lại", "you just came back"), diaryText: lines.resumeDiary(shown.task, shown.note !== null) },
+    );
+    return true;
+  }
+
+  /** Sets (or replaces) the task's "start when…" plan for today. Returns false for a plan with nothing in it. */
+  setStartTrigger(task: TodoTask, trigger: StartTrigger): boolean {
+    const day = dayKey(new Date(this.now()));
+    const [clean] = triggersFromJson([{ taskId: task.id, day, trigger, fired: false }]);
+    if (!clean) return false;
+    this.lastActedId = task.id;
+    this.setTriggers(setTrigger(this.state.triggers, task.id, day, clean.trigger));
+    this.diary.add(
+      "system",
+      L(`Hẹn bắt đầu “${shortText(taskTitle(task), 40)}”: ${lines.triggerChoice(clean.trigger, this.state.events)}`, `Start plan for “${shortText(taskTitle(task), 40)}”: ${lines.triggerChoice(clean.trigger, this.state.events)}`),
+    );
+    return true;
+  }
+
+  clearStartTrigger(task: TodoTask): void {
+    const day = dayKey(new Date(this.now()));
+    if (this.state.triggers.some((t) => t.taskId === task.id && t.day === day)) this.setTriggers(clearTrigger(this.state.triggers, task.id, day));
+  }
+
+  /** The choices of a task's "Start when…" menu. */
+  startTriggerChoices(): StartTrigger[] {
+    return triggerChoices({ events: this.state.events, now: this.now(), recentApps: this.recentApps, isDistracting: this.isDistractingNow });
+  }
+
+  /** **▶ Try 2 minutes**: a 2-minute focus on the task ("just open it"); at the end the pet offers a full session or lets you stop. */
+  startTwoMinutes(task: TodoTask | null): void {
+    this.startFocus(task, STARTER_MINUTES, true);
   }
 
   // ---------- Actions ----------
@@ -1966,6 +2254,7 @@ export class Brain {
   /** Returns whether Todoist accepted the new date. */
   async reschedule(task: TodoTask, dueString: string): Promise<boolean> {
     this.lastPlanAction = this.now();
+    this.lastActedId = task.id;
     let ok = true;
     try {
       await this.backend.todoist.reschedule(task.id, dueString);
@@ -2074,6 +2363,7 @@ export class Brain {
   /** Takes a task off today's plan without deleting it (it stays in Todoist with no date). Returns success. */
   async unplan(task: TodoTask): Promise<boolean> {
     this.lastPlanAction = this.now();
+    this.lastActedId = task.id;
     try {
       await this.backend.todoist.reschedule(task.id, "no date");
     } catch (e) {
@@ -2094,6 +2384,7 @@ export class Brain {
   async split(task: TodoTask, steps: string[], firstToday: boolean): Promise<boolean> {
     const clean = steps.map((s) => s.trim()).filter((s) => s.length > 0);
     if (clean.length === 0) return false;
+    this.lastActedId = task.id;
     let firstId: string | null = null;
     let created = 0;
     try {
@@ -2144,21 +2435,25 @@ export class Brain {
 
   // ---------- Focus (Pomodoro) ----------
 
-  startFocus(task: TodoTask | null, minutes?: number): void {
+  startFocus(task: TodoTask | null, minutes?: number, starter = false): void {
     const m = minutes ?? this.state.prefs.focusMinutes;
     const nowMs = this.now();
     const t = task ?? this.state.next;
-    this.set({ focus: { task: t, start: nowMs, end: nowMs + m * MIN, isBreak: false, minutes: m }, antic: null });
+    if (task) this.lastActedId = task.id;
+    this.set({ focus: { task: t, start: nowMs, end: nowMs + m * MIN, isBreak: false, minutes: m, ...(starter ? { starter: true } : {}) }, antic: null });
     this.finishFocusAt(nowMs + m * MIN);
     this.recompute();
     this.lastBubbleAt = nowMs;
-    this.set({ bubble: { id: ++this.bubbleSeq, text: lines.focusStart(t, m), actions: [], seconds: 5, urgent: false, reminder: false } });
-    this.diary.add("focus", L(`Bắt đầu tập trung ${m} phút`, `Started a ${m}-minute focus session`) + (t ? `: “${shortText(taskTitle(t), 40)}”` : ""));
+    this.set({ bubble: { id: ++this.bubbleSeq, text: starter ? lines.starterStart(t, m) : lines.focusStart(t, m), actions: [], seconds: 5, urgent: false, reminder: false } });
+    this.diary.add(
+      "focus",
+      (starter ? L(`Bắt đầu thử ${m} phút`, `Started a ${m}-minute starter`) : L(`Bắt đầu tập trung ${m} phút`, `Started a ${m}-minute focus session`)) + (t ? `: “${shortText(taskTitle(t), 40)}”` : ""),
+    );
   }
 
-  startBreak(): void {
+  startBreak(minutes?: number): void {
     const nowMs = this.now();
-    const m = this.state.prefs.breakMinutes;
+    const m = minutes ?? this.state.prefs.breakMinutes;
     this.set({ focus: { task: null, start: nowMs, end: nowMs + m * MIN, isBreak: true, minutes: m } });
     this.finishFocusAt(nowMs + m * MIN);
     this.recompute();
@@ -2200,19 +2495,34 @@ export class Brain {
     } else {
       const actions: BubbleAction[] = [];
       const t = f.task;
-      if (t && openTasks(this.state.day).some((x) => x.id === t.id)) {
+      const stillOpen = t !== null && openTasks(this.state.day).some((x) => x.id === t.id);
+      if (f.starter) {
+        // The 2-minute starter: a full session if it got going, or "that's enough".
+        if (t && stillOpen) actions.push({ title: L("✓ Xong rồi", "✓ Done"), run: () => void this.complete(t) });
+        actions.push({ ...this.focusAction(t), primary: true });
         actions.push({
-          title: L("✓ Xong rồi", "✓ Done"),
-          primary: true,
+          title: L("Thế là được rồi", "That's enough"),
           run: () => {
-            void this.complete(t);
-            this.startBreak();
+            this.diary.add("focus", L("Bạn dừng sau 2 phút thử", "You stopped after the 2-minute starter"));
+            this.say({ text: lines.starterEnough(), seconds: 6 });
           },
         });
+        bubble = { id: ++this.bubbleSeq, text: lines.starterEnd(t), actions, seconds: 120, urgent: true, reminder: false };
+      } else {
+        if (t && stillOpen) {
+          actions.push({
+            title: L("✓ Xong rồi", "✓ Done"),
+            primary: true,
+            run: () => {
+              void this.complete(t);
+              this.startBreak();
+            },
+          });
+        }
+        actions.push({ title: L(`+${f.minutes}' nữa`, `+${f.minutes}' more`), run: () => this.startFocus(f.task, f.minutes) });
+        actions.push({ title: L(`☕ Nghỉ ${this.state.prefs.breakMinutes}'`, `☕ Break ${this.state.prefs.breakMinutes}'`), run: () => this.startBreak() });
+        bubble = { id: ++this.bubbleSeq, text: lines.focusEnd(f.task, f.minutes), actions, seconds: 120, urgent: true, reminder: false };
       }
-      actions.push({ title: L(`+${f.minutes}' nữa`, `+${f.minutes}' more`), run: () => this.startFocus(f.task, f.minutes) });
-      actions.push({ title: L(`☕ Nghỉ ${this.state.prefs.breakMinutes}'`, `☕ Break ${this.state.prefs.breakMinutes}'`), run: () => this.startBreak() });
-      bubble = { id: ++this.bubbleSeq, text: lines.focusEnd(f.task, f.minutes), actions, seconds: 120, urgent: true, reminder: false };
     }
     this.lastBubbleAt = this.now();
     this.set({ bubble });
@@ -2259,11 +2569,49 @@ export class Brain {
    * so one click shows its effect on the mood and the reminders.
    */
   demoDistract(label: string): void {
+    this.takeSnapshot(this.now());
     this.distractionSince = { label, since: this.now() - 3 * MIN };
     // Clear a leftover greeting so "Run rules" shows the reminder right away.
     const b = this.state.bubble;
     if (b && !b.urgent) this.dismissBubble(b.id, "closed");
     this.recompute();
+  }
+
+  /** Demo: pretend you were away from the work app in front for 8 minutes and are back now: the resume card. */
+  demoComeBack(): void {
+    const nowMs = this.now();
+    this.clearForDemo();
+    this.takeSnapshot(nowMs - 8 * MIN);
+    this.awaySince = nowMs - 8 * MIN;
+    this.runRules(nowMs);
+  }
+
+  /** Demo: a meeting starts in 4 minutes, with a title that shares a word with one of the tasks. */
+  demoMeetingSoon(): void {
+    const nowMs = this.now();
+    this.clearForDemo();
+    this.addDemoEvent({ id: `demo-soon-${nowMs}`, title: L("Gia hạn với khách hàng ABC", "Client ABC renewal"), start: new Date(nowMs + 4 * MIN), end: new Date(nowMs + 34 * MIN), joinUrl: null });
+    this.runRules(nowMs);
+  }
+
+  /** Demo: a 30-minute meeting just ended and the next one starts in 12 minutes (the question and the breather). */
+  demoMeetingEnds(): void {
+    const nowMs = this.now();
+    this.clearForDemo();
+    this.takeSnapshot(nowMs - 31 * MIN);
+    this.addDemoEvent({ id: `demo-over-${nowMs}`, title: L("Họp kế hoạch quý", "Q4 planning"), start: new Date(nowMs - 31 * MIN), end: new Date(nowMs - MIN), joinUrl: null });
+    this.addDemoEvent({ id: `demo-next-${nowMs}`, title: L("Review thiết kế", "Design review"), start: new Date(nowMs + 12 * MIN), end: new Date(nowMs + 42 * MIN), joinUrl: null });
+    this.runRules(nowMs);
+  }
+
+  private addDemoEvent(e: CalEvent): void {
+    this.set({ events: [...this.state.events, e].sort((a, b) => a.start.getTime() - b.start.getTime()) });
+  }
+
+  /** Clears a waiting non-urgent bubble so a demo button's result shows at once. */
+  private clearForDemo(): void {
+    const b = this.state.bubble;
+    if (b && !b.urgent) this.dismissBubble(b.id, "closed");
   }
 
   /** Demo: pretend yesterday went by with nothing done, and wake up to it (a snack saves it, or the streak breaks). */

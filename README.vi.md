@@ -30,6 +30,9 @@ Mọi tính năng của bản macOS:
 - **Một bé pet sống cùng công việc:** độ no, bẩn và ruồi bu sau những ngày lỡ, XP và 5 giai đoạn lớn lên, màn ăn mừng ngẫu nhiên với bánh vàng hiếm, combo và pháo hoa, phụ kiện mở khoá, và sổ sticker mà trang nào cũng tặng sẵn 2 sticker. Trò nghịch (càu nhàu, diễu hành cầm biển, rồi lật bàn giữa màn hình) chỉ xảy ra khi bạn đang ở trang web hay ứng dụng gây xao nhãng — không bao giờ khi bạn đang họp hay đang tập trung (càu nhàu và diễu hành còn chờ bạn ngừng gõ phím).
 - **Chuỗi ngày dễ thở.** Xong 1 việc là giữ chuỗi; lỡ một ngày thì pet ăn 1 bánh trong túi để giữ, chuỗi đứt vẫn nối lại được vào ngày làm việc tới, còn ngày nghỉ, ngày tắt máy và ngày họp kín lịch không bao giờ bị tính.
 - **Hạn mức nhắc mỗi ngày:** tối đa 8 lời nhắc không gấp mỗi ngày (tuỳ chỉnh), lời nhắc nào bạn hay đóng thì sẽ thưa dần.
+- **"Mình đang làm gì nhỉ?"** Khi bạn quay lại sau 5 phút trở lên, sau một cuộc họp, hoặc sau 2 phút lướt chỗ gây xao nhãng, pet cho bạn xem lại bạn đang làm gì (việc, ứng dụng, trang web) kèm **Mở lại ↗**, **Tập trung** và **Việc khác**. Nút **📌 Ghim chỗ này** trên bảng việc giữ chỗ bạn đang làm cùng một dòng "bước tiếp theo". Không tính vào hạn mức nhắc.
+- **Trước và sau cuộc họp.** Bong bóng "sắp họp" liệt kê tối đa 2 việc liên quan; sau cuộc họp từ 15 phút trở lên, pet hỏi "Có gì cần ghi lại không?" (**＋ Bước tiếp theo** mở ô thêm việc có sẵn tên cuộc họp) và gợi ý nghỉ 5 phút nếu họp tiếp ngay sau đó.
+- **Hẹn "khi…thì bắt đầu" và 2 phút khởi động.** Menu **⋯** của mỗi việc có **Bắt đầu khi…** (sau cuộc họp, khi tôi mở một ứng dụng, sau bữa trưa) và **Thử 2 phút**: một phiên "chỉ mở ra xem" thật ngắn, hết giờ pet hỏi bạn có muốn làm một phiên đầy đủ hay thế là được rồi.
 - **Không phá sự tập trung:** chỉ nhắc khi bạn ngừng tay, giữ im lặng khi bạn đang vào guồng, cách nhau ít nhất 15 phút, đứng yên khi bạn gõ, mặc định rất yên tĩnh.
 - **Nhật ký** ghi lại mỗi lời nhắc và lý do, để bạn tinh chỉnh.
 - **Tiếng Anh và tiếng Việt.**
@@ -82,6 +85,7 @@ Pet giữ điểm vui 0–100, tính lại mỗi 15 giây (y hệt bản macOS).
 
 - Không thu thập dữ liệu, không có máy chủ riêng. Chỉ kết nối tới `api.todoist.com`, link lịch của bạn, và `api.anthropic.com` khi bạn bấm **Hỏi Claude**.
 - Chỉ đọc **tên ứng dụng đang mở**, và với trình duyệt thì thêm **địa chỉ tab** cùng tiêu đề trang (không đọc tiêu đề cửa sổ của ứng dụng khác); tất cả chỉ nằm trong bộ nhớ, không lưu, không gửi đi.
+- Thẻ **"Mình đang làm gì nhỉ?"** nhớ việc, ứng dụng, tiêu đề và địa chỉ trang (chỉ http/https) bạn đang dùng, cộng với "bước tiếp theo" bạn ghim. Tất cả **chỉ nằm trong bộ nhớ**: không lưu ra đĩa, không ghi vào nhật ký, và quên hẳn lúc nửa đêm. Các hẹn **Bắt đầu khi…** (một việc, và một cuộc họp, tên ứng dụng hoặc "sau bữa trưa") được lưu trong ngày và bị xoá vào hôm sau.
 - Phát hiện gõ phím dùng Raw Input của Windows, chỉ ghi **thời điểm phím cuối cùng được nhấn xuống**; không bao giờ biết phím nào và không dùng keyboard hook.
 - Link ICS là địa chỉ bí mật nên được lưu trong Windows Credential Manager như token, và chỉ tải từ địa chỉ Internet công khai.
 - Cài đặt và trạng thái pet nằm trong `%APPDATA%\com.trananhtung.todopet`; nhật ký chỉ ở máy này, trong `%LOCALAPPDATA%\com.trananhtung.todopet` (giữ 14 ngày, có thể tắt).

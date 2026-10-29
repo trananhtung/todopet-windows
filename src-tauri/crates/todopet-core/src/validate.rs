@@ -10,8 +10,9 @@ pub const MAX_SECRET_LEN: usize = 512;
 pub const MAX_DIARY_LINE_BYTES: usize = 8 * 1024;
 /// URL schemes `open_url` hands to the OS.
 pub const OPEN_URL_SCHEMES: [&str; 4] = ["http", "https", "msteams", "zoommtg"];
-/// The only storage documents the app uses: preferences, the pet's life, the postponed-task log.
-pub const STORE_KEYS: [&str; 3] = ["prefs", "life", "stuck"];
+/// The only storage documents the app uses: preferences, the pet's life, the postponed-task log, and the day's
+/// "start when…" plans.
+pub const STORE_KEYS: [&str; 4] = ["prefs", "life", "stuck", "triggers"];
 const MAX_URL_LEN: usize = 4096;
 /// Characters never valid unescaped in a URL that matter to the command lines the link may pass through
 /// (`explorer.exe`, protocol handlers): quotes, angle brackets, backslash, caret, backtick, pipe.
@@ -192,7 +193,21 @@ mod tests {
         for good in STORE_KEYS {
             assert!(store_key(good).is_ok(), "{good}");
         }
-        for bad in ["", "Prefs", "prefs ", "prefs.json", "pet-2", "secrets", "a", "../prefs", "life/x", "stuck2"] {
+        assert!(store_key("triggers").is_ok());
+        for bad in [
+            "",
+            "Prefs",
+            "prefs ",
+            "prefs.json",
+            "pet-2",
+            "secrets",
+            "a",
+            "../prefs",
+            "life/x",
+            "stuck2",
+            "trigger",
+            "triggers2",
+        ] {
             assert!(store_key(bad).is_err(), "{bad}");
         }
     }

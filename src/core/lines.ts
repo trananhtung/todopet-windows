@@ -7,7 +7,9 @@ import { L, pick } from "./l10n";
 const n = (count: number, noun: string, nouns = `${noun}s`) => `${count} ${count === 1 ? noun : nouns}`;
 import { accessoryEmoji, accessoryName, stageName } from "./life";
 import { isRecurring, taskTitle, type TodoTask } from "./models";
+import type { ResumeSummary } from "./resume";
 import type { StuckTask } from "./stuck";
+import { LUNCH_HOUR, type StartTrigger } from "./triggers";
 import type { Accessory, Mood, StageIndex } from "./types";
 
 const q = (t: TodoTask) => `“${shortText(taskTitle(t))}”`;
@@ -213,11 +215,22 @@ export const movedToTomorrow = (count: number) =>
 
 // Calendar
 
-export const meetingSoon = (e: CalEvent, minutes: number) =>
+/** `related` are open tasks that share a word with the meeting's title (at most 2 are listed). */
+export const meetingSoon = (e: CalEvent, minutes: number, related: TodoTask[] = []) =>
   L(
     `📅 ${minutes} phút nữa họp: “${shortText(e.title)}” (${timeString(e.start)})`,
     `📅 Meeting in ${minutes} min: “${shortText(e.title)}” (${timeString(e.start)})`,
-  );
+  ) + (related.length > 0 ? `\n${L("Liên quan: ", "Related: ")}${related.slice(0, 2).map((t) => `“${shortText(taskTitle(t), 40)}”`).join(", ")}` : "");
+
+/**
+ * After a meeting of 15+ minutes: a kind question. `next` is the following meeting when it starts within 15 minutes,
+ * and then a short breather is suggested.
+ */
+export const meetingOver = (e: CalEvent, next: CalEvent | null = null) =>
+  L(`“${shortText(e.title)}” xong rồi. Có gì cần ghi lại không?`, `“${shortText(e.title)}” is over. Anything to capture?`) +
+  (next
+    ? `\n${L(`“${shortText(next.title)}” bắt đầu lúc ${timeString(next.start)} — nghỉ 5 phút trước nhé?`, `“${shortText(next.title)}” starts at ${timeString(next.start)} — a 5-minute breather first?`)}`
+    : "");
 
 export function calendarDay(meetings: number, busyMinutes: number, free: number, target: number, reduced: boolean): string {
   const base = L(
@@ -235,6 +248,79 @@ export const timeBlock = (s: SlotSuggestion) =>
 
 export const timeSet = (t: TodoTask, at: Date) =>
   L(`Đã hẹn ${q(t)} lúc ${timeString(at)}. Mình sẽ nhắc đúng giờ ⏰`, `Scheduled ${q(t)} at ${timeString(at)}. I'll remind you ⏰`);
+
+// Where was I? (the resume card). It names the app and the page, so the diary gets `resumeDiary` instead.
+
+export type ResumeReason = "away" | "meeting" | "distraction";
+
+export function resumeCard(r: ResumeSummary, reason: ResumeReason = "away"): string {
+  const lead =
+    reason === "meeting"
+      ? L("Họp xong rồi nhé 👋", "Meeting's done 👋")
+      : reason === "distraction"
+        ? L("Mình cùng quay lại nhé 🌱", "Ready to pick it back up? 🌱")
+        : L("Bạn về rồi! 👋", "Welcome back! 👋");
+  const task = r.task ? `“${shortText(r.task, 60)}”` : null;
+  const parts = [lead];
+  if (task && r.where) parts.push(L(`Bạn đang làm: ${task} · trong ${r.where}`, `You were on: ${task} · in ${r.where}`));
+  else if (task) parts.push(L(`Bạn đang làm: ${task}`, `You were on: ${task}`));
+  else if (r.where) parts.push(L(`Bạn đang ở: ${r.where}`, `You were in: ${r.where}`));
+  if (r.note) parts.push(L(`📌 Bước tiếp theo: ${r.note}`, `📌 Next step: ${r.note}`));
+  return parts.join("\n");
+}
+
+/** What the diary keeps of a resume card: never the app, the page or the note. */
+export const resumeDiary = (task: string | null, hasNote: boolean) =>
+  L("Thẻ “bạn đang làm gì”", "Resume card") + (task ? `: “${shortText(task, 40)}”` : "") + (hasNote ? L(" (có ghi chú đã ghim)", " (with the pinned note)") : "");
+
+export const pinned = () => L("📌 Đã ghim chỗ này. Mình sẽ nhắc khi bạn quay lại.", "📌 Pinned. I'll remind you when you're back.");
+
+// If-then starts and the 2-minute starter
+
+export const asPlanned = (t: TodoTask) => L(`Như đã định: ${q(t)}`, `As planned: ${q(t)}`);
+
+/** The chip on a task with a plan: "⏱ after 14:00 meeting". */
+export function triggerChip(trigger: StartTrigger, events: CalEvent[]): string {
+  switch (trigger.kind) {
+    case "afterMeeting": {
+      const e = events.find((x) => x.id === trigger.eventId);
+      return e
+        ? L(`⏱ sau họp ${timeString(e.start)}`, `⏱ after ${timeString(e.start)} meeting`)
+        : L(`⏱ sau “${shortText(trigger.title, 18)}”`, `⏱ after “${shortText(trigger.title, 18)}”`);
+    }
+    case "appOpen":
+      return L(`⏱ khi mở ${shortText(trigger.app, 18)}`, `⏱ when I open ${shortText(trigger.app, 18)}`);
+    case "afterLunch":
+      return L("⏱ sau bữa trưa", "⏱ after lunch");
+  }
+}
+
+/** A choice in a task's "Start when…" menu. */
+export function triggerChoice(trigger: StartTrigger, events: CalEvent[]): string {
+  switch (trigger.kind) {
+    case "afterMeeting": {
+      const e = events.find((x) => x.id === trigger.eventId);
+      const title = shortText(trigger.title || e?.title || "", 30);
+      return L(`Sau họp “${title}”${e ? ` (${timeString(e.end)})` : ""}`, `After “${title}”${e ? ` (${timeString(e.end)})` : ""}`);
+    }
+    case "appOpen":
+      return L(`Khi tôi mở ${shortText(trigger.app, 30)}`, `When I open ${shortText(trigger.app, 30)}`);
+    case "afterLunch":
+      return L(`Sau bữa trưa (${LUNCH_HOUR}:00)`, `After lunch (${LUNCH_HOUR}:00)`);
+  }
+}
+
+export const starterStart = (t: TodoTask | null, minutes = 2) =>
+  t
+    ? L(`Chỉ ${minutes} phút thôi cho ${q(t)}. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")} on ${q(t)}. Open it and see, that's all 🌱`)
+    : L(`Chỉ ${minutes} phút thôi. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")}. Open it and see, that's all 🌱`);
+
+export const starterEnd = (t: TodoTask | null) =>
+  t
+    ? L(`Xong 2 phút rồi, bạn đã bắt đầu ${q(t)}! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?`, `Two minutes done, you've started ${q(t)}! 🌱 Keep going with a full session, or stop here for now?`)
+    : L("Xong 2 phút rồi, bạn đã bắt đầu! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?", "Two minutes done, you've started! 🌱 Keep going with a full session, or stop here for now?");
+
+export const starterEnough = () => L("Hay lắm, bắt đầu là phần khó nhất 🌱 Lần sau sẽ dễ hơn.", "Nice, starting is the hardest part 🌱 It gets easier next time.");
 
 // Postponed tasks
 

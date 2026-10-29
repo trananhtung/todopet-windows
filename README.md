@@ -30,6 +30,9 @@ Everything from the macOS app:
 - **A pet that lives with your work:** fullness, dirt and flies after missed days, XP and five growth stages, random celebrations with a rare golden treat, combos and fireworks, accessories to unlock, and a sticker book whose pages start with two gift stickers. Playful mischief (a grumble, a sign parade, then a table flip in the middle of your screen) only happens while you're on a distracting site or app, never in a meeting or while you're focusing (and the grumble and the parade wait for a pause in your typing).
 - **Forgiving streaks.** One finished task keeps your streak; a snack from your stash saves a missed day, a broken streak can be repaired the next workday, and days off, days the PC is off and packed meeting days never count against you.
 - **A daily nudge budget:** at most 8 unsolicited reminders a day (you choose), and the ones you keep closing come less often.
+- **"Where was I?"** After 5+ minutes away, a meeting, or a 2+ minute detour on a distracting site, the pet shows what you were on (the task, the app and the page) with **Reopen ↗**, **Focus** and **Something else**. **📌 Pin my place** on the board keeps your spot with a one-line next step. It isn't counted against the nudge budget.
+- **Meeting bookends.** The "meeting soon" bubble lists up to 2 related tasks; after a meeting of 15+ minutes the pet asks "Anything to capture?" (**＋ Next step** opens the add field with the meeting's name in it) and suggests a 5-minute breather when the next meeting is close.
+- **If-then starts and a 2-minute starter.** A task's **⋯** menu has **Start when…** (after a meeting, when I open an app, after lunch) and **Try 2 minutes**, a tiny "just open it" session that ends with an offer for a full one or a kind "that's enough".
 - **Designed not to break your focus:** it interrupts only at a pause, holds non-urgent bubbles while you're in the zone, spaces bubbles at least 15 minutes apart, keeps still while you type, and is quiet by default.
 - **A diary** of every reminder and why it fired, to tune it to how you work.
 - **English and Vietnamese.**
@@ -98,9 +101,10 @@ Score ≥ 75 is happy, ≥ 50 chill, and anything lower worried. It only turns g
 
 - No analytics and no servers of its own. Network traffic goes to `api.todoist.com`, your ICS links, and to `api.anthropic.com` only when you press **Ask Claude**.
 - Distraction detection reads the **name of the app in front** and, for browsers, the **address of the active tab** and its page title (window titles of other apps are never read). They stay in memory and are never stored or sent anywhere.
+- The **"Where was I?"** card remembers the task, app, page title and address (http/https only) you were on, plus the next step you pin. It lives **in memory only**: never saved to disk, never written to the diary, and forgotten at midnight. Your **Start when…** plans (a task, and a meeting, an app name or "after lunch") are saved for the day and dropped the day after.
 - Typing detection uses Windows Raw Input and records **only the time of the last key-down**: it never reads which key, and it is not a keyboard hook.
 - Calendar ICS links are secret addresses, so they're stored in Windows Credential Manager like the tokens, and only public internet addresses are fetched.
-- Settings and the pet's life are in `%APPDATA%\com.trananhtung.todopet`; the diary stays on this PC in `%LOCALAPPDATA%\com.trananhtung.todopet` (14 days, can be turned off).
+- Settings, the pet's life and today's "start when…" plans are in `%APPDATA%\com.trananhtung.todopet`; the diary stays on this PC in `%LOCALAPPDATA%\com.trananhtung.todopet` (14 days, can be turned off).
 - Spoken lines use the voices built into Windows, offline.
 
 ## Development

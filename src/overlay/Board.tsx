@@ -9,6 +9,7 @@ import * as lines from "../core/lines";
 import { dueDay, dueTime, isRecurring, planned, taskTitle, uiPriority, type TodoTask } from "../core/models";
 import { moodEmoji, moodLabel } from "../core/mood";
 import { isWorkday } from "../core/prefs";
+import type { StartTrigger } from "../core/triggers";
 import { ACCESSORIES, SPECIES_IDS } from "../core/types";
 import { defaultPose, renderPet, speciesInfo } from "../pets";
 import { Icon, type IconName } from "../ui/icons";
@@ -22,6 +23,9 @@ type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "ward
 /** Priority text colors (AA on the board's surfaces) and check-circle colors, P1…P4. */
 const PRIO_INK = ["", "var(--p1-ink)", "var(--p2-ink)", "var(--p3-ink)", "var(--p4-ink)"];
 const PRIO_LINE = ["", "var(--p1-line)", "var(--p2-line)", "var(--p3-line)", "var(--p4-line)"];
+
+/** "Start when…" lists this many of today's meetings. */
+const MAX_MEETING_CHOICES = 4;
 
 const short = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
 
@@ -98,7 +102,7 @@ export function Board(props: {
         ) : view.kind === "wardrobe" ? (
           <Wardrobe brain={brain} s={s} onBack={() => setView({ kind: "main" })} />
         ) : (
-          <Main brain={brain} backend={backend} s={s} focusAdd={request.focusAdd} seq={request.seq} onSplit={(task) => setView({ kind: "split", task })} />
+          <Main brain={brain} backend={backend} s={s} focusAdd={request.focusAdd} prefill={request.prefill} seq={request.seq} onSplit={(task) => setView({ kind: "split", task })} />
         )}
       </div>
       <Footer brain={brain} s={s} onClose={onClose} />
@@ -376,7 +380,23 @@ function DayOffToggle({ brain, s }: { brain: Brain; s: BrainState }) {
   );
 }
 
-function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; backend: Backend; s: BrainState; focusAdd: boolean; seq: number; onSplit: (t: TodoTask) => void }) {
+function Main({
+  brain,
+  backend,
+  s,
+  focusAdd,
+  prefill,
+  seq,
+  onSplit,
+}: {
+  brain: Brain;
+  backend: Backend;
+  s: BrainState;
+  focusAdd: boolean;
+  prefill: string | null;
+  seq: number;
+  onSplit: (t: TodoTask) => void;
+}) {
   const day = s.day;
   const stuckIds = new Map(s.stuck.map((x) => [x.task.id, x.days]));
   const done = day.completed.length;
@@ -388,7 +408,7 @@ function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; bac
     <>
       {s.focus && <FocusCard brain={brain} s={s} />}
 
-      <AddTask brain={brain} focusAdd={focusAdd} seq={seq} note={note} setNote={setNote} />
+      <AddTask brain={brain} focusAdd={focusAdd} prefill={prefill} seq={seq} note={note} setNote={setNote} />
 
       {day.overdue.length > 0 && (
         <section className="section" aria-labelledby="sec-overdue">
@@ -416,6 +436,7 @@ function Main({ brain, backend, s, focusAdd, seq, onSplit }: { brain: Brain; bac
           </h2>
           <span className="spacer" />
           {toPlan > 0 && <span className="chip stuck">{L(`thiếu ${toPlan} việc`, `${toPlan} to plan`)}</span>}
+          <PinPlace brain={brain} s={s} onNote={setNote} compact={toPlan > 0} />
           <DayOffToggle brain={brain} s={s} />
         </div>
         {day.today.length === 0 ? (
@@ -476,9 +497,11 @@ function TaskRow({
   onSplit: (t: TodoTask) => void;
   onNote: (n: Note) => void;
 }) {
-  const [pop, setPop] = useState<"move" | "delete" | null>(null);
+  const [pop, setPop] = useState<"move" | "delete" | "more" | "when" | null>(null);
   const moveRef = useRef<HTMLButtonElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const plan = s.triggers.find((x) => x.taskId === t.id && !x.fired) ?? null;
   const title = taskTitle(t);
   const time = dueTime(t);
   const day = dueDay(t);
@@ -511,6 +534,11 @@ function TaskRow({
         ⏳ {plural(stuckDays, "ngày", "day", "days")}
       </span>
     ),
+    plan && (
+      <span key="plan" className="chip plan" title={lines.triggerChoice(plan.trigger, s.events)}>
+        {lines.triggerChip(plan.trigger, s.events)}
+      </span>
+    ),
     isRecurring(t) && (
       <span key="rec" className="chip" title={L("Lặp lại", "Repeats")}>
         🔁
@@ -525,7 +553,7 @@ function TaskRow({
   const closePop = (restoreFocus: boolean) => {
     const which = pop;
     setPop(null);
-    if (restoreFocus) (which === "move" ? moveRef : deleteRef).current?.focus();
+    if (restoreFocus) (which === "move" ? moveRef : which === "more" || which === "when" ? moreRef : deleteRef).current?.focus();
   };
   return (
     <li className={`task${pop ? " active" : ""}`} style={{ ["--prio" as string]: PRIO_LINE[prio] }}>
@@ -542,6 +570,7 @@ function TaskRow({
         <IconButton icon="play" label={L("Tập trung", "Focus")} onClick={() => brain.startFocus(t)} />
         <IconButton icon="scissors" label={L("Chia nhỏ", "Split")} onClick={() => onSplit(t)} />
         <IconButton ref={moveRef} icon="reschedule" label={L("Dời", "Move")} aria-haspopup="menu" aria-expanded={pop === "move"} onClick={() => setPop(pop === "move" ? null : "move")} />
+        <IconButton ref={moreRef} icon="more" label={L("Thêm: thử 2 phút, bắt đầu khi…", "More: try 2 minutes, start when…")} aria-haspopup="menu" aria-expanded={pop === "more" || pop === "when"} onClick={() => setPop(pop === "more" || pop === "when" ? null : "more")} />
         <IconButton ref={deleteRef} icon="trash" danger label={L("Xoá", "Delete")} aria-haspopup="dialog" aria-expanded={pop === "delete"} onClick={() => setPop(pop === "delete" ? null : "delete")} />
       </div>
       {pop === "move" && (
@@ -576,6 +605,33 @@ function TaskRow({
           ))}
         </Popover>
       )}
+      {pop === "more" && (
+        <Popover anchor={moreRef} role="menu" label={`“${short(title, 40)}”`} className="menu" onClose={closePop}>
+          <div className="menu-body">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setPop(null);
+                brain.startTwoMinutes(t);
+              }}
+            >
+              <Icon name="play" size={15} />
+              {L("Thử 2 phút", "Try 2 minutes")}
+            </button>
+            <button type="button" role="menuitem" aria-haspopup="menu" onClick={() => setPop("when")}>
+              <Icon name="clock" size={15} />
+              {L("Bắt đầu khi…", "Start when…")}
+              <Icon name="chevronDown" size={13} className="menu-end turn" />
+            </button>
+          </div>
+        </Popover>
+      )}
+      {pop === "when" && (
+        <Popover anchor={moreRef} role="menu" label={L("Bắt đầu khi…", "Start when…")} className="menu" onClose={closePop}>
+          <WhenMenu brain={brain} s={s} t={t} plan={plan?.trigger ?? null} onClose={() => setPop(null)} onNote={onNote} />
+        </Popover>
+      )}
       {pop === "delete" && (
         <Popover anchor={deleteRef} role="alertdialog" label={L("Xoá việc", "Delete task")} className="confirm" onClose={closePop}>
           <p>{lines.confirmDelete(t)}</p>
@@ -598,6 +654,172 @@ function TaskRow({
         </Popover>
       )}
     </li>
+  );
+}
+
+/** "Start when…": after one of today's meetings, when I open an app (a recent one, or typed), or after lunch. */
+function WhenMenu({
+  brain,
+  s,
+  t,
+  plan,
+  onClose,
+  onNote,
+}: {
+  brain: Brain;
+  s: BrainState;
+  t: TodoTask;
+  plan: StartTrigger | null;
+  onClose: () => void;
+  onNote: (n: Note) => void;
+}) {
+  const [app, setApp] = useState("");
+  const title = taskTitle(t);
+  // The next few meetings are enough; the list stays short on a day full of them.
+  const choices = useMemo(() => {
+    let meetings = 0;
+    return brain.startTriggerChoices().filter((c) => c.kind !== "afterMeeting" || ++meetings <= MAX_MEETING_CHOICES);
+  }, [brain]);
+  const same = (a: StartTrigger, b: StartTrigger | null) =>
+    b !== null && a.kind === b.kind && (a.kind !== "afterMeeting" || (b.kind === "afterMeeting" && a.eventId === b.eventId)) && (a.kind !== "appOpen" || (b.kind === "appOpen" && a.app.toLowerCase() === b.app.toLowerCase()));
+  const choose = (trigger: StartTrigger) => {
+    onClose();
+    const ok = brain.setStartTrigger(t, trigger);
+    onNote({
+      n: Date.now(),
+      text: ok ? `⏱ “${short(title, 28)}”: ${lines.triggerChoice(trigger, s.events)}` : L("Chưa hẹn được, thử lại nhé.", "Couldn't set that, try again."),
+      error: !ok,
+    });
+  };
+  const typed = app.trim();
+  // Arrow, Home and End move the caret in the app field, not between the menu's items.
+  const keepKeys = (e: React.KeyboardEvent) => {
+    if (e.key === "Home" || e.key === "End" || e.key.startsWith("Arrow")) e.stopPropagation();
+  };
+  return (
+    <div className="menu-body">
+      <div className="menu-title">{L("Bắt đầu khi…", "Start when…")}</div>
+      {choices.map((c) => (
+        <button key={JSON.stringify(c)} type="button" role="menuitem" aria-current={same(c, plan) ? "true" : undefined} onClick={() => choose(c)}>
+          <Icon name={c.kind === "afterMeeting" ? "calendar" : c.kind === "appOpen" ? "reschedule" : "clock"} size={15} />
+          {lines.triggerChoice(c, s.events)}
+          {same(c, plan) && <Icon name="check" size={14} className="menu-end" />}
+        </button>
+      ))}
+      <form
+        className="menu-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (typed) choose({ kind: "appOpen", app: typed });
+        }}
+      >
+        <label className="sr-only" htmlFor={`when-app-${t.id}`}>
+          {L("Ứng dụng khác", "Another app")}
+        </label>
+        <input id={`when-app-${t.id}`} className="field" autoComplete="off" maxLength={60} placeholder={L("Mở ứng dụng khác…", "When I open another app…")} value={app} onChange={(e) => setApp(e.target.value)} onKeyDown={keepKeys} />
+        <button className="btn small" disabled={!typed}>
+          {L("Đặt", "Set")}
+        </button>
+      </form>
+      {plan && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            onClose();
+            brain.clearStartTrigger(t);
+            onNote({ n: Date.now(), text: L(`Đã bỏ hẹn giờ cho “${short(title, 28)}”`, `Removed the plan for “${short(title, 28)}”`), error: false });
+          }}
+        >
+          <Icon name="close" size={15} />
+          {L("Bỏ hẹn giờ", "Remove the plan")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** **📌 Pin my place** in the Today header: keeps what you're on (never saved to disk) with an optional next step. */
+function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; onNote: (n: Note) => void; compact: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const ref = useRef<HTMLButtonElement>(null);
+  const label = L("Ghim chỗ này", "Pin my place");
+  const shown = s.pinned ? L("Đã ghim", "Pinned") : label;
+  const explain = L(
+    "Mình nhớ bạn đang làm gì (việc, ứng dụng, trang web) và nhắc lại khi bạn quay lại. Chỉ giữ trong bộ nhớ, không lưu ra máy.",
+    "I remember what you're on (task, app, page) and show it when you're back. Kept in memory only, never saved to disk.",
+  );
+  const close = (restoreFocus: boolean) => {
+    setOpen(false);
+    if (restoreFocus) ref.current?.focus();
+  };
+  const submit = () => {
+    const ok = brain.pinPlace(text);
+    setOpen(false);
+    setText("");
+    onNote({ n: Date.now(), text: ok ? lines.pinned() : L("Chưa có gì để ghim, mở một ứng dụng hoặc ghi một dòng nhé.", "Nothing to pin yet: open an app, or write a line."), error: !ok });
+  };
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className={`btn small pin${compact ? " compact" : ""}`}
+        data-pinned={s.pinned}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`${shown}. ${explain}`}
+        title={`${label}: ${explain}`}
+        onClick={() => setOpen(!open)}
+      >
+        <Icon name="pin" size={14} />
+        <span className={compact ? "sr-only" : undefined}>{shown}</span>
+      </button>
+      {open && (
+        <Popover anchor={ref} role="dialog" label={label} className="confirm pin-form" onClose={close}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit();
+            }}
+          >
+            <p>{explain}</p>
+            <label className="sr-only" htmlFor="pin-note">
+              {L("Bước tiếp theo (không bắt buộc)", "Next step (optional)")}
+            </label>
+            <input
+              id="pin-note"
+              className="field"
+              data-autofocus
+              autoComplete="off"
+              maxLength={120}
+              placeholder={L("Bước tiếp theo (không bắt buộc)…", "Next step (optional)…")}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+            <div className="pop-actions">
+              {s.pinned && (
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => {
+                    brain.unpinPlace();
+                    close(true);
+                  }}
+                >
+                  {L("Bỏ ghim", "Unpin")}
+                </button>
+              )}
+              <button type="submit" className="btn small primary">
+                <Icon name="pin" size={14} />
+                {L("Ghim", "Pin")}
+              </button>
+            </div>
+          </form>
+        </Popover>
+      )}
+    </>
   );
 }
 
@@ -624,12 +846,15 @@ interface Note {
 function AddTask({
   brain,
   focusAdd,
+  prefill,
   seq,
   note,
   setNote,
 }: {
   brain: Brain;
   focusAdd: boolean;
+  /** Text to start the field with ("Team sync: "), from the after-meeting bubble. */
+  prefill: string | null;
   seq: number;
   note: Note | null;
   setNote: (n: Note | null) => void;
@@ -642,6 +867,18 @@ function AddTask({
   useEffect(() => {
     if (focusAdd) input.current?.focus();
   }, [focusAdd, seq]);
+  useEffect(() => {
+    if (prefill === null) return;
+    setText(prefill);
+    // After the value lands, with the cursor at its end so typing goes on from "Team sync: ".
+    const id = requestAnimationFrame(() => {
+      const el = input.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(prefill.length, prefill.length);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [prefill, seq]);
   useEffect(() => {
     if (!note || note.error) return;
     const id = setTimeout(() => setNote(null), 4500);
@@ -1041,8 +1278,8 @@ function NudgeCount({ s }: { s: BrainState }) {
   const hold = s.nudgeHoldUntil !== null && s.nudgeHoldUntil > Date.now() ? timeString(new Date(s.nudgeHoldUntil)) : null;
   const title =
     L(
-      `Hôm nay còn ${left}/${s.prefs.nudgeBudget} lần nhắc. Việc có giờ, cuộc họp, lời chào buổi sáng và tổng kết cuối ngày không tính.`,
-      `${left} of ${s.prefs.nudgeBudget} reminders left today. Timed tasks, meetings, the morning hello and the end-of-day review don't count.`,
+      `Hôm nay còn ${left}/${s.prefs.nudgeBudget} lần nhắc. Việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp và việc bạn tự hẹn giờ không tính.`,
+      `${left} of ${s.prefs.nudgeBudget} reminders left today. Timed tasks, meetings, the morning hello, the end-of-day review, the "where was I?" card, the question after a meeting and plans you set yourself don't count.`,
     ) + (hold ? L(` Đang tạm im tới ${hold}.`, ` Holding reminders until ${hold}.`) : "");
   // A plain span can't carry an aria-label: the count is a status, and the detail is read as hidden text.
   return (
