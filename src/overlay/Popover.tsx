@@ -38,7 +38,15 @@ export function Popover({
       // Stay inside the overlay's stage (above the taskbar; the demo draws a fake one at the bottom).
       const stage = document.querySelector(".stage")?.getBoundingClientRect();
       const bounds = { width: stage?.right ?? window.innerWidth, height: stage?.bottom ?? window.innerHeight };
-      setPos(placePopover({ left: r.left, top: r.top, width: r.width, height: r.height }, { width: el.offsetWidth, height: el.offsetHeight }, bounds));
+      // Opened from the board: stay inside it (a wide dialog under a button near its edge would hang out over the pet).
+      const board = a.closest(".board")?.getBoundingClientRect();
+      setPos(
+        placePopover(
+          { left: r.left, top: r.top, width: r.width, height: r.height },
+          { width: el.offsetWidth, height: el.offsetHeight },
+          board && board.width > 0 ? { ...bounds, bounds: { left: board.left, width: board.width } } : bounds,
+        ),
+      );
     };
     place();
   }, [anchor]);

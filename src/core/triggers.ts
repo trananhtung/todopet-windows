@@ -73,20 +73,34 @@ const isPet = (app: ForegroundApp) => app.exe.toLowerCase().startsWith("todopet"
 const words = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 0);
 const exeStem = (exe: string) => exe.trim().toLowerCase().replace(/\.exe$/, "");
 
+/** A typed app name as it is stored and shown: spaces tidied, no trailing ".exe" ("Figma.exe" is "Figma"). */
+export function normalizeAppName(raw: string): string {
+  return raw
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\s*\.exe$/i, "")
+    .trim();
+}
+
 /**
  * Is `app` the one a plan wants? An app picked from the recent ones is matched by its exe. A typed name needs 3+
- * characters and matches whole words of the app's name (in order: "studio", "Visual Studio") or the exe's name without
- * `.exe`, ignoring case: "e" or "exe" match nothing, "word" doesn't match "Password Manager".
+ * characters and, ignoring case and a trailing `.exe`, matches the start of the app's name word by word ("fig" and
+ * "Figma.exe" are Figma, "visual stu" is Visual Studio Code: a word may be cut after 3 letters, never at the front) or
+ * the start of the program's name ("chr" is chrome.exe). "e" or "exe" match nothing, and "word" isn't "Password Manager".
  */
 export function appMatches(app: ForegroundApp | null, wanted: string, exe?: string | null): boolean {
   if (!app) return false;
   if (exe) return app.exe.trim().toLowerCase() === exe.trim().toLowerCase();
-  const w = wanted.trim().toLowerCase();
+  const w = normalizeAppName(wanted).toLowerCase();
   if (w.length < MIN_APP_NAME) return false;
-  if (exeStem(app.exe) === w) return true;
+  if (exeStem(app.exe).startsWith(w)) return true;
   const want = words(w);
   if (want.length === 0) return false;
-  return ` ${words(app.name).join(" ")} `.includes(` ${want.join(" ")} `);
+  const have = words(app.name);
+  for (let i = 0; i + want.length <= have.length; i++) {
+    if (want.every((x, j) => have[i + j] === x || (x.length >= MIN_APP_NAME && have[i + j].startsWith(x)))) return true;
+  }
+  return false;
 }
 
 function holds(t: TaskTrigger, ctx: TriggerContext, now: Date): boolean {
@@ -202,8 +216,10 @@ function triggerFromJson(x: unknown): StartTrigger | null {
       return { kind: "afterMeeting", eventId: eventKey(raw), title: typeof r.title === "string" ? r.title.slice(0, MAX_TITLE) : "" };
     }
     case "appOpen": {
-      const app = text(r.app);
+      const raw = text(r.app);
       const exe = text(r.exe, 64)?.toLowerCase() ?? null;
+      // A typed name is kept without ".exe" (the chip says what the plan matches); a picked app keeps its own name.
+      const app = raw && !exe ? normalizeAppName(raw) : raw;
       if (!app || (!exe && app.length < MIN_APP_NAME)) return null;
       return exe ? { kind: "appOpen", app, exe } : { kind: "appOpen", app };
     }

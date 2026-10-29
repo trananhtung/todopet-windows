@@ -10,6 +10,17 @@ const overlaps = (a: Rect, b: Rect) =>
 const petBox = (x: number, H: number): Rect => ({ left: x - PET * 0.42, top: H - PET * 0.82, width: PET * 0.84, height: PET * 0.82 });
 
 describe("placeBoard", () => {
+  // v0.4 evaluation, issue 14: at 1024x700 the board sat flush to the top edge (its header 10 px from it).
+  it("leaves room above the board on a short screen, so it doesn't sit flush to the top", () => {
+    const W = 1024;
+    const H = 700 - 48; // the demo's fake taskbar
+    const p = placeBoard({ stageWidth: W, stageHeight: H, petX: 800, petSize: PET, headTop: head(H) });
+    expect(p.side).not.toBe("above");
+    expect(p.top).toBeGreaterThanOrEqual(16);
+    expect(p.top + p.height).toBe(H - 8);
+    expect(p.height).toBeGreaterThanOrEqual(300);
+  });
+
   it("opens beside the pet at full height on a laptop screen", () => {
     const W = 1366;
     const H = 720;
@@ -74,5 +85,21 @@ describe("placePopover", () => {
   it("stays on screen horizontally", () => {
     const p = placePopover({ left: 2, top: 100, width: 26, height: 26 }, { width: 180, height: 110 }, vp);
     expect(p.left).toBe(8);
+  });
+  // v0.4 evaluation, issue 14: a 288 px pin dialog under a button near the board's left edge hung 28 px out of the board,
+  // over the pet's head. Opened from the board it stays inside it.
+  it("stays inside the board it was opened from, when it is given one", () => {
+    const board = { left: 497, width: 402 };
+    const p = placePopover({ left: 636, top: 380, width: 121, height: 26 }, { width: 288, height: 150 }, { ...vp, bounds: board });
+    expect(p.left).toBeGreaterThanOrEqual(board.left + 8);
+    expect(p.left + 288).toBeLessThanOrEqual(board.left + board.width - 8);
+    // Without it, the same dialog hangs out of the board (and the viewport has room for that).
+    expect(placePopover({ left: 636, top: 380, width: 121, height: 26 }, { width: 288, height: 150 }, vp).left).toBeLessThan(board.left + 8);
+  });
+  it("is the same as before when the board is as wide as the screen, and gives up when the board is narrower than the popover", () => {
+    const p = placePopover({ left: 600, top: 200, width: 26, height: 26 }, { width: 180, height: 110 }, { ...vp, bounds: { left: 0, width: 1024 } });
+    expect(p.left + 180).toBe(626);
+    const tight = placePopover({ left: 300, top: 200, width: 26, height: 26 }, { width: 288, height: 110 }, { ...vp, bounds: { left: 280, width: 200 } });
+    expect(tight.left).toBe(38); // where it would have gone without a board
   });
 });

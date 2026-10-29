@@ -13,7 +13,7 @@ import type { BoardPlacement } from "./placement";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const placement: BoardPlacement = { side: "right", left: 0, top: 0, bottom: 0, width: 360, height: 600 };
-const request = (patch: Partial<BoardRequest> = {}): BoardRequest => ({ seq: 1, focusAdd: false, split: null, fromKeyboard: false, prefill: null, wrapUp: false, ...patch });
+const request = (patch: Partial<BoardRequest> = {}): BoardRequest => ({ seq: 1, focusAdd: false, split: null, fromKeyboard: false, prefill: null, wrapUp: false, focusTaskId: null, lighten: false, ...patch });
 
 let container: HTMLDivElement;
 let root: Root;
@@ -214,29 +214,72 @@ const sheet = () => document.querySelector<HTMLElement>(".sheet.wrap")!;
 const sheetButton = (text: string) => [...sheet().querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.getAttribute("aria-label") ?? b.textContent ?? "").includes(text))!;
 const noteField = () => document.querySelector<HTMLInputElement>("#wrap-note")!;
 const wrapRequest = () => request({ wrapUp: true });
+const frogSelect = () => document.querySelector<HTMLSelectElement>(".wrap-tomorrow select")!;
+const pickFrog = (value: string) =>
+  act(async () => {
+    const select = frogSelect();
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+const rowOf = (title: string) => [...sheet().querySelectorAll<HTMLElement>("li.wrap-row")].find((li) => li.textContent?.includes(title))!;
+const radiosIn = (el: ParentNode) => [...el.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
 
 describe("the Wrap up sheet", () => {
   it("keeps the draft when the board closes and opens again", async () => {
     await mount(wrapRequest());
     await type(noteField(), "Call mum first");
-    await click(sheet().querySelector<HTMLInputElement>('input[type="radio"]:not(:checked)')!);
+    const other = [...frogSelect().options].find((o) => o.value !== "" && o.value !== frogSelect().value && !o.disabled)!;
+    await pickFrog(other.value);
     const frog = brain.getSnapshot().wrapDraft!.frogId;
+    expect(frog).toBe(other.value);
     // The board goes away (blur, Escape, a click outside) and comes back.
     await act(async () => root.unmount());
     root = createRoot(container);
     await render(wrapRequest());
     expect(noteField().value).toBe("Call mum first");
     expect(brain.wrapDraft().frogId).toBe(frog);
-    expect(sheet().querySelector<HTMLInputElement>('input[type="radio"]:checked')).not.toBeNull();
+    expect(frogSelect().value).toBe(frog);
   });
 
-  it("puts focus on the heading, and groups the frog choices with a label", async () => {
+  it("puts focus on the heading, and labels the frog choice and each task's choices", async () => {
     await mount(wrapRequest());
     expect(document.activeElement?.tagName).toBe("H2");
     expect(document.activeElement?.textContent).toContain("Wrap up the day");
-    const group = sheet().querySelector('[role="radiogroup"]')!;
-    expect(group.getAttribute("aria-label")).toMatch(/frog/i);
-    expect(group.querySelectorAll('input[type="radio"]').length).toBeGreaterThan(1);
+    const label = document.querySelector(`label[for="${frogSelect().id}"]`)!;
+    expect(label.textContent).toMatch(/first tomorrow/i);
+    const groups = [...sheet().querySelectorAll('[role="radiogroup"]')];
+    expect(groups.length).toBe(brain.getSnapshot().day.today.length + brain.getSnapshot().day.overdue.length);
+    for (const g of groups) expect(g.getAttribute("aria-label")).toMatch(/what to do with/i);
+  });
+
+  // v0.4 evaluation, issue 10: "🐸 First tomorrow" was repeated on every row (4 to 10 times).
+  it("says it once: one first-task choice up top, and a frog only in the row it is on", async () => {
+    await mount(wrapRequest());
+    // (The row with the frog says it to a screen reader only.)
+    const visible = (el: Element) => {
+      const copy = el.cloneNode(true) as Element;
+      copy.querySelectorAll(".sr-only").forEach((e) => e.remove());
+      return copy.textContent!;
+    };
+    expect(visible(sheet()).match(/First tomorrow/g)).toHaveLength(1);
+    expect(sheet().querySelectorAll('input[type="radio"]')).toHaveLength(0);
+    expect(sheet().querySelectorAll(".wrap-frog-mark")).toHaveLength(1);
+    expect(sheet().querySelector(".wrap-row.is-frog")).not.toBeNull();
+  });
+
+  it("puts tomorrow's first task and the note above the list of tasks", async () => {
+    await mount(wrapRequest());
+    const position = (el: Element, other: Element) => el.compareDocumentPosition(other);
+    expect(position(noteField(), sheet().querySelector(".wrap-tasks")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(position(frogSelect(), sheet().querySelector(".wrap-tasks")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("can't pick a task moved off the plan as the first task", async () => {
+    await mount(wrapRequest());
+    const call = rowOf("Call client ABC");
+    await click(radiosIn(call).find((r) => r.textContent === "No date")!);
+    const option = [...frogSelect().options].find((o) => o.textContent === "Call client ABC")!;
+    expect(option.disabled).toBe(true);
   });
 
   it("shows a busy state that keeps its name, and can't be left meanwhile", async () => {
@@ -273,14 +316,12 @@ describe("the Wrap up sheet", () => {
 
   it("moves the frog to 'decide tomorrow' with a word about it when it is finished elsewhere", async () => {
     await mount(wrapRequest());
-    const radios = () => [...sheet().querySelectorAll<HTMLInputElement>('input[type="radio"]')];
-    const call = radios().find((r) => r.closest("li")?.textContent?.includes("Call client ABC"))!;
-    await click(call);
-    expect(call.checked).toBe(true);
+    const call = [...frogSelect().options].find((o) => o.textContent === "Call client ABC")!;
+    await pickFrog(call.value);
+    expect(frogSelect().value).toBe(call.value);
     await backend.todoist.close("2");
     await act(async () => brain.refresh());
-    const decide = radios().find((r) => r.closest("li")?.classList.contains("nofrog"))!;
-    expect(decide.checked).toBe(true);
+    expect(frogSelect().value).toBe("");
     expect(sheet().textContent).toContain("“Call client ABC” is already done");
   });
 
@@ -291,13 +332,13 @@ describe("the Wrap up sheet", () => {
         b.todoist.tasks = async (f) => (await tasks(f)).map((t) => (t.id === "4" ? { ...t, due: { ...t.due!, string: "every day", is_recurring: true } } : t));
       },
     });
-    const row = [...sheet().querySelectorAll("li.wrap-row")].find((li) => li.textContent?.includes("Plan the next sprint"))!;
-    const group = row.querySelector('[role="group"]')!;
+    const row = rowOf("Plan the next sprint");
+    const group = row.querySelector('[role="radiogroup"]')!;
     const reason = document.getElementById(group.getAttribute("aria-describedby") ?? "none");
     expect(reason?.textContent).toMatch(/repeating task keeps its own schedule/i);
-    expect([...group.querySelectorAll("button")].filter((b) => b.disabled)).toHaveLength(2);
+    expect(radiosIn(group).filter((b) => b.disabled)).toHaveLength(2);
     // Overdue tasks are on the sheet too.
-    const overdue = [...sheet().querySelectorAll("li.wrap-row")].find((li) => li.textContent?.includes("Reply to the boss"))!;
+    const overdue = rowOf("Reply to the boss");
     expect(overdue.textContent).toContain("overdue");
   });
 
@@ -328,27 +369,507 @@ describe("the Wrap up sheet", () => {
   });
 });
 
-describe("the day strip", () => {
-  it("lists the meetings and timed tasks with their times for a screen reader, and stacks blocks that overlap", async () => {
-    await mount(request(), {
-      now: new Date(2026, 9, 28, 10).getTime(),
+// v0.4 evaluation, issue 9: three buttons per task meant 34 Tab presses to reach "Done for today" with ten tasks.
+describe("the Wrap up sheet's keyboard", () => {
+  const checked = (row: HTMLElement) => radiosIn(row).find((r) => r.getAttribute("aria-checked") === "true")!;
+
+  it("makes each task's choices one tab stop, with the checked one in the tab order", async () => {
+    await mount(wrapRequest());
+    for (const g of sheet().querySelectorAll('[role="radiogroup"]')) {
+      const stops = radiosIn(g).filter((r) => r.tabIndex === 0);
+      expect(stops).toHaveLength(1);
+      expect(stops[0].getAttribute("aria-checked")).toBe("true");
+    }
+    // Back, the first task, the note, All to tomorrow, one stop per task, and the two buttons: about 10 Tab presses at most.
+    const stops = [...sheet().querySelectorAll<HTMLElement>("button, input, select")].filter((e) => !(e as HTMLButtonElement).disabled && e.tabIndex >= 0);
+    expect(stops.length).toBeLessThanOrEqual(brain.getSnapshot().day.today.length + brain.getSnapshot().day.overdue.length + 8);
+  });
+
+  it("moves between the choices with the arrow keys, Home and End, as a native radio group does", async () => {
+    await mount(wrapRequest());
+    const row = rowOf("Call client ABC");
+    const group = row.querySelector<HTMLElement>('[role="radiogroup"]')!;
+    const [tomorrow, none, keep] = radiosIn(group);
+    expect(checked(row)).toBe(keep);
+    keep.focus();
+    await key(keep, "ArrowLeft");
+    expect(checked(row)).toBe(none);
+    expect(document.activeElement).toBe(none);
+    expect(brain.wrapDraft().moves["2"]).toBe("none");
+    await key(none, "Home");
+    expect(checked(row)).toBe(tomorrow);
+    expect(brain.wrapDraft().moves["2"]).toBe("tomorrow");
+    await key(tomorrow, "ArrowLeft");
+    expect(checked(row)).toBe(keep); // wraps round
+    await key(keep, "End");
+    expect(checked(row)).toBe(keep);
+    await key(keep, "ArrowDown");
+    expect(checked(row)).toBe(tomorrow);
+  });
+
+  it("skips the choices a repeating task can't have", async () => {
+    await mount(wrapRequest(), {
       setup: (b) => {
-        const day = (h: number, m = 0) => {
-          const d = new Date(2026, 9, 28, h, m);
-          const p = (n: number) => String(n).padStart(2, "0");
-          return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}T${p(d.getHours())}${p(d.getMinutes())}00`;
-        };
-        const ev = (uid: string, title: string, a: string, z: string) => `BEGIN:VEVENT\r\nUID:${uid}\r\nDTSTART:${a}\r\nDTEND:${z}\r\nSUMMARY:${title}\r\nEND:VEVENT`;
-        b.calendar.fetchIcs = async () => [
-          { host: "demo.todopet", ok: true, text: `BEGIN:VCALENDAR\r\nVERSION:2.0\r\n${ev("a", "Design review", day(11), day(12))}\r\n${ev("b", "Budget call", day(11, 30), day(12, 30))}\r\nEND:VCALENDAR` },
-        ];
+        const tasks = b.todoist.tasks.bind(b.todoist);
+        b.todoist.tasks = async (f) => (await tasks(f)).map((t) => (t.id === "4" ? { ...t, due: { ...t.due!, string: "every day", is_recurring: true } } : t));
       },
     });
-    const track = document.querySelector<HTMLElement>(".ds-track")!;
-    const label = track.getAttribute("aria-label")!;
-    expect(label).toContain("Design review 11:00–12:00");
-    expect(label).toContain("Budget call 11:30–12:30");
-    const tops = [...track.querySelectorAll<HTMLElement>(".ds-seg")].map((e) => e.style.top);
+    const row = rowOf("Plan the next sprint");
+    const keep = radiosIn(row).find((r) => r.textContent === "Keep")!;
+    keep.focus();
+    await key(keep, "ArrowRight");
+    expect(checked(row)).toBe(keep);
+    expect(brain.wrapDraft().moves["4"] ?? "keep").toBe("keep");
+  });
+
+  it("goes back to the list with Escape instead of closing the board, and the draft stays", async () => {
+    await mount(wrapRequest());
+    await type(noteField(), "Start with the intro");
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    await act(async () => void noteField().dispatchEvent(esc));
+    // Taken by the sheet (the overlay only closes the board on an Escape nobody took).
+    expect(esc.defaultPrevented).toBe(true);
+    expect(document.querySelector(".sheet.wrap")).toBeNull();
+    expect(document.querySelector("#add-task")).not.toBeNull();
+    expect(brain.wrapDraft().note).toBe("Start with the intro");
+    // From the list itself, Escape is left alone.
+    const again = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    await act(async () => void document.querySelector("#add-task")!.dispatchEvent(again));
+    expect(again.defaultPrevented).toBe(false);
+  });
+
+  it("keeps its Escape while it is sending (the sheet can't be left meanwhile)", async () => {
+    await mount(wrapRequest());
+    vi.spyOn(brain, "wrapUp").mockImplementation(() => new Promise(() => undefined));
+    await click(sheetButton("Done for today"));
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    await act(async () => void sheet().dispatchEvent(esc));
+    expect(document.querySelector(".sheet.wrap")).not.toBeNull();
+  });
+});
+
+const WED_9AM = new Date(2026, 9, 28, 9).getTime();
+const WED_10AM = new Date(2026, 9, 28, 10).getTime();
+
+/** Today's meetings, as an ICS the demo calendar serves (local times on Wednesday 28 October). */
+function meetingsOn(...events: [uid: string, title: string, from: [number, number], to: [number, number]][]) {
+  const day = ([h, m]: [number, number]) => {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `20261028T${p(h)}${p(m)}00`;
+  };
+  const ev = (uid: string, title: string, a: [number, number], z: [number, number]) => `BEGIN:VEVENT\r\nUID:${uid}\r\nDTSTART:${day(a)}\r\nDTEND:${day(z)}\r\nSUMMARY:${title}\r\nEND:VEVENT`;
+  return (b: DemoBackend) => {
+    b.calendar.fetchIcs = async () => [{ host: "demo.todopet", ok: true, text: `BEGIN:VCALENDAR\r\nVERSION:2.0\r\n${events.map((e) => ev(...e)).join("\r\n")}\r\nEND:VCALENDAR` }];
+  };
+}
+
+describe("the day strip", () => {
+  const busyDay = meetingsOn(["a", "Design review", [11, 0], [12, 0]], ["b", "Budget call", [11, 30], [12, 30]], ["c", "Quarterly planning", [14, 0], [17, 0]]);
+  const track = () => document.querySelector<HTMLElement>(".ds-track")!;
+  const segs = () => [...track().querySelectorAll<HTMLElement>(".ds-seg")];
+
+  it("lists the meetings and timed tasks with their times for a screen reader, and stacks blocks that overlap", async () => {
+    await mount(request(), { now: WED_10AM, setup: busyDay });
+    expect(track().getAttribute("role")).toBe("group");
+    expect(track().getAttribute("aria-label")).toContain("3 meetings");
+    const labels = segs().map((e) => e.getAttribute("aria-label"));
+    expect(labels).toContain("Meeting: Design review, 11:00 to 12:00");
+    expect(labels).toContain("Meeting: Budget call, 11:30 to 12:30");
+    expect(labels).toContain("Timed task: Call client ABC, 11:00 to 11:30");
+    const tops = segs().map((e) => e.style.top);
     expect(new Set(tops).size).toBe(2);
+  });
+
+  // v0.4 evaluation, issue 7: 8 px unlabeled bars, mouse-only, orange under 3:1 on the light track.
+  it("draws 14 px bars, and names the blocks that are wide enough", async () => {
+    await mount(request(), { now: WED_10AM, setup: busyDay });
+    for (const seg of segs()) expect(seg.style.height).toBe("14px");
+    const labelled = segs().filter((e) => e.querySelector(".ds-label"));
+    expect(labelled.map((e) => e.textContent)).toEqual(["Quarterly planning"]);
+  });
+
+  it("marks the hours every 2 hours", async () => {
+    await mount(request(), { now: WED_10AM, setup: busyDay });
+    const axis = [...document.querySelectorAll(".ds-axis span")].map((e) => e.textContent);
+    expect(axis).toEqual(["08", "10", "12", "14", "16", "18"]);
+    expect(track().querySelectorAll(".ds-tick")).toHaveLength(4);
+  });
+
+  it("is reachable by keyboard: one tab stop, arrow keys between the blocks, and a caption that says what each is", async () => {
+    await mount(request(), { now: WED_10AM, setup: busyDay });
+    const stops = segs().filter((e) => e.tabIndex === 0);
+    expect(stops).toHaveLength(1);
+    const caption = () => document.querySelector(".ds-caption")!.textContent;
+    expect(caption()).toContain("Now 10:00");
+    expect(caption()).toContain("next: ");
+    await act(async () => stops[0].focus());
+    expect(caption()).toContain(segs()[0].getAttribute("title")!);
+    await key(stops[0], "ArrowRight");
+    expect(document.activeElement).toBe(segs()[1]);
+    expect(segs()[1].tabIndex).toBe(0);
+    expect(segs()[0].tabIndex).toBe(-1);
+    expect(caption()).toContain(segs()[1].getAttribute("title")!);
+    await key(segs()[1], "End");
+    expect(document.activeElement).toBe(segs()[segs().length - 1]);
+    await key(document.activeElement!, "Home");
+    expect(document.activeElement).toBe(segs()[0]);
+    await act(async () => segs()[0].blur());
+    expect(caption()).toContain("Now 10:00");
+  });
+
+  it("names the day's hours: 09:00 to 18:00 ends at 18, and the tick one hour from it gives way", async () => {
+    await mount(request(), { now: WED_10AM, setup: busyDay });
+    const { axisHours } = await import("./DayStrip");
+    expect(axisHours(8, 18)).toEqual([8, 10, 12, 14, 16, 18]);
+    expect(axisHours(9, 18)).toEqual([9, 11, 13, 15, 18]);
+    expect(axisHours(8, 17)).toEqual([8, 10, 12, 14, 17]);
+    expect(axisHours(9, 17)).toEqual([9, 11, 13, 15, 17]);
+    expect(axisHours(8, 24)).toEqual([8, 10, 12, 14, 16, 18, 20, 22, 24]);
+  });
+
+  it("says how far over the day is in plain words, and it is the way into lightening it", async () => {
+    await mount(request(), { now: WED_9AM, setup: (b) => b.demo.setHeavyDay(true) });
+    const over = document.querySelector<HTMLButtonElement>(".ds-over")!;
+    expect(over.textContent).toMatch(/^~\d+h\d* over$|^~\d+h over$/);
+    expect(over.getAttribute("aria-pressed")).toBe("false");
+    expect(document.querySelector(".lighten-banner")).toBeNull();
+    await click(over);
+    expect(document.querySelector(".lighten-banner")).not.toBeNull();
+    expect(over.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("has no over text when the day fits", async () => {
+    await mount(request(), { now: WED_9AM });
+    expect(document.querySelector(".ds-over")).toBeNull();
+    expect(document.querySelector(".ds-meter")).not.toBeNull();
+  });
+});
+
+describe("lightening an overbooked day (v0.4 evaluation, issue 3)", () => {
+  const heavy = (b: DemoBackend) => b.demo.setHeavyDay(true);
+  const rows = () => [...document.querySelectorAll<HTMLElement>(".task.lightening")];
+  const rowFor = (title: string) => rows().find((r) => r.textContent?.includes(title))!;
+  const banner = () => document.querySelector<HTMLElement>(".lighten-banner");
+
+  it("opens with how far over the day is, and a close button", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    expect(banner()?.textContent).toMatch(/~2h45 over/);
+    expect(banner()?.textContent).toContain("Move a few to tomorrow");
+    expect(banner()?.getAttribute("role")).toBe("status");
+    await click(banner()!.querySelector("button")!);
+    expect(banner()).toBeNull();
+    expect(rows()).toHaveLength(0);
+  });
+
+  it("puts each open row's estimate on it: its Todoist duration, or the default estimate", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    expect(rows()).toHaveLength(brain.getSnapshot().day.today.length);
+    const chip = (title: string) => rowFor(title).querySelector<HTMLElement>(".chip.est")!;
+    expect(chip("Write the weekly report").textContent).toContain("4h");
+    expect(chip("Call client ABC").textContent).toContain("3h");
+    expect(chip("Plan the next sprint").textContent).toContain("4h");
+    expect(chip("Call client ABC").classList.contains("dflt")).toBe(false);
+    expect(chip("Call client ABC").title).toBe("180 min, from Todoist");
+  });
+
+  it("shows the default estimate lighter, and says so", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: (b) => { heavy(b); const t = b.todoist.tasks.bind(b.todoist); b.todoist.tasks = async (f) => (await t(f)).map((x) => (x.id === "2" ? { ...x, duration: null } : x)); } });
+    const chip = rowFor("Call client ABC").querySelector<HTMLElement>(".chip.est")!;
+    expect(chip.textContent).toContain("30'");
+    expect(chip.classList.contains("dflt")).toBe(true);
+    expect(chip.title).toBe("30 min: your default estimate");
+  });
+
+  it("has no estimates and no move buttons until you ask for them", async () => {
+    await mount(request(), { now: WED_9AM, setup: heavy });
+    expect(document.querySelector(".chip.est, .lighten-go")).toBeNull();
+  });
+
+  it("moves a task to tomorrow in one tap, and the banner follows until the day fits", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    const before = banner()!.textContent;
+    await click(rowFor("Call client ABC").querySelector(".lighten-go")!);
+    await vi_waitFor(() => !brain.getSnapshot().day.today.some((t) => t.id === "2"));
+    await act(async () => undefined);
+    expect(rows().map((r) => r.textContent).join()).not.toContain("Call client ABC");
+    // 2h45 over, less the 2 hours of it that are not in a meeting: still over, by 45 minutes.
+    expect(banner()?.textContent).toMatch(/~45 min over/);
+    expect(banner()?.textContent).not.toBe(before);
+    expect(document.body.textContent).toContain("Moved “Call client ABC” to tomorrow ✓");
+    await click(rowFor("Plan the next sprint").querySelector(".lighten-go")!);
+    await vi_waitFor(() => !banner());
+    await act(async () => undefined);
+    // It fits now: the banner, the estimates and the buttons are gone, with a word about it.
+    expect(banner()).toBeNull();
+    expect(document.querySelector(".chip.est, .lighten-go")).toBeNull();
+    expect(document.body.textContent).toContain("Moved “Plan the next sprint” to tomorrow ✓ Nice, today fits now ✓");
+    expect(document.querySelector(".ds-over")).toBeNull();
+  });
+
+  it("moves to Monday on a Friday, and says so on the button", async () => {
+    await mount(request({ lighten: true }), { now: FRIDAY_4PM, setup: (b) => { heavy(b); } });
+    const go = rows()[0].querySelector<HTMLButtonElement>(".lighten-go");
+    // On Friday after 16:00 there is little of the day left: it is over, so the state is open.
+    expect(go?.textContent).toContain("Monday");
+    expect(go?.getAttribute("aria-label")).toContain("to Monday");
+  });
+
+  it("can't move a repeating task: its button is off, with the reason", async () => {
+    await mount(request({ lighten: true }), {
+      now: WED_9AM,
+      setup: (b) => {
+        heavy(b);
+        const tasks = b.todoist.tasks.bind(b.todoist);
+        b.todoist.tasks = async (f) => (await tasks(f)).map((t) => (t.id === "4" ? { ...t, due: { ...t.due!, string: "every day", is_recurring: true } } : t));
+      },
+    });
+    const go = rowFor("Plan the next sprint").querySelector<HTMLButtonElement>(".lighten-go")!;
+    expect(go.disabled).toBe(true);
+    expect(go.title).toMatch(/repeating task keeps its own schedule/i);
+  });
+
+  it("keeps the keyboard in the list after a move", async () => {
+    await mount(request({ lighten: true }), { now: WED_9AM, setup: heavy });
+    const go = rowFor("Call client ABC").querySelector<HTMLButtonElement>(".lighten-go")!;
+    go.focus();
+    await click(go);
+    await vi_waitFor(() => !brain.getSnapshot().day.today.some((t) => t.id === "2"));
+    await act(async () => undefined);
+    expect(document.activeElement?.closest(".board")).not.toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("asks to open ready from a request that arrives while the board is already open", async () => {
+    await mount(request(), { now: WED_9AM, setup: heavy });
+    expect(banner()).toBeNull();
+    await render(request({ seq: 2, lighten: true }));
+    expect(banner()).not.toBeNull();
+  });
+});
+
+describe("a bubble over the open board (v0.4 evaluation, issues 1 and 8)", () => {
+  const banner = () => document.querySelector<HTMLElement>(".bubble.banner");
+  const say = (b: Parameters<Brain["say"]>[0], why?: string) => act(async () => void (why ? brain.say(b, { why }) : brain.say(b)));
+
+  it("shows an urgent reminder in the board with its text and buttons, which work", async () => {
+    await mount();
+    const run = vi.fn();
+    await say({ text: "📅 Meeting in 4 min: “Client ABC renewal” (10:04)\nRelated: “Call client ABC”", seconds: 90, urgent: true, actions: [{ title: "OK", run }] }, "a meeting");
+    const b = banner()!;
+    expect(b).not.toBeNull();
+    expect(b.closest(".board")).not.toBeNull();
+    expect(b.textContent).toContain("Meeting in 4 min");
+    expect(b.getAttribute("role")).toBe("status");
+    expect(b.getAttribute("aria-live")).toBe("assertive");
+    await click([...b.querySelectorAll("button")].find((x) => x.textContent === "OK")!);
+    expect(run).toHaveBeenCalledOnce();
+    expect(banner()).toBeNull();
+  });
+
+  it("can be closed from the board", async () => {
+    await mount();
+    await say({ text: "⏰ In 8 min: “Call client ABC”", seconds: 40, urgent: true, actions: [] }, "task due");
+    await click(banner()!.querySelector(".bubble-close")!);
+    expect(banner()).toBeNull();
+    expect(brain.getSnapshot().bubble).toBeNull();
+  });
+
+  it("leaves the quiet replies to the board's own note, and the rest waits for the board to close", async () => {
+    await mount();
+    await say({ text: "Added “Buy milk” ✔︎", seconds: 4, urgent: true });
+    expect(banner()).toBeNull();
+    brain.dismissBubble(brain.getSnapshot().bubble!.id, "closed");
+    await say({ text: "Still there?", seconds: 30, actions: [{ title: "Yes", run: () => undefined }] }, "a nudge");
+    expect(banner()).toBeNull();
+  });
+
+  it("drops a banner that went stale before anyone read it", async () => {
+    await mount();
+    await say({ text: "⏰ In 8 min: “x”", seconds: 40, urgent: true, actions: [{ title: "OK", run: () => undefined }], validUntil: Date.now() - 1 }, "task due");
+    await act(async () => void brain.pruneBubble());
+    expect(banner()).toBeNull();
+  });
+});
+
+describe("Back to work, double-clicked (v0.4 evaluation, issue 4)", () => {
+  const wrapped = async () => {
+    await mount(request(), { now: FRIDAY_4PM });
+    await act(async () => void (await brain.wrapUp()));
+  };
+  const strip = () => document.querySelector<HTMLElement>(".daystrip")!;
+  const button = (text: string) => [...strip().querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes(text));
+
+  it("wakes the pet once, and the second click lands on nothing, not on Wrap up", async () => {
+    await wrapped();
+    expect(strip().textContent).toContain("Done for today");
+    await click(button("Back to work")!);
+    expect(brain.getSnapshot().doneUntil).toBeNull();
+    // The same spot is now the Wrap up button: a second click of the double-click.
+    const wrap = button("Wrap up")!;
+    expect(wrap).toBeTruthy();
+    await click(wrap);
+    expect(document.querySelector(".sheet.wrap")).toBeNull();
+    // A moment later it is a button like any other.
+    await act(async () => void (await new Promise((r) => setTimeout(r, 650))));
+    await click(button("Wrap up")!);
+    expect(document.querySelector(".sheet.wrap")).not.toBeNull();
+  });
+
+  it("wakes it only once however fast the clicks come", async () => {
+    await wrapped();
+    const wake = vi.spyOn(brain, "resumeDay");
+    const back = button("Back to work")!;
+    await click(back);
+    await click(back);
+    expect(wake.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(document.querySelector(".sheet.wrap")).toBeNull();
+  });
+});
+
+describe("Try 2 minutes while a focus session runs (v0.4 evaluation, issue 5)", () => {
+  async function openTry() {
+    const more = byLabel(MORE);
+    await click(more);
+    await click(menuItem(popover("menu")!, "Try 2 minutes"));
+    return more;
+  }
+
+  it("starts at once when nothing is running", async () => {
+    await mount();
+    await openTry();
+    expect(popover("alertdialog")).toBeNull();
+    expect(brain.getSnapshot().focus?.starter).toBe(true);
+  });
+
+  it("asks before replacing a running session, and keeping it changes nothing", async () => {
+    await mount();
+    const other = brain.getSnapshot().day.today[0];
+    brain.startFocus(other, 25);
+    const start = brain.getSnapshot().focus!.start;
+    const more = await openTry();
+    const dialog = popover("alertdialog")!;
+    expect(dialog.textContent).toMatch(/focus session\. Switch to 2 minutes\?/);
+    expect(brain.getSnapshot().focus).toMatchObject({ minutes: 25, start });
+    // The safe answer has the focus.
+    expect(document.activeElement?.textContent).toBe("Keep going");
+    await click(document.activeElement!);
+    expect(popover("alertdialog")).toBeNull();
+    expect(brain.getSnapshot().focus).toMatchObject({ minutes: 25, start });
+    expect(document.activeElement).toBe(more);
+  });
+
+  it("switches when you say so, and says how long you had been at it", async () => {
+    await mount();
+    brain.startFocus(brain.getSnapshot().day.today[0], 25);
+    await openTry();
+    const dialog = popover("alertdialog")!;
+    await click([...dialog.querySelectorAll("button")].find((b) => b.textContent?.includes("Switch to 2 minutes"))!);
+    expect(popover("alertdialog")).toBeNull();
+    expect(brain.getSnapshot().focus).toMatchObject({ minutes: 2, starter: true });
+  });
+
+  it("closes the question with Escape, to the More button", async () => {
+    await mount();
+    brain.startFocus(brain.getSnapshot().day.today[0], 25);
+    const more = await openTry();
+    await key(document.activeElement!, "Escape");
+    expect(popover("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(more);
+    expect(brain.getSnapshot().focus?.minutes).toBe(25);
+  });
+
+  it("doesn't ask about a break (nothing is lost)", async () => {
+    await mount();
+    brain.startBreak(5);
+    await openTry();
+    expect(popover("alertdialog")).toBeNull();
+    expect(brain.getSnapshot().focus?.starter).toBe(true);
+  });
+});
+
+describe("Another app… (v0.4 evaluation, issue 2)", () => {
+  const FIGMA = { name: "Figma", exe: "figma.exe", title: "Landing page" };
+  const sample = (app: typeof FIGMA | null) => ({ app, url: null, idleSeconds: 0, secondsSinceKey: 999, fullscreen: false, appSwitchedAt: Date.now() });
+  async function openDialog() {
+    await click(byLabel(MORE));
+    await click(menuItem(popover("menu")!, "Start when…"));
+    await click(menuItem(popover("menu")!, "Another app"));
+    return popover("dialog")!;
+  }
+  const matchLine = (d: HTMLElement) => d.querySelector(".app-match")!.textContent;
+
+  it("says which app lately in front a typed name matches, as you type", async () => {
+    await mount();
+    brain.onSample(sample(FIGMA));
+    brain.onSample(sample(null));
+    const dialog = await openDialog();
+    const input = dialog.querySelector("input")!;
+    expect(matchLine(dialog)).toBe("");
+    await type(input, "fi");
+    expect(matchLine(dialog)).toBe("");
+    await type(input, "fig");
+    expect(matchLine(dialog)).toBe("Matches Figma, which you used lately ✓");
+    await type(input, "Figma.exe");
+    expect(matchLine(dialog)).toBe("Matches Figma, which you used lately ✓");
+  });
+
+  it("explains what it takes in the hint, without promising what it can't match", async () => {
+    await mount();
+    const dialog = await openDialog();
+    const hint = dialog.querySelector(".hint")!.textContent!;
+    expect(hint).toMatch(/start of the name is enough/i);
+    expect(hint).toContain("chrome.exe");
+  });
+
+  it("sets the plan without the .exe, and says so kindly when it matches no app seen yet", async () => {
+    await mount();
+    const dialog = await openDialog();
+    expect(matchLine(dialog)).toBe("");
+    await type(dialog.querySelector("input")!, "Photoshop.exe");
+    expect(matchLine(dialog)).toBe("I haven't seen an app called that yet; I'll watch for it 👀");
+    await click([...dialog.querySelectorAll("button")].find((b) => b.textContent?.includes("Set"))!);
+    expect(brain.getSnapshot().triggers).toMatchObject([{ trigger: { kind: "appOpen", app: "Photoshop" } }]);
+    expect(document.body.textContent).toContain("When I open Photoshop. I haven't seen an app called that yet; I'll watch for it");
+    // The chip says what the plan matches.
+    expect(document.querySelector(".chip.plan")?.textContent).toBe("⏱ when I open Photoshop");
+  });
+
+  it("doesn't add the 'haven't seen' line when the app was seen", async () => {
+    await mount();
+    brain.onSample(sample(FIGMA));
+    brain.onSample(sample(null));
+    const dialog = await openDialog();
+    await type(dialog.querySelector("input")!, "fig");
+    await click([...dialog.querySelectorAll("button")].find((b) => b.textContent?.includes("Set"))!);
+    expect(document.body.textContent).not.toContain("haven't seen");
+    expect(brain.getSnapshot().triggers).toMatchObject([{ trigger: { kind: "appOpen", app: "fig" } }]);
+  });
+});
+
+describe("opening a task from a bubble (v0.4 evaluation, issue 13)", () => {
+  it("scrolls to the task, gives it the keyboard focus and flashes it", async () => {
+    await mount();
+    await render(request({ seq: 2, focusTaskId: "2" }));
+    const row = document.querySelector<HTMLElement>('.task[data-task-id="2"]')!;
+    expect(row.textContent).toContain("Call client ABC");
+    expect(document.activeElement).toBe(row);
+    expect(row.classList.contains("flash")).toBe(true);
+  });
+
+  it("leaves the flash after a moment, and does nothing for a task that is not there", async () => {
+    await mount();
+    await render(request({ seq: 2, focusTaskId: "nope" }));
+    expect(document.querySelector(".task.flash")).toBeNull();
+    await render(request({ seq: 3, focusTaskId: "4" }));
+    expect(document.querySelector(".task.flash")).not.toBeNull();
+    await act(async () => void (await new Promise((r) => setTimeout(r, 2500))));
+    expect(document.querySelector(".task.flash")).toBeNull();
+  });
+
+  it("comes back to the list from a sheet", async () => {
+    await mount(wrapRequest());
+    await render(request({ seq: 2, focusTaskId: "2" }));
+    expect(document.querySelector(".sheet.wrap")).toBeNull();
+    expect(document.activeElement?.getAttribute("data-task-id")).toBe("2");
   });
 });

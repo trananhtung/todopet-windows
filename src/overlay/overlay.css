@@ -10,7 +10,9 @@ body.overlay {
 .stage {
   position: fixed;
   inset: 0;
+  /* `clip`, not just `hidden`: a hidden box can still be scrolled by focus, and the pet reaches 9 px below it. */
   overflow: hidden;
+  overflow: clip;
   pointer-events: none;
 }
 .stage [data-hit] {
@@ -334,6 +336,55 @@ body.overlay {
   white-space: pre-line;
   padding-right: 18px;
 }
+/* Where you were, on the resume card: quieter than the task above it. */
+.bubble-detail {
+  margin-top: 2px;
+  padding-right: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+/* The same bubble inside the open board: a strip under the header, not floating over the pet. */
+.bubble.banner {
+  position: relative;
+  flex: none;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  margin: 8px 10px 0;
+  padding: 9px 12px 11px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+  box-shadow: none;
+  font-size: 13px;
+  animation: banner-in 0.28s var(--ease-out) both;
+  transform-origin: 50% 0;
+}
+.bubble.banner::after {
+  display: none;
+}
+.bubble.banner.urgent {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.bubble.banner.leaving {
+  animation: banner-out 0.24s ease-in both;
+}
+.bubble.banner .bubble-timer {
+  bottom: 3px;
+}
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@keyframes banner-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
 .bubble-close {
   position: absolute;
   top: 6px;
@@ -419,6 +470,11 @@ body.overlay {
   --p3-line: #246fe0;
   --p4-line: #8f8478;
   --ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent-strong);
+  /* The day strip's bars, each at 3:1 or better against the strip's track, with a label that reads on them (4.5:1). */
+  --ds-meeting: #2f6aa5;
+  --ds-meeting-ink: #ffffff;
+  --ds-timed: #b84d1b;
+  --ds-timed-ink: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) :is(.board, .popover, .bubble) {
@@ -438,9 +494,17 @@ body.overlay {
     --p2-line: #f0a03c;
     --p3-line: #79aee6;
     --p4-line: #9a8f84;
+    --ds-meeting: #79aee6;
+    --ds-meeting-ink: #1d1814;
+    --ds-timed: #f08a54;
+    --ds-timed-ink: #1d1814;
   }
 }
 :root[data-theme="dark"] :is(.board, .popover, .bubble) {
+  --ds-meeting: #79aee6;
+  --ds-meeting-ink: #1d1814;
+  --ds-timed: #f08a54;
+  --ds-timed-ink: #1d1814;
   --muted: #b3a294;
   --bad-ink: #f27389;
   --warn-ink: #e9b34a;
@@ -883,7 +947,8 @@ body.overlay {
 .seg button:hover {
   color: var(--ink);
 }
-.seg button[aria-pressed="true"] {
+.seg button[aria-pressed="true"],
+.seg button[aria-checked="true"] {
   background: var(--surface);
   color: var(--ink);
   box-shadow: var(--shadow-1);
@@ -919,17 +984,21 @@ body.overlay {
 }
 .add-note .note {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   margin: 6px 2px 0;
   min-width: 0;
   animation: note-in 0.25s var(--ease-out) both;
 }
+/* Up to two lines: a move that makes the day fit, or a plan for an app not seen yet, has more to say. */
 .add-note .note-text {
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 @keyframes note-in {
   from {
@@ -1290,6 +1359,9 @@ body.overlay {
   width: 264px;
   padding: 10px 12px;
 }
+.popover.confirm.switch-form {
+  width: 324px;
+}
 .popover.confirm p {
   margin: 0 0 10px;
   line-height: 1.4;
@@ -1297,6 +1369,7 @@ body.overlay {
 }
 .pop-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -1466,26 +1539,75 @@ body.overlay {
   font-size: 12px;
   color: var(--ink-2);
 }
+/* How far over the day is, in words: a button, because it is the way into lightening the day. */
+.ds-over {
+  flex: none;
+  min-height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--bad-soft);
+  color: var(--bad-ink);
+  font: 700 11.5px/22px var(--font);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ds-over:hover {
+  box-shadow: inset 0 0 0 1px var(--bad-ink);
+}
+.ds-over[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--bad-ink);
+}
 .ds-track {
   position: relative;
-  height: 22px;
   border-radius: 7px;
   background: var(--paper-2);
   overflow: hidden;
 }
+/* Every 2 hours: a hairline behind the bars. */
+.ds-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--ink) 13%, transparent);
+  pointer-events: none;
+}
+/* A 14 px bar. It is a tab stop (one for the whole strip) so keyboard users can read each one; the caption says what it is. */
 .ds-seg {
   position: absolute;
-  height: 8px;
-  min-width: 3px;
-  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  min-width: 4px;
+  padding: 0 5px;
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: default;
 }
 .ds-seg.meeting {
-  top: 3px;
-  background: var(--info);
+  background: var(--ds-meeting);
+  color: var(--ds-meeting-ink);
 }
 .ds-seg.timed {
-  bottom: 3px;
-  background: var(--accent);
+  background: var(--ds-timed);
+  color: var(--ds-timed-ink);
+}
+.ds-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The ring goes inside the bar: the track clips anything outside it. */
+.daystrip .ds-track .ds-seg:focus-visible {
+  z-index: 3;
+  box-shadow: none;
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
 }
 /* What is behind us is dimmed; the marker is now. */
 .ds-past {
@@ -1504,12 +1626,33 @@ body.overlay {
   background: var(--ink);
 }
 .ds-axis {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 12px;
   color: var(--muted);
   font-size: 11px;
-  line-height: 1;
+  line-height: 12px;
   font-variant-numeric: tabular-nums;
+}
+.ds-axis span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+.ds-axis span.first {
+  transform: none;
+}
+.ds-axis span.last {
+  transform: translateX(-100%);
+}
+/* What is hovered or focused; otherwise now and what is next. */
+.ds-caption {
+  min-height: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 15px;
 }
 .daystrip.is-done .ds-track {
   opacity: 0.6;
@@ -1842,61 +1985,81 @@ body.overlay {
   border: 1px solid var(--line);
   overflow: hidden;
 }
+/* One line per task: its name, then the three choices. */
 .wrap-row {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 7px 10px 8px;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 4px 8px 4px 10px;
   border-top: 1px solid var(--line);
 }
 .wrap-row:first-child {
   border-top: 0;
 }
+.wrap-row.is-frog {
+  background: var(--good-soft);
+}
 .wrap-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13.5px;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
   line-height: 1.35;
 }
-.wrap-row.off .wrap-title {
+/* A long title takes a second line rather than ending in "…" after a few letters (the tooltip has all of it). */
+.wrap-name {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.wrap-title .chip {
+  flex: none;
+  margin-left: 2px;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 6px;
+}
+.wrap-frog-mark {
+  flex: none;
+  font-size: 13px;
+  line-height: 1;
+}
+.wrap-row.off .wrap-name {
   color: var(--muted);
   text-decoration: line-through;
 }
 .wrap-ctl {
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 4px 8px;
+  gap: 6px;
 }
 .wrap-ctl .seg button:disabled {
   opacity: 0.45;
   cursor: default;
 }
-.frog-pick {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink-2);
-  font-size: 12px;
-  cursor: pointer;
+.wrap-ctl .seg button {
+  padding: 0 8px;
+  font-size: 11.5px;
 }
-.frog-pick input {
-  margin: 0;
-  accent-color: var(--accent-strong);
+/* The one place to choose tomorrow's first task, and the one line for tomorrow: up top, never far to scroll to. */
+.wrap-tomorrow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
 }
-.frog-pick input:checked + span {
-  color: var(--good-ink);
-  font-weight: 600;
-}
-.frog-pick input:disabled + span {
-  opacity: 0.5;
-}
-.wrap-row.nofrog {
-  background: var(--surface-2);
-}
-.wrap-note {
+.wrap-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1904,16 +2067,28 @@ body.overlay {
   font-size: 12.5px;
   font-weight: 600;
 }
-/* The button you came for stays in reach however long the list is. */
+.wrap-field .field {
+  min-height: 32px;
+  padding: 4px 10px;
+  color: var(--ink);
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+.wrap-frogdone {
+  margin: -2px 0 0;
+  font-size: 12px;
+}
+/* The button you came for stays in reach however long the list is: in the sheet's width, with the list ending above it. */
 .wrap-actions {
   position: sticky;
+  /* The board body's 12 px of bottom padding is below the sticky edge: reach into it, so nothing shows under the bar. */
   bottom: -12px;
   z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 0 -10px -12px;
-  padding: 8px 10px 12px;
+  margin-bottom: -12px;
+  padding: 8px 0 14px;
   background: linear-gradient(to bottom, transparent, var(--paper) 8px);
 }
 .wrap-actions .btn.primary {
@@ -1922,6 +2097,95 @@ body.overlay {
 .wrap-summary {
   margin: 0;
   font-size: 12px;
+}
+
+/* ---------- Lighten the day (v0.4): the board opened to move tasks off an overbooked day ---------- */
+
+.lighten-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 5px 4px 5px 10px;
+  border-radius: 10px;
+  background: var(--bad-soft);
+  color: var(--bad-ink);
+  font-size: 12.5px;
+  line-height: 1.35;
+  animation: banner-in 0.24s var(--ease-out) both;
+}
+.lighten-banner .icon {
+  flex: none;
+}
+.lighten-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+}
+.lighten-text b {
+  color: var(--bad-ink);
+  font-variant-numeric: tabular-nums;
+}
+.lighten-banner .btn.icon {
+  flex: none;
+  width: 26px;
+  min-height: 26px;
+  color: var(--bad-ink);
+}
+/* A third column for the one-tap "tomorrow"; the hover actions stop short of it. */
+.task.lightening {
+  grid-template-columns: 20px minmax(0, 1fr) 96px;
+  align-items: center;
+}
+.task.lightening .check {
+  align-self: start;
+}
+.task.lightening .t-actions {
+  right: 104px;
+}
+.lighten-go {
+  justify-content: center;
+  width: 96px;
+  min-height: 28px;
+  padding: 0 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.board .chip.est {
+  background: var(--paper-2);
+  color: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* The default estimate is a guess: lighter, and dashed. */
+.board .chip.est.dflt {
+  background: transparent;
+  color: var(--ink-2);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+/* "Open" from a bubble: the row you were sent to is found by the eye. */
+.task:focus-visible {
+  outline: 2px solid transparent;
+}
+.task.flash {
+  animation: row-flash 2.4s ease-out;
+}
+@keyframes row-flash {
+  0%,
+  35% {
+    background: var(--accent-soft);
+  }
+}
+.popover.app-form .app-match {
+  min-height: 1.4em;
+  margin: -4px 0 10px;
+  color: var(--muted);
+}
+.popover.app-form .app-match.seen {
+  color: var(--good-ink);
 }
 
 /* ---------- Demo controls ---------- */

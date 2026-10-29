@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDemoBackend, type DemoBackend } from "../backend/demo";
 import { BackendError, type RawTask, type SystemSample } from "../backend/types";
-import { Brain, type Bubble } from "./brain";
+import { Brain, showsOverBoard, type Bubble } from "./brain";
 import { dayKey } from "./dates";
 import { setLang } from "./l10n";
 import { demoLife, type LifeState } from "./life";
@@ -756,13 +756,13 @@ describe("Brain v0.4: the overbooked check", () => {
     expect(r.bubblesIn(120).filter(overbooked)).toEqual([]);
   });
 
-  it("Pick tasks to move opens the board", async () => {
+  it("Pick tasks to move opens the board, ready to lighten the day (v0.4 evaluation, issue 3)", async () => {
     const r = await started({ start: at(28, 8, 58), setup: lengths(200, 200, 200) });
     const openBoard = vi.fn();
     r.brain.effects = { openBoard };
     const b = r.checkAt(9)!;
     r.brain.pickAction(b.id, 0);
-    expect(openBoard).toHaveBeenCalledExactlyOnceWith(false);
+    expect(openBoard).toHaveBeenCalledExactlyOnceWith(false, undefined, { lighten: true });
   });
 
   it("'It's fine' changes nothing and asks nothing more", async () => {
@@ -1174,5 +1174,320 @@ describe("Brain v0.4 review: the overbooked check's window", () => {
     expect(load.meetingMinutes).toBe(60);
     // Tasks 1 and 4 at the default 30 minutes; the timed one is inside the meeting.
     expect(load.taskMinutes).toBe(60);
+  });
+});
+
+// ---------- The v0.4 evaluation (feedback-v04-001): stale bubbles, typed apps, the overbooked flow, the demo ----------
+
+describe("Brain v0.4 evaluation: bubbles that went stale are dropped unseen (issues 1 and 8)", () => {
+  const abc = { uid: "abc", title: "Client ABC renewal", start: at(28, 9, 20), end: at(28, 10) };
+  const bubbleOf = (r: Rig) => r.brain.getSnapshot().bubble;
+
+  it("drops the meeting-soon bubble once the meeting has started, and that is no refusal", async () => {
+    const r = await started({ setup: combine(meetings(abc), untimed) });
+    r.clock.t = at(28, 9, 16);
+    r.brain.runRules(r.clock.t);
+    const b = bubbleOf(r)!;
+    expect(b.text).toContain("Meeting in 4 min");
+    expect(b.validUntil).toBe(at(28, 9, 20));
+    // Still ahead: still there.
+    r.clock.t = at(28, 9, 19) + 30_000;
+    r.brain.pruneBubble();
+    expect(bubbleOf(r)?.id).toBe(b.id);
+    // Started (the board was open, so nobody saw it): gone, never shown with "in 4 min".
+    r.clock.t = at(28, 9, 21);
+    r.brain.pruneBubble();
+    expect(bubbleOf(r)).toBeNull();
+    expect(r.brain.getSnapshot().life.dismissedInRow).toBe(0);
+    expect(r.brain.getSnapshot().life.nudgeHoldUntil).toBeNull();
+  });
+
+  it("drops it at the heartbeat and at the next rule run too", async () => {
+    const r = await started({ setup: combine(meetings(abc), untimed) });
+    r.clock.t = at(28, 9, 16);
+    r.brain.runRules(r.clock.t);
+    expect(bubbleOf(r)).not.toBeNull();
+    r.clock.t = at(28, 9, 22);
+    r.brain.tick();
+    expect(bubbleOf(r)?.text ?? "").not.toContain("Meeting in");
+    const again = await started({ setup: combine(meetings(abc), untimed) });
+    again.clock.t = at(28, 9, 16);
+    again.brain.runRules(again.clock.t);
+    again.clock.t = at(28, 9, 22);
+    again.brain.runRules(again.clock.t);
+    expect(bubbleOf(again)?.text ?? "").not.toContain("Meeting in");
+  });
+
+  it("says why in the diary, in words that name no one", async () => {
+    const r = await started({ setup: combine(meetings(abc), untimed) });
+    const diary = vi.spyOn(r.brain.diary, "add");
+    r.clock.t = at(28, 9, 16);
+    r.brain.runRules(r.clock.t);
+    r.clock.t = at(28, 9, 21);
+    r.brain.pruneBubble();
+    expect(diary.mock.calls.some((c) => c[0] === "response" && /out of date/.test(String(c[1])))).toBe(true);
+  });
+
+  it("drops a 2-minute starter's bubble as soon as the session is stopped, and a focus start's too", async () => {
+    const r = await started({ setup: combine(meetings(), untimed) });
+    const [one, two] = todayTasks(r);
+    r.brain.startTwoMinutes(two);
+    expect(bubbleOf(r)?.text).toContain("Just 2 minutes");
+    r.brain.stopFocus();
+    expect(bubbleOf(r)).toBeNull();
+    r.brain.startFocus(one);
+    expect(bubbleOf(r)?.text).toContain("25 minutes");
+    r.brain.stopFocus();
+    expect(bubbleOf(r)).toBeNull();
+    r.brain.startBreak(5);
+    expect(bubbleOf(r)?.text).toContain("5-minute break");
+    r.brain.stopFocus();
+    expect(bubbleOf(r)).toBeNull();
+  });
+
+  it("drops a confirmation that is waiting past its moment (the board was open all that time)", async () => {
+    const r = await started({ setup: combine(meetings(), untimed) });
+    const [, two] = todayTasks(r);
+    r.brain.startTwoMinutes(two);
+    const first = bubbleOf(r)!;
+    expect(first.validUntil).toBe(r.clock.t + 30_000);
+    r.clock.t += 20_000;
+    r.brain.pruneBubble();
+    expect(bubbleOf(r)?.id).toBe(first.id);
+    r.clock.t += 20_000;
+    r.brain.pruneBubble();
+    expect(bubbleOf(r)).toBeNull();
+    // The session itself is untouched.
+    expect(r.brain.getSnapshot().focus?.starter).toBe(true);
+  });
+
+  it("drops a timed task's bubble when the task was finished somewhere else", async () => {
+    // Task 2 is due at 10:00; at 9:52 it is "in 8 min".
+    const r = await started({ setup: meetings() });
+    r.clock.t = at(28, 9, 52);
+    r.brain.runRules(r.clock.t);
+    const b = bubbleOf(r)!;
+    expect(b.text).toContain("In 8 min");
+    expect(b.validUntil).toBe(at(28, 10));
+    // Deleted elsewhere (finished elsewhere would be answered by a cheer of its own).
+    await r.backend.todoist.remove("2");
+    await r.brain.refresh();
+    expect(bubbleOf(r)).toBeNull();
+  });
+
+  it("drops the 'due now' bubble five minutes on, and the 'in 8 min' one the moment it is due", async () => {
+    const r = await started({ setup: meetings() });
+    r.clock.t = at(28, 9, 52);
+    r.brain.runRules(r.clock.t);
+    r.clock.t = at(28, 10) + 30_000;
+    r.brain.pruneBubble();
+    expect(bubbleOf(r)).toBeNull();
+    r.brain.runRules(r.clock.t);
+    const now = bubbleOf(r)!;
+    expect(now.text).toContain("It's time");
+    expect(now.validUntil).toBe(at(28, 10, 5));
+    r.clock.t = at(28, 10, 6);
+    r.brain.pruneBubble();
+    expect(bubbleOf(r)).toBeNull();
+  });
+
+  it("drops the overbooked warning once the day fits again", async () => {
+    const r = await started({ start: at(28, 8, 58), setup: lengths(200, 200, 200) });
+    const b = r.checkAt(9)!;
+    expect(b.text).toContain("overbooked");
+    expect(bubbleOf(r)?.id).toBe(b.id);
+    for (const t of todayTasks(r).slice(0, 2)) await r.brain.reschedule(t, "tomorrow");
+    expect(r.brain.currentLoad().overBy).toBeLessThan(60);
+    expect(bubbleOf(r)).toBeNull();
+  });
+
+  it("drops an 'as planned' card whose task was finished somewhere else", async () => {
+    const r = await started({ setup: combine(meetings(), untimed) });
+    const sprint = todayTasks(r).find((t) => t.id === "4")!;
+    r.answer(r.step()!); // the morning greeting
+    r.brain.setStartTrigger(sprint, { kind: "afterLunch" });
+    r.clock.t = at(28, 13, 1);
+    const b = r.until((x) => x.text.startsWith("As planned"));
+    expect(bubbleOf(r)?.id).toBe(b.id);
+    await r.backend.todoist.remove("4");
+    await r.brain.refresh();
+    expect(bubbleOf(r)).toBeNull();
+  });
+
+  it("drops a regular nudge whose task is gone before anyone read it", async () => {
+    const r = await started({ setup: combine(meetings(), untimed) });
+    r.answer(r.step()!); // the morning greeting
+    const nudge = r.until((x) => x.kind === "nudge", 120);
+    const next = r.brain.getSnapshot().next!;
+    expect(nudge.text).toContain(next.content);
+    await r.backend.todoist.remove(next.id);
+    await r.brain.refresh();
+    expect(bubbleOf(r)).toBeNull();
+  });
+
+  it("shows over the board only what is urgent and asks or announces something", () => {
+    const base: Bubble = { id: 1, text: "x", actions: [], seconds: 5, urgent: false, reminder: false };
+    const act = [{ title: "OK", run: () => undefined }];
+    expect(showsOverBoard({ ...base, urgent: true, reminder: true })).toBe(true); // a meeting, a timed task
+    expect(showsOverBoard({ ...base, urgent: true, actions: act })).toBe(true); // "Is it done?"
+    expect(showsOverBoard({ ...base, urgent: true })).toBe(false); // "Added ✔︎": the board says so itself
+    expect(showsOverBoard({ ...base, actions: act, reminder: true })).toBe(false); // not urgent: it waits
+  });
+});
+
+describe("Brain v0.4 evaluation: the meeting's related tasks can be opened (issue 13)", () => {
+  const abc = { uid: "abc", title: "Client ABC renewal", start: at(28, 9, 20), end: at(28, 10) };
+
+  it("adds an Open button per related task, which asks the board to focus that task", async () => {
+    const r = await started({ setup: combine(meetings(abc), untimed) });
+    const openBoard = vi.fn();
+    r.brain.effects = { openBoard };
+    r.clock.t = at(28, 9, 16);
+    r.brain.runRules(r.clock.t);
+    const b = r.brain.getSnapshot().bubble!;
+    expect(titles(b)).toEqual(["Open “Call client ABC”", "OK"]);
+    expect(b.actions[0].primary).toBe(true);
+    r.brain.pickAction(b.id, 0);
+    expect(openBoard).toHaveBeenCalledWith(false, undefined, { focusTaskId: "2" });
+  });
+
+  it("has only OK when nothing is related", async () => {
+    const r = await started({ setup: combine(meetings({ ...abc, title: "Weekly sync" }), untimed) });
+    r.clock.t = at(28, 9, 16);
+    r.brain.runRules(r.clock.t);
+    expect(titles(r.brain.getSnapshot().bubble)).toEqual(["OK"]);
+  });
+
+  it("cuts a long task title on its button", async () => {
+    const r = await started({ setup: combine(meetings(abc), untimed) });
+    await r.brain.add("Prepare the client renewal terms and the whole pricing table", "today", 1);
+    r.clock.t = at(28, 9, 16);
+    r.brain.runRules(r.clock.t);
+    const open = titles(r.brain.getSnapshot().bubble)!.filter((t) => t.startsWith("Open"));
+    expect(open.length).toBeGreaterThan(0);
+    for (const t of open) expect(t.length).toBeLessThanOrEqual(24);
+  });
+});
+
+describe("Brain v0.4 evaluation: typed app names (issue 2)", () => {
+  const FIGMA = { app: { name: "Figma", exe: "figma.exe", title: "Landing page" }, url: null };
+
+  it("knows which typed names match an app seen lately", async () => {
+    const r = await started({ setup: combine(meetings(), untimed) });
+    r.brain.onSample(r.sample({ ...FIGMA, appSwitchedAt: r.clock.t }));
+    r.brain.onSample(r.sample({ appSwitchedAt: r.clock.t + 1 }));
+    expect(r.brain.recentAppMatch("fig")?.name).toBe("Figma");
+    expect(r.brain.recentAppMatch("Figma.exe")?.name).toBe("Figma");
+    expect(r.brain.recentAppMatch("code")?.name).toBe("Visual Studio Code");
+    expect(r.brain.recentAppMatch("photoshop")).toBeNull();
+    expect(r.brain.recentAppMatch("fi")).toBeNull();
+  });
+
+  it("stores 'Figma.exe' as Figma and fires when Figma comes to the front", async () => {
+    const r = await started({ setup: combine(meetings(), untimed) });
+    const sprint = todayTasks(r).find((t) => t.id === "4")!;
+    r.answer(r.step()!); // the morning greeting
+    expect(r.brain.setStartTrigger(sprint, { kind: "appOpen", app: "  Figma.exe " })).toBe(true);
+    expect(r.brain.getSnapshot().triggers[0].trigger).toEqual({ kind: "appOpen", app: "Figma" });
+    r.brain.onSample(r.sample({ ...FIGMA, appSwitchedAt: r.clock.t + 1000 }));
+    r.clock.t += 20_000;
+    const b = r.step(0);
+    expect(b?.text).toBe("As planned: “Plan the next sprint”");
+  });
+
+  it("fires a plan typed as 'fig'", async () => {
+    const r = await started({ setup: combine(meetings(), untimed) });
+    const sprint = todayTasks(r).find((t) => t.id === "4")!;
+    r.answer(r.step()!);
+    r.brain.setStartTrigger(sprint, { kind: "appOpen", app: "fig" });
+    r.brain.onSample(r.sample({ ...FIGMA, appSwitchedAt: r.clock.t + 1000 }));
+    r.clock.t += 20_000;
+    expect(r.step(0)?.text).toBe("As planned: “Plan the next sprint”");
+  });
+});
+
+describe("Brain v0.4 evaluation: lighten the day (issue 3)", () => {
+  it("'Pick tasks to move' opens the board in the lighten-the-day state", async () => {
+    const r = await started({ start: at(28, 8, 58), setup: lengths(200, 200, 200) });
+    const openBoard = vi.fn();
+    r.brain.effects = { openBoard };
+    const b = r.checkAt(9)!;
+    r.brain.pickAction(b.id, 0);
+    expect(openBoard).toHaveBeenCalledWith(false, undefined, { lighten: true });
+  });
+
+  it("knows each task's estimate: its Todoist duration, else the default", async () => {
+    const r = await started({ setup: combine(meetings(), untimed, lasting({ "1": 90 })) });
+    const [one, two] = todayTasks(r);
+    expect(r.brain.estimateOf(one)).toEqual({ minutes: 90, own: true });
+    expect(r.brain.estimateOf(two)).toEqual({ minutes: 30, own: false });
+  });
+
+  it("moves one task to the next workday and the load drops at once", async () => {
+    const r = await started({ start: at(28, 9), setup: lengths(200, 200, 200) });
+    const before = r.brain.currentLoad();
+    const [one] = todayTasks(r);
+    expect(await r.brain.moveToNextWorkday(one)).toBe(true);
+    expect(todayTasks(r).map((t) => t.id)).not.toContain(one.id);
+    expect(r.brain.currentLoad().taskMinutes).toBe(before.taskMinutes - 200);
+  });
+
+  it("moves to Monday on a Friday, as the Wrap up sheet does", async () => {
+    const r = await started({ start: at(30, 16), setup: combine(meetings(), untimed), demo: false });
+    r.brain.setDemoWeekends(true);
+    const [one] = todayTasks(r);
+    const moves: string[] = [];
+    const reschedule = r.backend.todoist.reschedule.bind(r.backend.todoist);
+    r.backend.todoist.reschedule = async (id, due) => {
+      moves.push(`${id}:${due}`);
+      return reschedule(id, due);
+    };
+    await r.brain.moveToNextWorkday(one);
+    expect(moves).toEqual([`${one.id}:2026-11-02`]);
+  });
+});
+
+describe("Brain v0.4 evaluation: demo reach (issue 11)", () => {
+  it("shows the end-of-day review at any hour, past the gap between bubbles", async () => {
+    const r = await started({ start: at(28, 11), setup: combine(meetings(), untimed), prefs: { bubbleGap: 15 } });
+    r.brain.say({ text: "Just now", seconds: 5, urgent: true });
+    r.brain.dismissBubble(r.brain.getSnapshot().bubble!.id, "ignored");
+    r.brain.demoReview();
+    const b = r.brain.getSnapshot().bubble!;
+    expect(b.text).toMatch(/end of day/i);
+    expect(titles(b)).toEqual(["Wrap up", "Move to tomorrow", "Keep going"]);
+    const openWrapUp = vi.fn();
+    r.brain.effects = { openWrapUp };
+    r.brain.pickAction(b.id, 0);
+    expect(openWrapUp).toHaveBeenCalledOnce();
+  });
+
+  it("can pretend weekends are weekends, so 'Monday' shows after a Friday", async () => {
+    const r = await started({ start: at(30, 16), setup: combine(meetings(), untimed) });
+    expect(r.brain.wrapDay()).toEqual({ day: "2026-10-31", isTomorrow: true });
+    r.brain.setDemoWeekends(true);
+    expect(r.brain.wrapDay()).toEqual({ day: "2026-11-02", isTomorrow: false });
+    r.brain.setDemoWeekends(false);
+    expect(r.brain.wrapDay().isTomorrow).toBe(true);
+  });
+
+  it("jumps to the start of the next workday: Monday after a Friday, with weekends on", async () => {
+    const r = await started({ start: at(30, 16), setup: combine(meetings(), untimed) });
+    expect(r.brain.nextMorning()).toBe(at(31, 8, 20));
+    r.brain.setDemoWeekends(true);
+    expect(r.brain.nextMorning()).toBe(new Date(2026, 10, 2, 8, 20).getTime());
+  });
+
+  it("brings what you moved to tomorrow back as today's tasks the next morning", async () => {
+    const r = await started({ start: at(28, 16, 30), setup: meetings() });
+    const sprint = todayTasks(r).find((t) => t.id === "4")!;
+    await r.brain.moveToNextWorkday(sprint);
+    expect(todayTasks(r).map((t) => t.id)).not.toContain("4");
+    r.clock.t = r.brain.nextMorning();
+    r.brain.tick();
+    await r.brain.refresh();
+    expect(new Date(r.clock.t).getDate()).toBe(29);
+    expect(todayTasks(r).map((t) => t.id)).toContain("4");
+    expect(r.brain.getSnapshot().day.overdue.map((t) => t.id)).toContain("1");
   });
 });

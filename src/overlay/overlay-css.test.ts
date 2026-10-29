@@ -32,6 +32,14 @@ describe("overlay.css", () => {
     expect(sign.height ?? "auto").toBe("auto");
   });
 
+  // Regression (v0.4 evaluation, issue 14): the pet's box reaches 9 px below the stage, so focusing it by clicking scrolled
+  // the stage (`overflow: hidden` can still be scrolled by focus) and lifted the board 9 px: its top corners were cut.
+  it("never lets the stage scroll, whatever takes the focus", () => {
+    const stage = rule(".stage");
+    expect(stage.overflow).toBe("clip");
+    expect(css).toMatch(/\.stage \{[^}]*overflow: hidden;[^}]*overflow: clip;/);
+  });
+
   it("keeps popovers out of the board's scroll area", () => {
     expect(rule(".popover").position).toBe("fixed");
   });

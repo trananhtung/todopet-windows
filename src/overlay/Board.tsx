@@ -1,24 +1,26 @@
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type Ref } from "react";
 import type { Backend } from "../backend/types";
-import { errorMessage, type Brain, type BrainState, type DueChoice } from "../core/brain";
+import { errorMessage, showsOverBoard, type Brain, type BrainState, type DueChoice } from "../core/brain";
 import { currentEvent, freeMinutes } from "../core/calendar";
-import { addDays, atHour, daysAgo, dayKey, hoursText, parseDate, timeString } from "../core/dates";
+import { atHour, daysAgo, dayKey, hoursText, parseDate, timeString } from "../core/dates";
 import { getLang, L, plural } from "../core/l10n";
 import * as life from "../core/life";
 import * as lines from "../core/lines";
-import { dueDay, dueTime, isRecurring, openTasks, planned, taskTitle, uiPriority, type TodoTask } from "../core/models";
-import { dayStrip } from "../core/load";
+import { dueDay, dueTime, isRecurring, planned, taskTitle, uiPriority, type TodoTask } from "../core/models";
 import { moodEmoji, moodLabel } from "../core/mood";
 import { isWorkday } from "../core/prefs";
-import { MIN_APP_NAME, type StartTrigger } from "../core/triggers";
+import { MIN_APP_NAME, normalizeAppName, type StartTrigger } from "../core/triggers";
 import { ACCESSORIES, SPECIES_IDS } from "../core/types";
-import { canMove, canWrapUp, chooseFrog, chooseMove, moveAllToTomorrow, MAX_NOTE_LENGTH, setNote, wrapMoves, type WrapMove } from "../core/wrapup";
+import { canMove } from "../core/wrapup";
 import { defaultPose, renderPet, speciesInfo } from "../pets";
 import { Icon, type IconName } from "../ui/icons";
 import { localeTag } from "../ui/lang";
 import type { BoardRequest } from "./App";
+import { BubbleView } from "./Bubble";
+import { DayStripCard } from "./DayStrip";
 import type { BoardPlacement } from "./placement";
 import { Popover } from "./Popover";
+import { nextWorkdayName, WrapUpSheet } from "./WrapUp";
 
 type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "wardrobe" } | { kind: "wrapup" };
 
@@ -64,12 +66,15 @@ export function Board(props: {
   const { brain, backend, request, placement, onClose } = props;
   const s = useSyncExternalStore(brain.subscribe, brain.getSnapshot);
   const [view, setView] = useState<View>(request.split ? { kind: "split", task: request.split } : request.wrapUp ? { kind: "wrapup" } : { kind: "main" });
+  // "Lighten the day": the board opened to move tasks off an overbooked day (it ends when the day fits, or with its close button).
+  const [lighten, setLighten] = useState(request.lighten);
   const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (request.split) setView({ kind: "split", task: request.split });
     else if (request.wrapUp) setView({ kind: "wrapup" });
-    else if (request.focusAdd) setView({ kind: "main" });
+    else if (request.focusAdd || request.lighten || request.focusTaskId) setView({ kind: "main" });
+    setLighten(request.lighten);
   }, [request]);
 
   // Fresh data whenever the board opens (like clicking the macOS pet).
@@ -85,12 +90,16 @@ export function Board(props: {
   // Back from the Wrap up sheet: focus goes to the button that opened it.
   const lastView = useRef(view.kind);
   useEffect(() => {
-    if (lastView.current === "wrapup" && view.kind !== "wrapup") ref.current?.querySelector<HTMLElement>("[data-wrap-up]")?.focus();
+    // (Unless something else asked for the focus: a bubble's "Open" on a task.)
+    if (lastView.current === "wrapup" && view.kind !== "wrapup" && !request.focusTaskId) ref.current?.querySelector<HTMLElement>("[data-wrap-up]")?.focus();
     lastView.current = view.kind;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.kind]);
 
   const needsToken = !s.hasToken || s.authError;
   const origin = placement.side === "left" ? "100% 100%" : placement.side === "right" ? "0% 100%" : "50% 100%";
+  // An urgent bubble (a meeting, a timed task) is not held back by the open board: it shows here, with its buttons.
+  const banner = s.bubble && showsOverBoard(s.bubble) && !brain.bubbleStale(s.bubble) ? s.bubble : null;
 
   return (
     <section
@@ -102,8 +111,17 @@ export function Board(props: {
       // Anchored by its bottom edge and as tall as its content, up to the room it was given.
       style={{ left: placement.left, bottom: placement.bottom, width: placement.width, maxHeight: placement.height, transformOrigin: origin }}
       aria-label={L("Bảng việc", "Task board")}
+      onKeyDown={(e) => {
+        // Escape inside a sheet goes back to the list, like its Back button; from the list it closes the board (App).
+        if (e.key === "Escape" && !e.defaultPrevented && view.kind !== "main" && !needsToken) {
+          const busy = ref.current?.querySelector("[aria-busy='true']");
+          e.preventDefault();
+          if (!busy) setView({ kind: "main" });
+        }
+      }}
     >
       <Header s={s} backend={backend} onClose={onClose} onWardrobe={() => setView({ kind: "wardrobe" })} />
+      {banner && <BubbleView key={banner.id} bubble={banner} brain={brain} banner />}
       <div className="board-body">
         {needsToken ? (
           <Connect brain={brain} backend={backend} error={s.errorText} authError={s.hasToken && s.authError} />
@@ -121,6 +139,9 @@ export function Board(props: {
             focusAdd={request.focusAdd}
             prefill={request.prefill}
             seq={request.seq}
+            focusTaskId={request.focusTaskId}
+            lighten={lighten}
+            onLighten={setLighten}
             onSplit={(task) => setView({ kind: "split", task })}
             onWrapUp={() => setView({ kind: "wrapup" })}
           />
@@ -381,7 +402,7 @@ function Connect({ brain, backend, error, authError }: { brain: Brain; backend: 
 
 /** "Take today off": shown on days that would be workdays (the demo always works), pressed on a rest day. */
 function DayOffToggle({ brain, s }: { brain: Brain; s: BrainState }) {
-  const now = new Date();
+  const now = new Date(brain.clockNow());
   const dayOff = s.prefs.restDays.includes(dayKey(now));
   if (!dayOff && !s.isDemo && !isWorkday({ ...s.prefs, restDays: [] }, now)) return null;
   return (
@@ -408,6 +429,9 @@ function Main({
   focusAdd,
   prefill,
   seq,
+  focusTaskId,
+  lighten,
+  onLighten,
   onSplit,
   onWrapUp,
 }: {
@@ -417,24 +441,64 @@ function Main({
   focusAdd: boolean;
   prefill: string | null;
   seq: number;
+  focusTaskId: string | null;
+  lighten: boolean;
+  onLighten: (on: boolean) => void;
   onSplit: (t: TodoTask) => void;
   onWrapUp: () => void;
 }) {
   const day = s.day;
   const stuckIds = new Map(s.stuck.map((x) => [x.task.id, x.days]));
   const done = day.completed.length;
-  const dayOff = s.prefs.restDays.includes(dayKey(new Date()));
+  const dayOff = s.prefs.restDays.includes(dayKey(new Date(brain.clockNow())));
   // Nothing to plan on a day off, nor once the day is wrapped up (what you moved to tomorrow was on purpose).
   const toPlan = dayOff || s.doneUntil !== null ? 0 : s.target - planned(day);
   // One confirmation line under the add form, for adds and for moves.
   const [note, setNote] = useState<Note | null>(null);
+
+  // Lightening the day: it goes on until the day fits (the strip updates as tasks move), or you close it.
+  const load = brain.currentLoad();
+  const over = load.overBy;
+  const fits = over <= 0;
+  // A move that makes it fit says so in its own note ("Moved … ✓ Nice, today fits now ✓"); any other way says it here.
+  const moving = useRef(false);
+  useEffect(() => {
+    if (!lighten || !fits) return;
+    onLighten(false);
+    if (!moving.current) setNote({ n: Date.now(), text: lines.dayFits(), error: false });
+  }, [lighten, fits, onLighten]);
+  // After a task leaves the list, the keyboard stays in the list instead of falling to the top of the board.
+  const listRef = useRef<HTMLElement>(null);
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    const next = listRef.current?.querySelector<HTMLElement>(".lighten-go:not(:disabled)") ?? listRef.current?.querySelector<HTMLElement>(".lighten-banner button");
+    (next ?? listRef.current?.closest<HTMLElement>(".board"))?.focus({ preventScroll: true });
+  }, [day.today.length]);
+
+  // "Open" on a meeting's related task: scroll to it, give it the focus, and flash it so the eye finds it.
+  const [flash, setFlash] = useState<string | null>(null);
+  const focused = useRef(-1);
+  useEffect(() => {
+    if (!focusTaskId || focused.current === seq) return;
+    const li = [...document.querySelectorAll<HTMLElement>(".board [data-task-id]")].find((e) => e.dataset.taskId === focusTaskId);
+    if (!li) return;
+    focused.current = seq;
+    li.scrollIntoView?.({ block: "nearest" });
+    li.focus({ preventScroll: true });
+    setFlash(focusTaskId);
+    setTimeout(() => setFlash(null), 2400);
+  }, [focusTaskId, seq, day]);
+
+  const dayName = nextWorkdayName(brain);
   return (
     <>
       {s.focus && <FocusCard brain={brain} s={s} />}
 
       <AddTask brain={brain} focusAdd={focusAdd} prefill={prefill} seq={seq} note={note} setNote={setNote} />
 
-      <DayStripCard brain={brain} s={s} onWrapUp={onWrapUp} />
+      <DayStripCard brain={brain} s={s} lighten={lighten} onLighten={() => onLighten(!lighten)} onWrapUp={onWrapUp} />
       <PlanNote s={s} />
 
       {day.overdue.length > 0 && (
@@ -450,13 +514,13 @@ function Main({
           </div>
           <ul className="tasks">
             {day.overdue.map((t) => (
-              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} onSplit={onSplit} onNote={setNote} />
+              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} flash={flash === t.id} onSplit={onSplit} onNote={setNote} />
             ))}
           </ul>
         </section>
       )}
 
-      <section className="section" aria-labelledby="sec-today">
+      <section className="section" aria-labelledby="sec-today" ref={listRef}>
         <div className="sec-head">
           <h2 id="sec-today">
             {L("Hôm nay", "Today")} <span className="count">{day.today.length}</span>
@@ -466,12 +530,38 @@ function Main({
           <PinPlace brain={brain} s={s} onNote={setNote} compact={toPlan > 0} />
           <DayOffToggle brain={brain} s={s} />
         </div>
+        {lighten && (
+          <div className="lighten-banner" role="status">
+            <Icon name="hourglass" size={15} />
+            <span className="lighten-text">
+              <b>{lines.loadOver(load)}</b> {lines.lightenHint(dayName ?? L("ngày mai", "tomorrow"))}
+            </span>
+            <button type="button" className="btn ghost icon" aria-label={L("Đóng", "Close")} title={L("Đóng", "Close")} onClick={() => onLighten(false)}>
+              <Icon name="close" size={14} />
+            </button>
+          </div>
+        )}
         {day.today.length === 0 ? (
           <div className="tasks empty">{done > 0 ? L("Xong hết rồi! 🎉", "All done! 🎉") : L("Chưa có việc nào. Thêm 3 việc quan trọng nhất nhé.", "Nothing yet. Add your 3 most important tasks.")}</div>
         ) : (
           <ul className="tasks">
             {day.today.map((t) => (
-              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} onSplit={onSplit} onNote={setNote} />
+              <TaskRow
+                key={t.id}
+                t={t}
+                brain={brain}
+                s={s}
+                stuckDays={stuckIds.get(t.id)}
+                flash={flash === t.id}
+                lighten={lighten}
+                dayName={dayName}
+                onMoved={(phase) => {
+                  moving.current = phase === "start";
+                  if (phase === "start") refocus.current = true;
+                }}
+                onSplit={onSplit}
+                onNote={setNote}
+              />
             ))}
           </ul>
         )}
@@ -514,6 +604,10 @@ function TaskRow({
   brain,
   s,
   stuckDays,
+  flash = false,
+  lighten = false,
+  dayName = null,
+  onMoved,
   onSplit,
   onNote,
 }: {
@@ -521,10 +615,17 @@ function TaskRow({
   brain: Brain;
   s: BrainState;
   stuckDays?: number;
+  /** Just opened from a bubble: the row flashes once. */
+  flash?: boolean;
+  /** Lightening the day: the row shows its estimate and a one-tap move to the next workday. */
+  lighten?: boolean;
+  /** The next workday's name when it isn't tomorrow. */
+  dayName?: string | null;
+  onMoved?: (phase: "start" | "end") => void;
   onSplit: (t: TodoTask) => void;
   onNote: (n: Note) => void;
 }) {
-  const [pop, setPop] = useState<"move" | "delete" | "more" | "when" | "whenApp" | null>(null);
+  const [pop, setPop] = useState<"move" | "delete" | "more" | "when" | "whenApp" | "replace" | null>(null);
   const moveRef = useRef<HTMLButtonElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
   const moreRef = useRef<HTMLButtonElement>(null);
@@ -532,10 +633,35 @@ function TaskRow({
   const title = taskTitle(t);
   const time = dueTime(t);
   const day = dueDay(t);
-  const today = dayKey(new Date());
-  const late = time !== null && time < new Date();
+  const clock = new Date(brain.clockNow());
+  const today = dayKey(clock);
+  const late = time !== null && time < clock;
   const prio = uiPriority(t);
+  const est = lighten ? brain.estimateOf(t) : null;
+  const where = dayName ?? L("ngày mai", "tomorrow");
+  const moveOne = () => {
+    onMoved?.("start");
+    const name = short(title, 40);
+    void brain.moveToNextWorkday(t).then((ok) => {
+      onMoved?.("end");
+      onNote(
+        ok
+          ? { n: Date.now(), text: L(`Đã dời “${name}” sang ${where} ✓`, `Moved “${name}” to ${where} ✓`) + (brain.currentLoad().overBy <= 0 ? ` ${lines.dayFits()}` : ""), error: false }
+          : { n: Date.now(), text: brain.getSnapshot().errorText ?? L("Chưa dời được, thử lại nhé.", "Couldn't move it, try again."), error: true },
+      );
+    });
+  };
   const meta = [
+    est && (
+      <span
+        key="est"
+        className={`chip est${est.own ? "" : " dflt"}`}
+        title={est.own ? L(`${est.minutes} phút, theo Todoist`, `${est.minutes} min, from Todoist`) : L(`${est.minutes} phút: ước tính mặc định của bạn`, `${est.minutes} min: your default estimate`)}
+      >
+        <span className="sr-only">{L("Ước tính ", "Estimate ")}</span>
+        {lines.estimateLabel(est.minutes)}
+      </span>
+    ),
     s.next?.id === t.id && (
       <span key="next" className="chip frog">
         🐸 {L("làm trước", "do first")}
@@ -553,7 +679,7 @@ function TaskRow({
     ),
     day && day < today && (
       <span key="ago" className="chip late">
-        {daysAgo(day)}
+        {daysAgo(day, clock)}
       </span>
     ),
     stuckDays !== undefined && (
@@ -580,10 +706,17 @@ function TaskRow({
   const closePop = (restoreFocus: boolean) => {
     const which = pop;
     setPop(null);
-    if (restoreFocus) (which === "move" ? moveRef : which === "more" || which === "when" || which === "whenApp" ? moreRef : deleteRef).current?.focus();
+    if (restoreFocus) (which === "move" ? moveRef : which === "more" || which === "when" || which === "whenApp" || which === "replace" ? moreRef : deleteRef).current?.focus();
   };
+  // Try 2 minutes replaces a running session: ask first, so a focus you are in the middle of is never lost by a tap.
+  const running = s.focus && !s.focus.isBreak ? s.focus : null;
   return (
-    <li className={`task${pop ? " active" : ""}`} style={{ ["--prio" as string]: PRIO_LINE[prio] }}>
+    <li
+      className={`task${pop ? " active" : ""}${lighten ? " lightening" : ""}${flash ? " flash" : ""}`}
+      style={{ ["--prio" as string]: PRIO_LINE[prio] }}
+      data-task-id={t.id}
+      tabIndex={-1}
+    >
       <button className="check" aria-label={L(`Xong: ${title}`, `Complete: ${title}`)} title={L("Xong", "Complete")} onClick={(e) => e.detail < 2 && void brain.complete(t)}>
         <Icon name="check" size={12} />
       </button>
@@ -597,9 +730,21 @@ function TaskRow({
         <IconButton icon="play" label={L("Tập trung", "Focus")} onClick={() => brain.startFocus(t)} />
         <IconButton icon="scissors" label={L("Chia nhỏ", "Split")} onClick={() => onSplit(t)} />
         <IconButton ref={moveRef} icon="reschedule" label={L("Dời", "Move")} aria-haspopup="menu" aria-expanded={pop === "move"} onClick={() => setPop(pop === "move" ? null : "move")} />
-        <IconButton ref={moreRef} icon="more" label={L("Thêm: thử 2 phút, bắt đầu khi…", "More: try 2 minutes, start when…")} aria-haspopup="menu" aria-expanded={pop === "more" || pop === "when" || pop === "whenApp"} onClick={() => setPop(pop === "more" || pop === "when" || pop === "whenApp" ? null : "more")} />
+        <IconButton ref={moreRef} icon="more" label={L("Thêm: thử 2 phút, bắt đầu khi…", "More: try 2 minutes, start when…")} aria-haspopup="menu" aria-expanded={pop === "more" || pop === "when" || pop === "whenApp" || pop === "replace"} onClick={() => setPop(pop === "more" || pop === "when" || pop === "whenApp" || pop === "replace" ? null : "more")} />
         <IconButton ref={deleteRef} icon="trash" danger label={L("Xoá", "Delete")} aria-haspopup="dialog" aria-expanded={pop === "delete"} onClick={() => setPop(pop === "delete" ? null : "delete")} />
       </div>
+      {lighten && (
+        <button
+          type="button"
+          className="btn small lighten-go"
+          disabled={!canMove(t)}
+          title={canMove(t) ? L(`Dời “${short(title, 40)}” sang ${where}`, `Move “${short(title, 40)}” to ${where}`) : L("Việc lặp lại giữ lịch riêng của nó", "A repeating task keeps its own schedule")}
+          aria-label={L(`Dời “${short(title, 40)}” sang ${where}`, `Move “${short(title, 40)}” to ${where}`)}
+          onClick={(e) => e.detail < 2 && moveOne()}
+        >
+          <span aria-hidden>→</span> {dayName ?? L("Ngày mai", "Tomorrow")}
+        </button>
+      )}
       {pop === "move" && (
         <Popover anchor={moveRef} role="menu" label={L(`Dời “${short(title, 40)}”`, `Move “${short(title, 40)}”`)} className="menu" onClose={closePop}>
           {(
@@ -639,6 +784,10 @@ function TaskRow({
               type="button"
               role="menuitem"
               onClick={() => {
+                if (running) {
+                  setPop("replace");
+                  return;
+                }
                 closePop(true);
                 brain.startTwoMinutes(t);
               }}
@@ -650,6 +799,27 @@ function TaskRow({
               <Icon name="clock" size={15} />
               {L("Bắt đầu khi…", "Start when…")}
               <Icon name="chevronDown" size={13} className="menu-end turn" />
+            </button>
+          </div>
+        </Popover>
+      )}
+      {pop === "replace" && running && (
+        <Popover anchor={moreRef} role="alertdialog" label={L("Đổi sang thử 2 phút", "Switch to 2 minutes")} className="confirm switch-form" onClose={closePop}>
+          <p>{lines.switchToStarter(Math.max(0, Math.trunc((brain.clockNow() - running.start) / 60_000)))}</p>
+          <div className="pop-actions">
+            <button type="button" className="btn small" data-autofocus onClick={() => closePop(true)}>
+              {L("Tiếp tục phiên này", "Keep going")}
+            </button>
+            <button
+              type="button"
+              className="btn small primary"
+              onClick={() => {
+                closePop(true);
+                brain.startTwoMinutes(t);
+              }}
+            >
+              <Icon name="play" size={14} />
+              {L("Chuyển sang 2 phút", "Switch to 2 minutes")}
             </button>
           </div>
         </Popover>
@@ -764,7 +934,11 @@ function WhenMenu({
   );
 }
 
-/** The dialog behind "Another app…": the name of an app to wait for (3+ characters), with its own focus and Escape. */
+/**
+ * The dialog behind "Another app…": the name of an app to wait for (3+ characters), with its own focus and Escape. The
+ * start of a name is enough ("fig"), and so is the program's name as Task Manager shows it ("Figma.exe"). It says
+ * which app lately in front the name matches, and when none does it still sets the plan, and says so kindly.
+ */
 function AnotherApp({
   brain,
   s,
@@ -780,8 +954,10 @@ function AnotherApp({
 }) {
   const [app, setApp] = useState("");
   const id = useId();
-  const typed = app.trim();
+  const typed = normalizeAppName(app);
   const ok = typed.length >= MIN_APP_NAME;
+  // What it matches among the apps used lately, worked out from what is typed (nothing to say before 3 letters).
+  const match = ok ? brain.recentAppMatch(typed) : null;
   const submit = () => {
     if (!ok) return;
     onClose(true);
@@ -789,7 +965,9 @@ function AnotherApp({
     const set = brain.setStartTrigger(t, trigger);
     onNote({
       n: Date.now(),
-      text: set ? `⏱ “${short(taskTitle(t), 28)}”: ${lines.triggerChoice(trigger, s.events)}` : L("Chưa hẹn được, thử lại nhé.", "Couldn't set that, try again."),
+      text: set
+        ? `⏱ “${short(taskTitle(t), 28)}”: ${lines.triggerChoice(trigger, s.events)}${match ? "" : `. ${lines.appUnseen()}`}`
+        : L("Chưa hẹn được, thử lại nhé.", "Couldn't set that, try again."),
       error: !set,
     });
   };
@@ -807,13 +985,19 @@ function AnotherApp({
         data-autofocus
         autoComplete="off"
         maxLength={60}
-        aria-describedby={`${id}-hint`}
+        aria-describedby={`${id}-hint ${id}-match`}
         placeholder={L("Ví dụ: Figma", "e.g. Figma")}
         value={app}
         onChange={(e) => setApp(e.target.value)}
       />
       <p id={`${id}-hint`} className="hint">
-        {L(`Ít nhất ${MIN_APP_NAME} chữ, đúng tên ứng dụng hoặc tên file chạy của nó.`, `At least ${MIN_APP_NAME} letters: the app's name, or its program's name.`)}
+        {L(
+          `Ít nhất ${MIN_APP_NAME} chữ. Gõ đầu tên là đủ: “fig” là Figma, “chrome.exe” là Chrome.`,
+          `At least ${MIN_APP_NAME} letters. The start of the name is enough: “fig” finds Figma, “chrome.exe” finds Chrome.`,
+        )}
+      </p>
+      <p id={`${id}-match`} className={`hint app-match${match ? " seen" : ""}`} aria-live="polite">
+        {ok ? (match ? lines.appSeen(match.name) : lines.appUnseen()) : ""}
       </p>
       <div className="pop-actions">
         <button type="button" className="btn small" onClick={() => onClose(true)}>
@@ -916,99 +1100,6 @@ function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; 
   );
 }
 
-const hh = (h: number) => `${String(h).padStart(2, "0")}:00`;
-
-/** "08:00", or "Mon 08:00" when that is not tomorrow. */
-function untilLabel(ms: number): string {
-  const d = new Date(ms);
-  const near = [dayKey(new Date()), addDays(dayKey(new Date()), 1)].includes(dayKey(d));
-  const weekday = near ? "" : `${d.toLocaleDateString(localeTag(getLang()), { weekday: "short" })} `;
-  return `${weekday}${timeString(d)}`;
-}
-
-/**
- * The work day at a glance (SPEC v0.4 §4): meetings and timed tasks on a strip with a marker for now, and what is
- * still ahead against the time left ("~6h / 7h left"), calm until the day runs an hour over. After 15:00 it also holds
- * the **Wrap up** button; once the day is done it says so, with a way back.
- */
-function DayStripCard({ brain, s, onWrapUp }: { brain: Brain; s: BrainState; onWrapUp: () => void }) {
-  // The marker and the time left move on their own.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 30_000);
-    return () => clearInterval(id);
-  }, []);
-  const strip = dayStrip(brain.dayInput());
-  const done = s.doneUntil !== null;
-  const wrapUpOpen = canWrapUp(brain.clockNow(), s.prefs.workEnd);
-  if (!strip.hasContent && !wrapUpOpen && !done) return null;
-  const now = new Date(brain.loadClock());
-  const t0 = atHour(strip.startHour, 0, now).getTime();
-  const length = atHour(strip.endHour, 0, now).getTime() - t0;
-  const timeAt = (f: number) => timeString(new Date(t0 + f * length));
-  const meetings = strip.segments.filter((x) => x.kind === "meeting").length;
-  const timed = strip.segments.length - meetings;
-  const detail = lines.loadDetail(strip.load);
-  // What the strip shows, said out loud: each meeting and timed task with its times.
-  const listed = strip.segments.map((seg) => `${seg.title} ${timeAt(seg.start)}–${timeAt(seg.end)}`).join("; ");
-  const summary = L(
-    `Ngày làm việc ${hh(strip.startHour)} đến ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. Bây giờ là ${timeString(now)}.`,
-    `Work day ${hh(strip.startHour)} to ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. It is ${timeString(now)} now.`,
-  );
-  return (
-    <section className={`daystrip level-${done ? "ok" : strip.level}${done ? " is-done" : ""}`} aria-label={L("Ngày làm việc hôm nay", "Today's work day")}>
-      <div className="ds-head">
-        <span className="ds-load" title={done ? undefined : detail}>
-          <Icon name={done ? "moon" : "hourglass"} size={14} />
-          <span className="ds-text">
-            {done ? L(`Xong hôm nay · yên tĩnh tới ${untilLabel(s.doneUntil!)}`, `Done for today · quiet until ${untilLabel(s.doneUntil!)}`) : lines.loadMeter(strip.load)}
-          </span>
-          {!done && <span className="sr-only">{detail}</span>}
-        </span>
-        {!done && strip.hasContent && strip.load.capacity > 0 && (
-          <span className="ds-meter" aria-hidden>
-            <i style={{ width: `${strip.ratio * 100}%` }} />
-          </span>
-        )}
-        <span className="spacer" />
-        {done ? (
-          <button type="button" className="btn small" onClick={() => brain.resumeDay()} title={L("Pet thức dậy và nhắc việc lại như thường", "Wake the pet and get the usual reminders back")}>
-            <Icon name="sun" size={14} />
-            {L("Làm tiếp", "Back to work")}
-          </button>
-        ) : (
-          wrapUpOpen && (
-            <button type="button" className="btn small wrap-btn" data-wrap-up="" onClick={onWrapUp} title={L("Dọn nốt ngày: dời việc, chọn việc đầu tiên cho mai, ghi một dòng", "Close the day: move what's left, pick tomorrow's first task, leave a note")}>
-              <Icon name="moon" size={14} />
-              {L("Tổng kết ngày", "Wrap up")}
-            </button>
-          )
-        )}
-      </div>
-      <div className="ds-track" role="img" aria-label={`${summary} ${listed}`} style={strip.lanes > 1 ? { height: 6 + strip.lanes * 11 } : undefined}>
-        {strip.segments.map((seg) => (
-          <i
-            key={`${seg.kind}-${seg.id}`}
-            className={`ds-seg ${seg.kind === "meeting" ? "meeting" : "timed"}`}
-            style={{
-              left: `${seg.start * 100}%`,
-              width: `${(seg.end - seg.start) * 100}%`,
-              // Blocks that overlap stack in rows.
-              ...(strip.lanes > 1 ? { top: 3 + seg.lane * 11, bottom: "auto" } : {}),
-            }}
-            title={`${seg.kind === "meeting" ? "📅" : "⏰"} ${seg.title} · ${timeAt(seg.start)}–${timeAt(seg.end)}`}
-          />
-        ))}
-        <i className="ds-past" style={{ width: `${strip.now * 100}%` }} />
-        <b className="ds-now" style={{ left: `${strip.now * 100}%` }} title={L(`Bây giờ ${timeString(now)}`, `Now ${timeString(now)}`)} />
-      </div>
-      <div className="ds-axis" aria-hidden>
-        <span>{hh(strip.startHour)}</span>
-        <span>{hh(strip.endHour)}</span>
-      </div>
-    </section>
-  );
-}
 
 /** The note you left yourself last time you wrapped up, all day. */
 function PlanNote({ s }: { s: BrainState }) {
@@ -1025,199 +1116,6 @@ function PlanNote({ s }: { s: BrainState }) {
   );
 }
 
-/**
- * **Wrap up** (SPEC v0.4 §3): today's wins, each unfinished task (Tomorrow / No date / Keep), tomorrow's frog, one line
- * for tomorrow, and **Done for today**. The choices are made here and applied together when you press the button.
- */
-function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: BrainState; onBack: () => void; onDone: () => void }) {
-  // The draft lives in the brain (for the day), so closing the board doesn't lose it.
-  const draft = s.wrapDraft ?? brain.wrapDraft();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const heading = useRef<HTMLHeadingElement>(null);
-  const id = useId();
-  useEffect(() => {
-    heading.current?.focus();
-  }, []);
-  const tasks = openTasks(s.day);
-  const overdue = new Set(s.day.overdue.map((t) => t.id));
-  const wins = s.day.completed;
-  const { tomorrow, none } = wrapMoves(draft, tasks);
-  // "Tomorrow" is the next workday: its name when that isn't tomorrow.
-  const next = brain.wrapDay();
-  const dayName = next.isTomorrow ? null : (parseDate(next.day)?.toLocaleDateString(localeTag(getLang()), { weekday: "long" }) ?? null);
-  const choices: [WrapMove, string][] = [
-    ["tomorrow", dayName ?? L("Ngày mai", "Tomorrow")],
-    ["none", L("Không hạn", "No date")],
-    ["keep", L("Giữ", "Keep")],
-  ];
-  const submit = async () => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    const result = await brain.wrapUp(draft);
-    setBusy(false);
-    if (result.ok) onDone();
-    else {
-      const done = result.moved + result.offPlan;
-      setError(
-        L(
-          `Đã dời ${done} việc, ${result.failed} việc chưa dời được${result.error ? ` (${result.error})` : ""}. Pet vẫn đang thức, bạn thử lại nhé.`,
-          `Moved ${done}, and ${result.failed} couldn't move${result.error ? ` (${result.error})` : ""}. Your pet is still awake: you can try again.`,
-        ),
-      );
-    }
-  };
-  const plan = [
-    tomorrow.length > 0 && (dayName ? L(`dời ${tomorrow.length} việc sang ${dayName}`, `move ${plural(tomorrow.length, "", "task", "tasks").trim()} to ${dayName}`) : L(`dời ${tomorrow.length} việc sang mai`, `move ${plural(tomorrow.length, "", "task", "tasks").trim()} to tomorrow`)),
-    none.length > 0 && L(`bỏ ${none.length} việc khỏi kế hoạch`, `take ${plural(none.length, "", "task", "tasks").trim()} off the plan`),
-  ].filter(Boolean);
-  const doneLabel = L("Xong hôm nay", "Done for today");
-  const frogLabel = dayName ? L(`Làm đầu tiên vào ${dayName}`, `First on ${dayName}`) : L("Làm đầu tiên ngày mai", "First tomorrow");
-  return (
-    <div className="sheet wrap">
-      <div>
-        <button className="btn ghost small" onClick={onBack} disabled={busy}>
-          <Icon name="arrowLeft" size={14} /> {L("Quay lại", "Back")}
-        </button>
-      </div>
-      <h2 ref={heading} tabIndex={-1}>
-        <Icon name="moon" size={18} /> {L("Tổng kết ngày", "Wrap up the day")}
-      </h2>
-      <p className="muted wrap-intro">{L("Vài cú chạm là xong, không có đúng sai: chỉ là dọn bàn cho mai.", "A few taps, no right answers: just a tidy desk for tomorrow.")}</p>
-
-      <section aria-labelledby="wrap-wins">
-        <h3 id="wrap-wins">
-          {L("Hôm nay bạn đã làm", "Today's wins")} <span className="count good">{wins.length}</span>
-        </h3>
-        {wins.length === 0 ? (
-          <p className="wrap-empty">{L("Hôm nay chưa tick việc nào, và vậy cũng không sao. Mai là một trang mới 🌱", "Nothing ticked off today, and that's okay. Tomorrow is a fresh page 🌱")}</p>
-        ) : (
-          <ul className="wrap-wins">
-            {wins.slice(0, 4).map((t) => (
-              <li key={t.id} title={taskTitle(t)}>
-                <Icon name="check" size={13} />
-                <span>{taskTitle(t)}</span>
-              </li>
-            ))}
-            {wins.length > 4 && <li className="more">{L(`và ${wins.length - 4} việc nữa`, `and ${wins.length - 4} more`)}</li>}
-          </ul>
-        )}
-      </section>
-
-      <section aria-labelledby="wrap-open">
-        <div className="wrap-head">
-          <h3 id="wrap-open">
-            {L("Còn dang dở", "Still open")} <span className="count">{tasks.length}</span>
-          </h3>
-          <span className="spacer" />
-          {tasks.some(canMove) && (
-            <button type="button" className="btn small" onClick={() => brain.editWrapDraft((d, all) => moveAllToTomorrow(d, all))}>
-              {dayName ? L(`Tất cả sang ${dayName}`, `All to ${dayName}`) : L("Tất cả sang mai", "All to tomorrow")}
-            </button>
-          )}
-        </div>
-        {draft.frogDone && (
-          <p className="muted wrap-frogdone" role="status">
-            🐸 {L(`“${short(draft.frogDone, 40)}” đã xong rồi, giỏi quá! Chọn việc khác hoặc để mai tính.`, `“${short(draft.frogDone, 40)}” is already done, nice! Pick another, or decide tomorrow.`)}
-          </p>
-        )}
-        {tasks.length === 0 ? (
-          <p className="wrap-empty">{L("Không còn việc nào dang dở 🎉", "Nothing left open 🎉")}</p>
-        ) : (
-          <ul className="wrap-tasks" role="radiogroup" aria-label={L("Con ếch của ngày mai: việc làm đầu tiên", "Tomorrow's frog: the first thing to do")}>
-            {tasks.map((t) => {
-              const title = taskTitle(t);
-              const move = draft.moves[t.id] ?? "keep";
-              const movable = canMove(t);
-              const why = `${id}-why-${t.id}`;
-              return (
-                <li key={t.id} className={`wrap-row${move === "none" ? " off" : ""}`}>
-                  <div className="wrap-title" title={title}>
-                    {title}
-                    {overdue.has(t.id) && <span className="chip late">{L("quá hạn", "overdue")}</span>}
-                  </div>
-                  <div className="wrap-ctl">
-                    <div className="seg" role="group" aria-label={L(`Làm gì với “${short(title, 40)}”`, `What to do with “${short(title, 40)}”`)} aria-describedby={movable ? undefined : why}>
-                      {choices.map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          aria-pressed={move === value}
-                          disabled={value !== "keep" && !movable}
-                          onClick={() => brain.editWrapDraft((d, all) => chooseMove(d, all, t.id, value))}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    {!movable && (
-                      <span id={why} className="chip" tabIndex={0} title={L("Việc lặp lại giữ lịch riêng của nó", "A repeating task keeps its own schedule")}>
-                        🔁<span className="sr-only">{L("Việc lặp lại giữ lịch riêng của nó, nên chỉ có thể giữ nguyên", "A repeating task keeps its own schedule, so it can only stay")}</span>
-                      </span>
-                    )}
-                    <label className="frog-pick" title={L("Con ếch của ngày mai: việc làm đầu tiên", "Tomorrow's frog: the first thing to do")}>
-                      <input type="radio" name="wrap-frog" checked={draft.frogId === t.id} disabled={move === "none"} onChange={() => brain.editWrapDraft((d, all) => chooseFrog(d, all, t.id))} />
-                      <span>🐸 {frogLabel}</span>
-                      <span className="sr-only">{`: ${title}`}</span>
-                    </label>
-                  </div>
-                </li>
-              );
-            })}
-            <li className="wrap-row nofrog">
-              <label className="frog-pick">
-                <input type="radio" name="wrap-frog" checked={draft.frogId === null} onChange={() => brain.editWrapDraft((d, all) => chooseFrog(d, all, null))} />
-                <span>{L("Mai mình chọn sau", "I'll decide tomorrow")}</span>
-              </label>
-            </li>
-          </ul>
-        )}
-      </section>
-
-      <div className="wrap-note">
-        <label htmlFor="wrap-note">{L("Mai mình bắt đầu từ đâu?", "Where do I start tomorrow?")}</label>
-        <input
-          id="wrap-note"
-          className="field"
-          autoComplete="off"
-          maxLength={MAX_NOTE_LENGTH}
-          placeholder={L("Một dòng cho chính mình…", "One line for future you…")}
-          value={draft.note}
-          onChange={(e) => brain.editWrapDraft((d) => setNote(d, e.target.value))}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              void submit();
-            }
-          }}
-        />
-      </div>
-
-      <p className="muted wrap-summary" role="status">
-        {plan.length > 0 ? `${plan.join(L(" và ", " and ")).replace(/^./, (c) => c.toLocaleUpperCase())}. ` : ""}
-        {L(
-          `Pet sẽ ngủ và im lặng tới khi ngày làm việc tiếp theo bắt đầu (${hh(s.prefs.workStart)}). Cuộc họp và việc có giờ vẫn được nhắc.`,
-          `Your pet will sleep and stay quiet until the next workday starts (${hh(s.prefs.workStart)}). Meetings and timed tasks still get through.`,
-        )}
-      </p>
-      {error && (
-        <div className="error" role="alert">
-          {error}
-        </div>
-      )}
-      <div className="wrap-actions">
-        <button className="btn primary" disabled={busy} aria-busy={busy} aria-label={doneLabel} onClick={() => void submit()}>
-          <Icon name="moon" size={15} />
-          {busy ? "…" : doneLabel}
-        </button>
-        <button className="btn" onClick={onBack} disabled={busy}>
-          {L("Chưa đâu", "Not yet")}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function addedNote(due: DueChoice, title: string): string {
   const q = `“${short(title, 32)}”`;
@@ -1375,7 +1273,7 @@ function FocusCard({ brain, s }: { brain: Brain; s: BrainState }) {
     return () => clearInterval(id);
   }, []);
   const f = s.focus!;
-  const left = Math.max(0, Math.round((f.end - Date.now()) / 1000));
+  const left = Math.max(0, Math.round((f.end - brain.clockNow()) / 1000));
   return (
     <div className="focus-card">
       <span className="clock">
@@ -1398,7 +1296,7 @@ function CalendarCard({ brain, backend, s }: { brain: Brain; backend: Backend; s
     if (open) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [open]);
   if (!s.prefs.useCalendar || s.events.length === 0) return null;
-  const now = new Date();
+  const now = new Date(brain.clockNow());
   const start = atHour(s.prefs.workStart, 0, now);
   const end = atHour(s.prefs.workEnd, 0, now);
   const free = freeMinutes(s.events, start, end);
@@ -1563,7 +1461,7 @@ function SplitSheet({ brain, s, task, onDone }: { brain: Brain; s: BrainState; t
 }
 
 function Wardrobe({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: () => void }) {
-  const today = new Date();
+  const today = new Date(brain.clockNow());
   const days = Array.from({ length: 30 }, (_, i) => dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29 + i)));
   const perfect = new Set(s.life.perfectDays);
   const locked = SPECIES_IDS.map(speciesInfo).filter((x) => x.unlock);

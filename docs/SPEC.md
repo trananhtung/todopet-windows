@@ -222,9 +222,9 @@ people detach; overcommitting is the main planning failure.
   and window title, and the browser address if it is http(s). Distracting apps and sites never become the context.
 - Snapshot moments: you go idle, a meeting starts, or you switch to a distracting app or site.
 - Coming back (after ≥ 5 min away, after a meeting, or leaving a distraction for 2 samples in a row after ≥ 2 min)
-  shows a resume card instead of the generic welcome-back: "You were on: ⟨task⟩ · in ⟨app⟩ — ⟨title⟩" ("Next up:
-  ⟨task⟩ · you were in …" when the task is only the next one in line) with **Reopen ↗ ⟨host⟩** (only for an http(s)
-  address), **Focus** and **Something else**. It is a check-in, not counted against the nudge budget, but it waits
+  shows a resume card instead of the generic welcome-back: the task on a line of its own ("You were on: ⟨task⟩", or
+  "Next up: ⟨task⟩" when it is only the next one in line) and where you were as a quieter line under it ("Last in:
+  ⟨app⟩ — ⟨title⟩"), with **Reopen ↗ ⟨host⟩** (only for an http(s) address), **Focus** and **Something else**. It is a check-in, not counted against the nudge budget, but it waits
   for a pause and while reminders are held, comes at most every 30 minutes, and stops for the day after two closes.
 - Never a call (Zoom, Teams, Meet…) or the pet itself as the place, and never shown while a call is in front (it waits
   for its 10 minutes). A browser sample whose address can't be read for a second neither ends a distraction nor
@@ -235,7 +235,8 @@ people detach; overcommitting is the main planning failure.
 
 ### 2. Meeting bookends (`brain.ts`, `calendar.ts`)
 - The "meeting soon" bubble lists up to 2 related open tasks (sharing a word of 4+ letters with the meeting title,
-  case- and diacritic-insensitive, common words ignored).
+  case- and diacritic-insensitive, common words ignored), each with an **Open** button: the board opens (or stays
+  open) scrolled to that task, which takes the keyboard focus and flashes once.
 - After a meeting of 15+ minutes ends and you are at the PC (within 10 min): "“⟨meeting⟩” is over. Anything to
   capture?" with **＋ Next step** (opens the board's add field prefilled with "⟨meeting⟩: ", never over a draft) and
   **Nothing**. If the next meeting starts in 3 to 15 minutes, it also suggests a breather of up to 5 minutes, cut to
@@ -250,7 +251,9 @@ people detach; overcommitting is the main planning failure.
   when that is earlier), at most a few taps: today's wins; each unfinished task (overdue ones too) with **Tomorrow**
   (the next workday, named when it isn't tomorrow: "Monday") / **No date** / keep; pick **tomorrow's frog**; one
   line "where do I start tomorrow?". **Done for today** puts the pet to sleep and stops non-urgent bubbles until
-  the next workday.
+  the next workday. The sheet is one line per task with its three choices as a radio group (one tab stop, arrow keys
+  between the choices); tomorrow's first task is one choice (a list) and the note sits above the tasks, so neither is
+  far to scroll to; the buttons stay in reach below. Escape goes back to the list, like **Back**.
 - Tomorrow's frog and the note are stored locally (`plan` key) and the next morning's greeting names them; the
   frog goes first in "eat the frog" ordering that day.
 - The draft lives in the brain for the day (closing the board keeps it); a frog finished elsewhere becomes "I'll
@@ -267,20 +270,44 @@ people detach; overcommitting is the main planning failure.
 - Load = estimates of today's open tasks + remaining meeting minutes in work hours; capacity = remaining work
   minutes. Once a day, after planning, if load exceeds capacity by 60+ minutes: "Today looks overbooked: ~6h of
   tasks + 3h of meetings in 7h left. Move some?" with **Pick tasks to move** and **It's fine** (a check-in).
-- The board shows a compact timeline of the work day: meetings, timed tasks, now, and a load meter.
+  **Pick tasks to move** opens the board in a "lighten the day" state: a banner at the top of Today says how far over
+  the day is ("~3h45 over") and has a close button; every open row shows its estimate ("30'", lighter when it is the
+  default) and a one-tap **→ Tomorrow** (the next workday, like the Wrap up sheet; a repeating task can't move). The
+  banner follows the load as tasks move and goes away, with a word about it, when the day fits. How far over the day
+  is also shows in plain words in the strip's header ("~3h45 over"), and tapping it opens the same state. The warning
+  bubble is dropped if the day fits again before anyone read it.
+- The board shows a compact timeline of the work day: meetings, timed tasks, now, and a load meter. The blocks are 14 px
+  bars (3:1 or better against the track in both themes), labeled when wide enough, with hours marked every 2 hours and
+  a caption under them that follows hover and focus (now and what is next otherwise). They are reachable by keyboard:
+  one tab stop, arrow keys between blocks, each with its name and times.
 - The check runs from planning until the middle of the work day (after that the review covers it) and when work time
   is left. Load counts today's open tasks (not overdue ones) and only the part of a meeting that is still ahead; a
   timed task inside a meeting isn't counted twice. Blocks of the timeline that overlap stack in rows.
 
 ### 5. If-then starts and the 2-minute starter (`brain.ts`, board)
 - A task's menu has **Start when…**: after ⟨a meeting today⟩, when I open ⟨app⟩ (recent non-distracting apps, not the one
-  in front, or **Another app…**, a small dialog for a name of 3+ letters matching whole words or the program's name),
-  after lunch (13:00). An app plan fires when the app comes to the front after the plan was made. Stored locally for
+  in front, or **Another app…**, a small dialog for a name of 3+ letters: the start of the app's name word by word, or of
+  its program's, ignoring case and a trailing ".exe", so "fig" and "Figma.exe" are both Figma), after lunch (13:00). The
+  dialog says which app seen lately the name matches; a name that matches none is still kept, and the confirmation says
+  so kindly. A plan's chip uses the words of its menu entry ("⏱ after “Team sync” (12:00)"). An app plan fires when the app comes to the front after the plan was made. Stored locally for
   the day; fires once with "As planned: ⟨task⟩" and **Focus now** / **Later** (the user asked for it, so it is not
   counted against the budget and not held; **Later** re-arms it for 30 minutes). A plan whose meeting moved or was
   cancelled is dropped at the calendar sync. The diary only says what kind of plan it was.
 - **▶ Try 2 minutes** (task menu and the stuck-task bubble) starts a 2-minute focus on the task ("just open it");
-  when it ends the pet offers a normal focus session or "that's enough".
+  when it ends the pet offers a normal focus session or "that's enough". While a focus session is running, the menu
+  asks first ("You're 12 minutes into a focus session. Switch to 2 minutes?").
+
+### 6. Bubbles and the open board
+- An urgent bubble that announces or asks something (a meeting, a timed task, "is it done?", "Move some?") shows as a
+  banner at the top of the open board, with its words and buttons. The quiet replies ("Added ✔︎") stay out of the way
+  (the board has its own note), and the rest wait for the board to close.
+- Every bubble can say when it stops being true: the meeting it announces has started, the task it names is gone or
+  done, the focus session it confirms was stopped, the day no longer runs over. A stale bubble is dropped unseen, at
+  once when its subject changes and at the latest at the next beat; that is no refusal and costs nothing.
+- The demo panel can show what the browser can't otherwise: **Day's end** (the review bubble, past the gap between
+  bubbles), **Next morning** (the clock moves to 8:20 on the next workday: what you moved to tomorrow comes back as
+  today's tasks, with the greeting, the frog and the note) and **Friday** (16:30 with weekends off, so "tomorrow" is
+  "Monday").
 
 ## v0.5 "Game"
 

@@ -8,6 +8,7 @@ import { normalizeWords, relatedTasks, significantWords } from "./related";
 import { isConferencing, isNotWorkApp, resumeSummary, shouldOfferResume, snapshot, withNote, workUrl, type WorkContext } from "./resume";
 import {
   appMatches,
+  normalizeAppName,
   clearTrigger,
   dueTriggers,
   markFired,
@@ -314,12 +315,81 @@ describe("if-then triggers", () => {
       trig("3", { kind: "appOpen", app: "photoshop" }),
       trig("4", { kind: "appOpen", app: "   " }),
     ];
-    expect(ids(dueTriggers(list, ctx({ app: figma })))).toEqual(["1", "2"]);
+    expect(ids(dueTriggers(list, ctx({ app: figma })))).toEqual(["1", "2", "5"]);
     expect(dueTriggers(list, ctx({ app: null }))).toEqual([]);
     expect(appMatches(app("Visual Studio Code", "code.exe"), "code")).toBe(true);
     expect(appMatches(app("Excel", "excel.exe"), "")).toBe(false);
-    // Whole words or the exe's name only, and 3+ characters (the plans' review): "fig" is not Figma.
-    expect(appMatches(figma, "fig")).toBe(false);
+    // The start of a word counts too, from 3 letters: "fig" is Figma (the v0.4 evaluation).
+    expect(appMatches(figma, "fig")).toBe(true);
+  });
+
+  describe("typed app names (v0.4 evaluation, issue 2)", () => {
+    const figma = app("Figma", "Figma.exe", "Homepage");
+    const code = app("Visual Studio Code", "code.exe", "brain.ts");
+    const chrome = app("Google Chrome", "chrome.exe", "Docs");
+    const password = app("Password Manager", "pwmanager.exe");
+
+    it("strips a trailing .exe and the spaces around the name", () => {
+      expect(normalizeAppName("Figma.exe")).toBe("Figma");
+      expect(normalizeAppName("  figma.EXE ")).toBe("figma");
+      expect(normalizeAppName("Figma .exe")).toBe("Figma");
+      expect(normalizeAppName("  Visual   Studio  ")).toBe("Visual Studio");
+      expect(normalizeAppName(".exe")).toBe("");
+      expect(normalizeAppName("exe")).toBe("exe");
+    });
+
+    it("matches the program's name as Task Manager shows it", () => {
+      expect(appMatches(figma, "Figma.exe")).toBe(true);
+      expect(appMatches(figma, "figma.exe ")).toBe(true);
+      expect(appMatches(figma, "FIGMA")).toBe(true);
+      expect(appMatches(code, "code.exe")).toBe(true);
+      expect(appMatches(figma, "Photoshop.exe")).toBe(false);
+    });
+
+    it("matches word prefixes of 3+ letters, ignoring case", () => {
+      expect(appMatches(figma, "fig")).toBe(true);
+      expect(appMatches(figma, "FIGM")).toBe(true);
+      expect(appMatches(code, "stud")).toBe(true);
+      expect(appMatches(code, "visual stu")).toBe(true);
+      expect(appMatches(code, "vis")).toBe(true);
+      expect(appMatches(chrome, "chr")).toBe(true);
+      expect(appMatches(chrome, "goo chr")).toBe(true);
+    });
+
+    it("needs the words in order, and never matches the middle of a word", () => {
+      expect(appMatches(code, "studio visual")).toBe(false);
+      expect(appMatches(code, "udio")).toBe(false);
+      expect(appMatches(password, "word")).toBe(false);
+      expect(appMatches(figma, "gma")).toBe(false);
+    });
+
+    it("needs 3 characters, and a prefix of 3+ letters for a word that isn't whole", () => {
+      expect(appMatches(figma, "fi")).toBe(false);
+      expect(appMatches(figma, "f")).toBe(false);
+      expect(appMatches(figma, "")).toBe(false);
+      expect(appMatches(figma, ".exe")).toBe(false);
+      expect(appMatches(figma, "exe")).toBe(false);
+      // A whole short word of the name is fine ("Adobe XD"), as before.
+      expect(appMatches(app("Adobe XD", "xd.exe"), "adobe xd")).toBe(true);
+      expect(appMatches(app("Adobe XD", "xd.exe"), "xd")).toBe(false);
+    });
+
+    it("keeps a program picked from the recent apps exact", () => {
+      expect(appMatches(figma, "Figma", "figma.exe")).toBe(true);
+      expect(appMatches(figma, "Figma", "other.exe")).toBe(false);
+    });
+
+    it("stores a typed name without .exe, so the chip and the plan agree", () => {
+      const [t] = triggersFromJson([{ taskId: "1", day: DAY, trigger: { kind: "appOpen", app: "  Figma.exe " } }]);
+      expect(t.trigger).toEqual({ kind: "appOpen", app: "Figma" });
+      expect(triggersFromJson([{ taskId: "1", day: DAY, trigger: { kind: "appOpen", app: ".exe" } }])).toEqual([]);
+      expect(triggersFromJson([{ taskId: "1", day: DAY, trigger: { kind: "appOpen", app: "fi.exe" } }])).toEqual([]);
+    });
+
+    it("fires a plan typed as Figma.exe or fig when Figma comes to the front", () => {
+      const list = [trig("1", { kind: "appOpen", app: "Figma" }), trig("2", { kind: "appOpen", app: "fig" })];
+      expect(ids(dueTriggers(list, ctx({ app: figma })))).toEqual(["1", "2"]);
+    });
   });
 
   it("fires after lunch from 13:00", () => {

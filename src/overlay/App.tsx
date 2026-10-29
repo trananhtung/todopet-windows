@@ -36,6 +36,20 @@ export interface BoardRequest {
   prefill: string | null;
   /** Opens on the Wrap up sheet (the end-of-day bubble, the board's Wrap up button, the demo). */
   wrapUp: boolean;
+  /** Scrolls to this task and gives it the focus (the meeting bubble's "Open"). */
+  focusTaskId: string | null;
+  /** Opens ready to move tasks off an overbooked day: estimates on the rows, a one-tap "tomorrow" on each. */
+  lighten: boolean;
+}
+
+/** What opens the board besides the add field and a prefill (see `BrainEffects.openBoard`). */
+interface BoardOptions {
+  split?: TodoTask | null;
+  fromKeyboard?: boolean;
+  prefill?: string | null;
+  wrapUp?: boolean;
+  focusTaskId?: string;
+  lighten?: boolean;
 }
 
 const isHidden = (s: BrainState) => s.hiddenUntil !== null || (s.fullscreen && s.prefs.hideInFullscreen);
@@ -102,9 +116,18 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
   }, [brain]);
 
   const openBoard = useCallback(
-    (focusAdd: boolean, split: TodoTask | null = null, fromKeyboard = false, prefill: string | null = null, wrapUp = false) => {
+    (focusAdd: boolean, o: BoardOptions = {}) => {
       setPlacement(computePlacement());
-      setBoard((b) => ({ seq: (b?.seq ?? 0) + 1, focusAdd, split, fromKeyboard, prefill, wrapUp }));
+      setBoard((b) => ({
+        seq: (b?.seq ?? 0) + 1,
+        focusAdd,
+        split: o.split ?? null,
+        fromKeyboard: o.fromKeyboard ?? false,
+        prefill: o.prefill ?? null,
+        wrapUp: o.wrapUp ?? false,
+        focusTaskId: o.focusTaskId ?? null,
+        lighten: o.lighten ?? false,
+      }));
       void backend.system.focusOverlay().catch(() => undefined);
       applyClickThrough(false);
     },
@@ -131,9 +154,9 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     brain.effects = {
       chime: playChime,
       speak,
-      openBoard: (focusAdd, prefill) => openBoard(focusAdd, null, false, prefill ?? null),
-      openSplit: (task) => openBoard(false, task),
-      openWrapUp: () => openBoard(false, null, false, null, true),
+      openBoard: (focusAdd, prefill, opts) => openBoard(focusAdd, { prefill: prefill ?? null, ...opts }),
+      openSplit: (task) => openBoard(false, { split: task }),
+      openWrapUp: () => openBoard(false, { wrapUp: true }),
     };
   }, [brain, openBoard]);
 
@@ -199,6 +222,11 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       window.removeEventListener("resize", replace);
     };
   }, [boardIsOpen, badge, s.prefs.petScale, computePlacement]);
+
+  // A bubble that went stale while the board hid it (or while nobody looked) never shows up late.
+  useEffect(() => {
+    if (s.bubble) brain.pruneBubble();
+  }, [brain, s.bubble, board]);
 
   // Tray tooltip ticks every second during focus.
   useEffect(() => {
@@ -390,15 +418,16 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     e.preventDefault();
     brain.petClicked();
     if (boardOpen.current) closeBoard();
-    else openBoard(false, null, true);
+    else openBoard(false, { fromKeyboard: true });
   };
 
   const hidden = isHidden(s);
-  const showBubble = s.bubble && !board && (!hidden || s.bubble.urgent);
+  // While the board is open, the urgent ones that ask or announce something show inside it (a banner); the rest wait.
+  const showBubble = s.bubble && !board && (!hidden || s.bubble.urgent) && !brain.bubbleStale(s.bubble);
 
   return (
     <>
-      {fakeDesktop && <DemoDesktop />}
+      {fakeDesktop && <DemoDesktop brain={brain} />}
       <div className="stage" ref={stageRef} style={fakeDesktop ? { bottom: 48 } : undefined}>
         {!hidden && s.antic?.kind.type === "parade" && (
           <div className="sign" ref={signRef} aria-hidden>
@@ -452,7 +481,7 @@ function PetBadge({ brain }: { brain: Brain }) {
     return () => clearInterval(id);
   }, [s.focus]);
   if (s.focus) {
-    const left = Math.max(0, Math.round((s.focus.end - Date.now()) / 1000));
+    const left = Math.max(0, Math.round((s.focus.end - brain.clockNow()) / 1000));
     return (
       <span className="pet-badge" aria-hidden>
         {s.focus.isBreak ? "☕" : "🍅"} {String(Math.floor(left / 60)).padStart(2, "0")}:{String(left % 60).padStart(2, "0")}

@@ -18,7 +18,7 @@ import { Diary } from "./diary";
 import { L, langFromLocale, plural, setLang } from "./l10n";
 import * as life from "./life";
 import * as lines from "./lines";
-import { dayLoad, isOverbooked, type DayLoad, type DayLoadInput } from "./load";
+import { dayLoad, isOverbooked, taskEstimate, type DayLoad, type DayLoadInput } from "./load";
 import {
   actionable,
   buildDay,
@@ -45,6 +45,7 @@ import { isConferencing, isNotWorkApp, resumeSummary, shouldOfferResume, snapsho
 import { appRules, currentDistraction, isBrowser, siteRules } from "./sites";
 import { findStuck, pretendSeen, recordSeen, type SeenLog, type StuckTask } from "./stuck";
 import {
+  appMatches,
   clearTrigger,
   dueTriggers,
   goneMeetingPlans,
@@ -125,6 +126,8 @@ const BREATHER_MINUTES = 5;
 /** A breather shorter than this isn't worth suggesting. */
 const BREATHER_MIN = 3;
 const STARTER_MINUTES = 2;
+/** A confirmation ("Starting 25 minutes…") is shown within this long of what it confirms, or never. */
+const CONFIRM_MS = 30_000;
 /** At most one resume card per this many minutes. */
 const RESUME_COOLDOWN = 30;
 /** Cards you closed or ignored this many times in a day aren't offered again that day. */
@@ -159,7 +162,19 @@ export interface Bubble {
   kind?: ReminderKind;
   /** A check-in that isn't counted but whose refusals are: see `CardKind`. */
   card?: CardKind;
+  /** A quieter second line under the text (where you were, on the resume card). */
+  detail?: string;
+  /** After this time (epoch ms) the bubble is out of date (the meeting it announces has started) and is dropped unseen. */
+  validUntil?: number;
+  /** Turns false once what the bubble is about has changed (its session stopped, its task is gone): it is dropped unseen. */
+  stillValid?: () => boolean;
 }
+
+/**
+ * Does this bubble get through while the board is open? Urgent ones that announce or ask something (a meeting, a timed
+ * task, "is it done?") do, as a banner in the board. The quiet replies ("Added ✔︎") don't: the board says so itself.
+ */
+export const showsOverBoard = (b: Bubble): boolean => b.urgent && (b.reminder || b.actions.length > 0);
 
 export interface FocusSession {
   task: TodoTask | null;
@@ -267,8 +282,11 @@ type SayOptions = {
 export interface BrainEffects {
   chime?(c: Chime): void;
   speak?(text: string, lang: Lang): void;
-  /** `prefill` is put in the add field ("Team sync: "). */
-  openBoard?(focusAdd: boolean, prefill?: string): void;
+  /**
+   * `prefill` is put in the add field ("Team sync: "); `focusTaskId` scrolls to that task and gives it the focus;
+   * `lighten` opens the board to move tasks off an overbooked day.
+   */
+  openBoard?(focusAdd: boolean, prefill?: string, opts?: { focusTaskId?: string; lighten?: boolean }): void;
   openSplit?(task: TodoTask): void;
   /** Opens the board on the Wrap up sheet. */
   openWrapUp?(): void;
@@ -410,6 +428,8 @@ export class Brain {
   private calendarHosts: string[] = [];
   /** Demo controls: a mood shown for a few seconds while a stunt plays. */
   private demoMood: { mood: Mood; until: number } | null = null;
+  /** Demo controls: Saturdays and Sundays are days off as in real life, so "Monday" can be seen after a Friday. */
+  private demoWeekends = false;
   private filterTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Kind words that wait until you're around, for the day they were written on: how the last day was settled, and
@@ -524,6 +544,12 @@ export class Brain {
     this.state = { ...this.state, ...patch };
     if (patch.life || patch.prefs) this.state.nudgesLeft = budgetLeft(this.state);
     if (patch.life) this.state.nudgeHoldUntil = patch.life.nudgeHoldUntil;
+    // What a bubble is about may have changed with this (the focus session stopped, the task is gone): drop it unseen.
+    const waiting = this.state.bubble;
+    if (waiting && patch.bubble === undefined && waiting.stillValid && !waiting.stillValid()) {
+      this.dismissBubble(waiting.id, "stale");
+      return;
+    }
     for (const fn of this.listeners) fn();
   }
 
@@ -1070,7 +1096,7 @@ export class Brain {
     const p = this.state.prefs;
     // The demo is always a working day (unless you take it off), so every behavior can be tried at any hour.
     const demo = this.state.isDemo;
-    const workday = demo ? !isRestDay(p, d) : isWorkday(p, d);
+    const workday = this.workdayOn(d);
     return {
       workday,
       inWork: workday && (demo || (h >= p.workStart && h < p.workEnd)),
@@ -1266,7 +1292,7 @@ export class Brain {
       before = { ...s };
       return life.closeDay(s, today, (key) => {
         const d = parseDate(key);
-        return d ? (this.state.isDemo ? !isRestDay(this.state.prefs, d) : isWorkday(this.state.prefs, d)) : false;
+        return d ? this.workdayOn(d) : false;
       });
     });
     const after = this.state.life;
@@ -1357,12 +1383,17 @@ export class Brain {
    * rules do (`remindEvery`, `remindOnce`, `mayRemind`) before a reminder's timer is set, so a held reminder keeps
    * its turn and comes as soon as the hold ends.
    */
-  say(b: { text: string; actions?: BubbleAction[]; seconds: number; urgent?: boolean }, opts: SayOptions = {}): void {
+  say(b: { text: string; detail?: string; actions?: BubbleAction[]; seconds: number; urgent?: boolean; validUntil?: number; stillValid?: () => boolean }, opts: SayOptions = {}): void {
+    // A bubble that went stale never blocks the next one.
+    this.pruneBubble();
     const cur = this.state.bubble;
     const actions = b.actions ?? [];
     if (cur && cur.actions.length > 0 && !b.urgent && actions.length === 0) return;
     if (cur && cur.urgent && !b.urgent) return;
     const bubble: Bubble = { id: ++this.bubbleSeq, text: b.text, actions, seconds: b.seconds, urgent: b.urgent ?? false, reminder: opts.why !== undefined };
+    if (b.detail) bubble.detail = b.detail;
+    if (b.validUntil !== undefined) bubble.validUntil = b.validUntil;
+    if (b.stillValid) bubble.stillValid = b.stillValid;
     if (opts.kind) bubble.kind = opts.kind;
     if (opts.card) bubble.card = opts.card;
     this.lastBubbleAt = this.now();
@@ -1406,7 +1437,7 @@ export class Brain {
    * fades was read, not refused; an expired one was never seen): a repeating kind's interval doubles, up to ×8, and
    * three refusals in a row hold the rest for an hour.
    */
-  dismissBubble(bubbleId: number, how: "closed" | "ignored" | "expired"): void {
+  dismissBubble(bubbleId: number, how: "closed" | "ignored" | "expired" | "stale"): void {
     const b = this.state.bubble;
     if (!b || b.id !== bubbleId) return;
     const kind = b.kind;
@@ -1428,7 +1459,9 @@ export class Brain {
           ? L("Bạn đóng bong bóng", "You closed the bubble")
           : how === "ignored"
             ? L("Bạn không phản hồi (tự ẩn)", "No response (faded away)")
-            : L("Bong bóng hết hạn mà chưa hiện ra (pet đang ẩn)", "The bubble expired without showing (the pet was out of the way)");
+            : how === "stale"
+              ? L("Bong bóng đã cũ (việc nó nói tới đã đổi) nên mình bỏ đi, không tính là bạn từ chối", "The bubble was out of date (what it was about had changed), so it was dropped: not a refusal")
+              : L("Bong bóng hết hạn mà chưa hiện ra (pet đang ẩn)", "The bubble expired without showing (the pet was out of the way)");
       this.diary.add("response", what + backoff, { tag: how });
     }
     this.set({ bubble: null });
@@ -1446,6 +1479,25 @@ export class Brain {
         ),
       );
     }
+  }
+
+  /** Is the bubble out of date: its time is up, or what it is about has changed? */
+  bubbleStale(b: Bubble, nowMs = this.now()): boolean {
+    if (b.validUntil !== undefined && nowMs >= b.validUntil) return true;
+    return b.stillValid !== undefined && !b.stillValid();
+  }
+
+  /** Drops the waiting bubble if it is out of date (the board never showed it): neither a refusal nor a reminder skipped. */
+  pruneBubble(nowMs = this.now()): boolean {
+    const b = this.state.bubble;
+    if (!b || !this.bubbleStale(b, nowMs)) return false;
+    this.dismissBubble(b.id, "stale");
+    return true;
+  }
+
+  /** `stillValid` for a bubble about this task: false once it is finished or gone. */
+  private whileOpen(t: TodoTask): () => boolean {
+    return () => openTasks(this.state.day).some((x) => x.id === t.id);
   }
 
   private play(c: Chime): void {
@@ -1640,6 +1692,7 @@ export class Brain {
     if (this.state.hasToken && !this.state.loading && stale && nowMs >= this.nextSyncAt) void this.refresh();
     // A bubble the overlay never got to show (pet hidden, full-screen app) must not block reminders forever. It
     // expired unseen: no back-off, and no step toward the hold.
+    this.pruneBubble(nowMs);
     const b = this.state.bubble;
     if (b && nowMs - this.bubbleAt > (b.seconds + 60) * 1000) this.dismissBubble(b.id, "expired");
     void this.refreshCalendar();
@@ -1759,6 +1812,7 @@ export class Brain {
   runRules(nowMs: number): void {
     const now = new Date(nowMs);
     const s = this.state;
+    this.pruneBubble(nowMs);
     this.trackMeetings(nowMs, now);
     if (s.quietUntil !== null && nowMs < s.quietUntil) return;
     if (s.quietUntil !== null) this.set({ quietUntil: null });
@@ -1787,9 +1841,25 @@ export class Brain {
           const url = upcoming.joinUrl;
           actions.push({ title: L("Vào họp ↗", "Join ↗"), primary: true, run: () => void this.backend.system.openUrl(url).catch(() => undefined) });
         }
+        // The tasks that go with it can be opened from here: the board scrolls to the task and gives it the focus.
+        const related = relatedTasks(upcoming.title, ranked(openTasks(s.day), s.day.frogId), 2);
+        related.forEach((t, i) =>
+          actions.push({
+            title: L(`Mở “${shortText(taskTitle(t), 16)}”`, `Open “${shortText(taskTitle(t), 16)}”`),
+            primary: i === 0 && !upcoming.joinUrl,
+            run: () => this.effects.openBoard?.(false, undefined, { focusTaskId: t.id }),
+          }),
+        );
         actions.push({ title: "OK", run: () => undefined });
         this.say(
-          { text: lines.meetingSoon(upcoming, Math.max(1, Math.ceil(mins)), relatedTasks(upcoming.title, ranked(openTasks(s.day), s.day.frogId), 2)), actions, seconds: 90, urgent: true },
+          {
+            text: lines.meetingSoon(upcoming, Math.max(1, Math.ceil(mins)), related),
+            actions,
+            seconds: 90,
+            urgent: true,
+            // "In 4 min" is only true until it starts.
+            validUntil: upcoming.start.getTime(),
+          },
           { chime: "important", why: L(`họp lúc ${timeString(upcoming.start)}`, `meeting at ${timeString(upcoming.start)}`) },
         );
         return;
@@ -1820,7 +1890,7 @@ export class Brain {
     // Not while the pet is out of the way (nobody would see it), nor on a stale list of tasks.
     if (cameBack !== null && cameBack.resume === null && !done && cameBack.minutes > 15 && ctx.inWork && next && !this.outOfTheWay && this.snapshotFresh && this.mayRemind("welcome")) {
       this.say(
-        { text: lines.welcomeBack(next), actions: [this.focusAction(next), this.laterAction()], seconds: 30 },
+        { text: lines.welcomeBack(next), actions: [this.focusAction(next), this.laterAction()], seconds: 30, stillValid: this.whileOpen(next) },
         { why: L(`bạn vừa quay lại sau ${cameBack.minutes} phút`, `you just came back after ${cameBack.minutes} minutes`), kind: "welcome" },
       );
       return;
@@ -1833,14 +1903,15 @@ export class Brain {
       const mins = (time.getTime() - nowMs) / MIN;
       if (mins > 0 && mins <= 10 && this.once(`soon-${t.id}`)) {
         this.say(
-          { text: lines.soon(t, Math.ceil(mins)), actions: [this.focusAction(t), this.completeAction(t)], seconds: 40, urgent: true },
+          // True until it is due (then "It's time" takes over), and while the task is still open.
+          { text: lines.soon(t, Math.ceil(mins)), actions: [this.focusAction(t), this.completeAction(t)], seconds: 40, urgent: true, validUntil: time.getTime(), stillValid: this.whileOpen(t) },
           { chime: "important", why: L(`việc hẹn lúc ${timeString(time)}`, `task due at ${timeString(time)}`) },
         );
         return;
       }
       if (mins <= 0 && mins > -5 && this.once(`now-${t.id}`)) {
         this.say(
-          { text: lines.dueNow(t), actions: [this.focusAction(t), this.completeAction(t)], seconds: 60, urgent: true },
+          { text: lines.dueNow(t), actions: [this.focusAction(t), this.completeAction(t)], seconds: 60, urgent: true, validUntil: time.getTime() + 5 * MIN, stillValid: this.whileOpen(t) },
           { chime: "important", why: L(`tới giờ hẹn ${timeString(time)}`, `due now (${timeString(time)})`) },
         );
         return;
@@ -1904,6 +1975,7 @@ export class Brain {
               : { title: L("Nghỉ xíu thôi (10')", "Just a quick break (10')"), neutral: true, run: () => (this.distractionSnoozedUntil = this.now() + 10 * MIN) },
           ],
           seconds: 30,
+          ...(next ? { stillValid: this.whileOpen(next) } : {}),
         },
         { why: L(`ở ${d.app} ${Math.trunc(d.minutes)} phút trong giờ làm`, `on ${d.app} for ${Math.trunc(d.minutes)} min during work hours`), kind: "distract" },
       );
@@ -2028,6 +2100,8 @@ export class Brain {
             this.laterAction(),
           ],
           seconds: 60,
+          // Not once a session has started, or the task is done.
+          stillValid: () => this.state.focus === null && this.whileOpen(stuck.task)(),
         },
         {
           why: L(`“${shortText(taskTitle(stuck.task), 30)}” nằm trong danh sách ${stuck.days} ngày`, `“${shortText(taskTitle(stuck.task), 30)}” has been on your list ${stuck.days} days`),
@@ -2040,7 +2114,7 @@ export class Brain {
     // 6b. A hungry pet begs for a finished task.
     if (ctx.inWork && life.isHungry(s.life) && this.remindEvery("hungry", 60)) {
       this.say(
-        { text: lines.hungry(s.life.satiety, next), actions: next ? [this.focusAction(next), this.laterAction()] : [], seconds: 30 },
+        { text: lines.hungry(s.life.satiety, next), actions: next ? [this.focusAction(next), this.laterAction()] : [], seconds: 30, ...(next ? { stillValid: this.whileOpen(next) } : {}) },
         { why: L(`độ no còn ${Math.trunc(s.life.satiety)}%`, `only ${Math.trunc(s.life.satiety)}% full`), kind: "hungry" },
       );
       this.speak(lines.voiceHungry());
@@ -2093,7 +2167,12 @@ export class Brain {
     const slot = s.suggestions[0];
     if (ctx.inWork && planned(day) >= target && slot && slot.start.getTime() - nowMs < 3 * 60 * MIN && this.remindOnce("timeblock", `timeblock-${this.dayKey}`)) {
       this.say(
-        { text: lines.timeBlock(slot), actions: [{ title: L("⏰ Đặt giờ", "⏰ Set time"), primary: true, run: () => void this.schedule(slot) }, this.laterAction()], seconds: 60 },
+        {
+          text: lines.timeBlock(slot),
+          actions: [{ title: L("⏰ Đặt giờ", "⏰ Set time"), primary: true, run: () => void this.schedule(slot) }, this.laterAction()],
+          seconds: 60,
+          stillValid: this.whileOpen(slot.task),
+        },
         { why: L("gợi ý khung giờ trống (mỗi ngày một lần)", "a free time slot (once a day)"), kind: "timeblock" },
       );
       return;
@@ -2101,18 +2180,7 @@ export class Brain {
 
     // 9. End-of-day review (shutdown ritual): opens the Wrap up sheet. A daily check-in: never counted.
     if (ctx.inWork && nowMs >= ctx.reviewTime && day.today.length > 0 && this.once(`review-${this.dayKey}`)) {
-      this.say(
-        {
-          text: lines.review(day.completed.length, planned(day), day.today.length),
-          actions: [
-            { title: L("Tổng kết ngày", "Wrap up"), primary: true, run: () => this.effects.openWrapUp?.() },
-            { title: L("Dời sang mai", "Move to tomorrow"), run: () => void this.moveTodayToTomorrow() },
-            { title: L("Làm tiếp", "Keep going"), run: () => undefined },
-          ],
-          seconds: 90,
-        },
-        { why: L(`30 phút trước giờ tan làm, còn ${day.today.length} việc`, `30 min before work ends, ${day.today.length} left`) },
-      );
+      this.sayReview();
       return;
     }
 
@@ -2136,7 +2204,7 @@ export class Brain {
       this.markFired(LATER, null);
       const idleHours = (nowMs - this.lastProgress()) / (60 * MIN);
       this.say(
-        { text: lines.nudge(s.mood, next, idleHours), actions: [this.focusAction(next), this.completeAction(next), this.laterAction()], seconds: 45 },
+        { text: lines.nudge(s.mood, next, idleHours), actions: [this.focusAction(next), this.completeAction(next), this.laterAction()], seconds: 45, stillValid: this.whileOpen(next) },
         {
           why: L(
             `${minutes} phút chưa nhắc; ${idleHours.toFixed(1)} giờ chưa có tiến triển`,
@@ -2152,6 +2220,23 @@ export class Brain {
     if (ctx.inWork && (s.mood === "happy" || s.mood === "normal") && nowMs - this.lastBubbleAt > 40 * MIN && this.remindEvery("tip", 150)) {
       this.say({ text: lines.tip(), seconds: 14 }, { why: L("pet đang vui và đã im lặng 40 phút", "the pet is in a good mood and quiet for 40 min"), kind: "tip" });
     }
+  }
+
+  /** The end-of-day review: what got done, and a way into the Wrap up sheet. */
+  private sayReview(): void {
+    const day = this.state.day;
+    this.say(
+      {
+        text: lines.review(day.completed.length, planned(day), day.today.length),
+        actions: [
+          { title: L("Tổng kết ngày", "Wrap up"), primary: true, run: () => this.effects.openWrapUp?.() },
+          { title: L("Dời sang mai", "Move to tomorrow"), run: () => void this.moveTodayToTomorrow() },
+          { title: L("Làm tiếp", "Keep going"), run: () => undefined },
+        ],
+        seconds: 90,
+      },
+      { why: L(`30 phút trước giờ tan làm, còn ${day.today.length} việc`, `30 min before work ends, ${day.today.length} left`) },
+    );
   }
 
   // ---------- Meeting bookends, plans and the resume card (SPEC v0.4) ----------
@@ -2277,7 +2362,8 @@ export class Brain {
     if (soon) actions.push({ title: L(`☕ Nghỉ ${breather} phút`, `☕ ${breather}-min breather`), run: () => this.startBreak(breather) });
     actions.push({ title: L("Không có gì", "Nothing"), run: () => undefined });
     this.say(
-      { text: lines.meetingOver(over, soon, breather), actions, seconds: 60 },
+      // The breather is offered before the next meeting: not after it has started.
+      { text: lines.meetingOver(over, soon, breather), actions, seconds: 60, ...(soon ? { validUntil: soon.start.getTime() } : {}) },
       { why: L(`họp “${shortText(over.title, 30)}” vừa kết thúc`, `“${shortText(over.title, 30)}” just ended`), card: "aftermeeting" },
     );
     return true;
@@ -2314,7 +2400,7 @@ export class Brain {
         run: () => this.setTriggers(rearmTrigger(this.state.triggers, t.taskId, t.day, this.now() + PLAN_LATER_MINUTES * MIN)),
       };
       this.say(
-        { text: lines.asPlanned(task), actions: [{ title: L("▶ Bắt đầu ngay", "▶ Focus now"), primary: true, run: () => this.startFocus(task) }, later], seconds: 45 },
+        { text: lines.asPlanned(task), actions: [{ title: L("▶ Bắt đầu ngay", "▶ Focus now"), primary: true, run: () => this.startFocus(task) }, later], seconds: 45, stillValid: this.whileOpen(task) },
         { why: L(`kế hoạch bạn đặt: ${lines.triggerKindText(t.trigger)}`, `your plan: ${lines.triggerKindText(t.trigger)}`) },
       );
       return true;
@@ -2369,8 +2455,9 @@ export class Brain {
     // One primary button: Reopen when there is a page to go back to, else Focus.
     if (target) actions.push({ ...this.focusAction(target), primary: url === null });
     actions.push({ title: L("Việc khác", "Something else"), run: () => this.effects.openBoard?.(false) });
+    const place = lines.resumePlace(shown);
     this.say(
-      { text: lines.resumeCard(shown, pending.reason), actions, seconds: 45 },
+      { text: lines.resumeCard(shown, pending.reason), ...(place ? { detail: place } : {}), actions, seconds: 45, ...(task ? { stillValid: this.whileOpen(task) } : {}) },
       { why: L("bạn vừa quay lại", "you just came back"), diaryText: lines.resumeDiary(shown.task, shown.note !== null), card: "resume" },
     );
     return true;
@@ -2399,6 +2486,15 @@ export class Brain {
     return triggerChoices({ events: this.state.events, now: this.now(), recentApps: this.recentApps, current: this.sample.app, isDistracting: this.isDistractingNow });
   }
 
+  /**
+   * The app lately in front (or in front now) that a typed name for "Start when I open…" matches, or null: the dialog
+   * shows it, and says kindly when nothing matches yet (the plan is still kept, and waits for the app).
+   */
+  recentAppMatch(typed: string): ForegroundApp | null {
+    const apps = [...(this.sample.app ? [this.sample.app] : []), ...this.recentApps];
+    return apps.find((a) => !isNotWorkApp(a) && appMatches(a, typed)) ?? null;
+  }
+
   /** **▶ Try 2 minutes**: a 2-minute focus on the task ("just open it"); at the end the pet offers a full session or lets you stop. */
   startTwoMinutes(task: TodoTask | null): void {
     this.startFocus(task, STARTER_MINUTES, true);
@@ -2406,8 +2502,8 @@ export class Brain {
 
   // ---------- Wrapping up the day and the overbooked check (SPEC v0.4 §3, §4) ----------
 
-  /** Is this a day the pet works on? The demo works every day unless you take it off (as in `context`). */
-  private readonly workdayOn = (d: Date): boolean => (this.state.isDemo ? !isRestDay(this.state.prefs, d) : isWorkday(this.state.prefs, d));
+  /** Is this a day the pet works on? The demo works every day unless you take it off (or turned weekends on). */
+  private readonly workdayOn = (d: Date): boolean => (this.state.isDemo && !this.demoWeekends ? !isRestDay(this.state.prefs, d) : isWorkday(this.state.prefs, d));
 
   private setPlanDoc(doc: PlanDoc): void {
     this.plan = doc;
@@ -2443,10 +2539,16 @@ export class Brain {
       {
         text: lines.overbooked(load),
         actions: [
-          { title: L("Chọn việc để dời", "Pick tasks to move"), primary: true, run: () => this.effects.openBoard?.(false) },
+          // The board opens ready to choose: durations on the rows and a way to move each one.
+          { title: L("Chọn việc để dời", "Pick tasks to move"), primary: true, run: () => this.effects.openBoard?.(false, undefined, { lighten: true }) },
           { title: L("Không sao", "It's fine"), run: () => undefined },
         ],
         seconds: 60,
+        // Not once moving things has made the day fit.
+        stillValid: () => {
+          const now = this.currentLoad();
+          return now.capacity > 0 && isOverbooked(now);
+        },
       },
       { why: L(`ngày có vẻ quá tải: dư ${load.overBy} phút so với thời gian còn lại`, `the day looks overbooked: ${load.overBy} min more than the time left`) },
     );
@@ -2467,6 +2569,17 @@ export class Brain {
   /** The current time, for the board (it shows the Wrap up button from the same clock the brain uses). */
   clockNow(): number {
     return this.now();
+  }
+
+  /** What the load counts for a task: its Todoist duration (`own`), else the default estimate. */
+  estimateOf(task: TodoTask): { minutes: number; own: boolean } {
+    const own = task.durationMinutes !== null && Number.isFinite(task.durationMinutes) && task.durationMinutes > 0;
+    return { minutes: taskEstimate(task, this.state.prefs.defaultEstimate), own };
+  }
+
+  /** One tap to "tomorrow" while lightening the day: the next workday (Monday after a Friday), like the Wrap up sheet. */
+  moveToNextWorkday(task: TodoTask): Promise<boolean> {
+    return this.reschedule(task, this.wrapDay().day);
   }
 
   /**
@@ -2937,7 +3050,19 @@ export class Brain {
     this.finishFocusAt(nowMs + m * MIN);
     this.recompute();
     this.lastBubbleAt = nowMs;
-    this.set({ bubble: { id: ++this.bubbleSeq, text: starter ? lines.starterStart(t, m) : lines.focusStart(t, m), actions: [], seconds: 5, urgent: false, reminder: false } });
+    // A confirmation: right away, or not at all (the board may have been open; and not once the session is over).
+    this.set({
+      bubble: {
+        id: ++this.bubbleSeq,
+        text: starter ? lines.starterStart(t, m) : lines.focusStart(t, m),
+        actions: [],
+        seconds: 5,
+        urgent: false,
+        reminder: false,
+        validUntil: nowMs + CONFIRM_MS,
+        stillValid: () => this.state.focus?.start === nowMs,
+      },
+    });
     this.diary.add(
       "focus",
       (starter ? L(`Bắt đầu thử ${m} phút`, `Started a ${m}-minute starter`) : L(`Bắt đầu tập trung ${m} phút`, `Started a ${m}-minute focus session`)) + (t ? `: “${shortText(taskTitle(t), 40)}”` : ""),
@@ -2950,7 +3075,9 @@ export class Brain {
     this.set({ focus: { task: null, start: nowMs, end: nowMs + m * MIN, isBreak: true, minutes: m } });
     this.finishFocusAt(nowMs + m * MIN);
     this.recompute();
-    this.set({ bubble: { id: ++this.bubbleSeq, text: lines.breakStart(m), actions: [], seconds: 6, urgent: false, reminder: false } });
+    this.set({
+      bubble: { id: ++this.bubbleSeq, text: lines.breakStart(m), actions: [], seconds: 6, urgent: false, reminder: false, validUntil: nowMs + CONFIRM_MS, stillValid: () => this.state.focus?.start === nowMs },
+    });
     this.diary.add("focus", L(`Nghỉ ${m} phút`, `${m}-minute break`));
   }
 
@@ -3130,6 +3257,24 @@ export class Brain {
   /** Demo: open the Wrap up sheet, whatever the hour. */
   demoWrapUp(): void {
     this.effects.openWrapUp?.();
+  }
+
+  /** Demo: the end-of-day review bubble now, past the gap between bubbles and the hour (it opens the Wrap up sheet). */
+  demoReview(): void {
+    this.set({ bubble: null });
+    this.sayReview();
+  }
+
+  /** Demo: Saturdays and Sundays are days off as in real life, so a Friday's "tomorrow" is Monday. */
+  setDemoWeekends(on: boolean): void {
+    if (this.demoWeekends === on) return;
+    this.demoWeekends = on;
+    this.recompute();
+  }
+
+  /** Demo: when "the next morning" is: 8:20 on the next workday (Monday after a Friday, with weekends on). */
+  nextMorning(): number {
+    return nextWorkdayStart(this.now(), this.state.prefs.workStart, this.workdayOn) + 20 * MIN;
   }
 
   /**

@@ -37,15 +37,16 @@ const sample = (a: ForegroundApp | null, url: string | null = null): SystemSampl
 });
 const never = () => false;
 
-describe("typed app names (item 8)", () => {
+describe("typed app names (item 8, then the v0.4 evaluation)", () => {
   const vscode = app("Visual Studio Code", "code.exe");
 
   it("needs 3 characters", () => {
     expect(appMatches(vscode, "e")).toBe(false);
     expect(appMatches(vscode, "co")).toBe(false);
     expect(appMatches(vscode, "  c ")).toBe(false);
-    expect(appMatches(vscode, "cod")).toBe(false); // not a whole word nor the exe
-    expect(appMatches(app("Figma", "figma.exe"), "fig")).toBe(false);
+    // From 3 letters the start of a word counts (v0.4 evaluation, issue 2): "fig" is Figma, "cod" is Code.
+    expect(appMatches(vscode, "cod")).toBe(true);
+    expect(appMatches(app("Figma", "figma.exe"), "fig")).toBe(true);
   });
 
   it("matches whole words of the name, in order, or the exe name without .exe, ignoring case", () => {
@@ -306,12 +307,46 @@ describe("the resume card's words (item 14, M2)", () => {
 
   it("says what was next, not what you were on, when the task is only the next one", () => {
     setLang("en");
-    expect(lines.resumeCard(summary, "away")).toContain("You were on: “Taxes” · in Google Chrome — Spec");
-    expect(lines.resumeCard({ ...summary, taskIsNext: true }, "away")).toContain("Next up: “Taxes” · you were in Google Chrome — Spec");
+    expect(lines.resumeCard(summary, "away")).toContain("You were on: “Taxes”");
+    expect(lines.resumeCard({ ...summary, taskIsNext: true }, "away")).toContain("Next up: “Taxes”");
     expect(lines.resumeCard({ ...summary, taskIsNext: true }, "away")).not.toContain("You were on");
     expect(lines.resumeCard({ ...summary, taskIsNext: true, where: null }, "away")).toContain("Next up: “Taxes”");
     setLang("vi");
     expect(lines.resumeCard({ ...summary, taskIsNext: true }, "away")).toContain("Việc tiếp theo: “Taxes”");
+    setLang("en");
+  });
+
+  // v0.4 evaluation, issue 12: "Next up: X · you were in Y" glued two ideas and read as if Y belonged to X.
+  it("puts where you were on a line of its own, never glued to the task with a middle dot", () => {
+    for (const lang of ["en", "vi"] as const) {
+      setLang(lang);
+      for (const next of [false, true]) {
+        const card = lines.resumeCard({ ...summary, taskIsNext: next }, "away");
+        const place = lines.resumePlace({ ...summary, taskIsNext: next });
+        expect(card).not.toContain("·");
+        expect(card).not.toContain("Google Chrome");
+        expect(place).toContain("Google Chrome — Spec");
+        expect(place).not.toContain("\n");
+        expect(place).not.toContain("·");
+      }
+    }
+    setLang("en");
+    expect(lines.resumePlace(summary)).toBe("Last in: Google Chrome — Spec");
+    setLang("vi");
+    expect(lines.resumePlace(summary)).toBe("Bạn vừa ở: Google Chrome — Spec");
+    setLang("en");
+  });
+
+  it("keeps the place in the card itself when there is no task to put it under", () => {
+    setLang("en");
+    const onlyPlace = { ...summary, task: null };
+    expect(lines.resumeCard(onlyPlace, "away")).toContain("You were in: Google Chrome — Spec");
+    expect(lines.resumePlace(onlyPlace)).toBe("");
+    expect(lines.resumePlace({ ...summary, where: null })).toBe("");
+    // The pinned note stays with the card (it is yours); only the place is the quiet line.
+    expect(lines.resumeCard({ ...summary, note: "Fix the loop" }, "away")).toContain("📌 Next step: Fix the loop");
+    setLang("vi");
+    expect(lines.resumeCard(onlyPlace, "away")).toContain("Bạn đang ở: Google Chrome — Spec");
     setLang("en");
   });
 
@@ -362,5 +397,51 @@ describe("resumeDetails preference (M2)", () => {
     expect(prefsFromJson({ resumeDetails: false }, 0).resumeDetails).toBe(false);
     expect(prefsFromJson({ resumeDetails: "no" }, 0).resumeDetails).toBe(true);
     expect(prefsFromJson({}, 0).resumeDetails).toBe(true);
+  });
+});
+
+// v0.4 evaluation, issue 6: the chip said "⏱ after 11:00 meeting" (the start time, no title) while the menu it came from
+// said "After “Team sync” (12:00)" (the end time): two names for one plan.
+describe("a plan's chip and its menu entry say the same thing", () => {
+  const team = ev("team", "Team sync", at(11), at(12));
+  const pick = triggerChoices({ events: [team], now: at(10), recentApps: [], isDistracting: () => false })[0];
+
+  it("names the meeting and its end time, in both languages", () => {
+    for (const lang of ["en", "vi"] as const) {
+      setLang(lang);
+      const choice = lines.triggerChoice(pick, [team]);
+      const chip = lines.triggerChip(pick, [team]);
+      expect(choice).toContain("“Team sync” (12:00)");
+      expect(chip).toContain("“Team sync” (12:00)");
+      expect(chip).not.toContain("11:00");
+      expect(chip.startsWith("⏱")).toBe(true);
+    }
+    setLang("en");
+    expect(lines.triggerChip(pick, [team])).toBe("⏱ after “Team sync” (12:00)");
+    setLang("vi");
+    expect(lines.triggerChip(pick, [team])).toBe("⏱ sau họp “Team sync” (12:00)");
+    setLang("en");
+  });
+
+  it("cuts a long title short and keeps the end time; two meetings at one hour stay apart", () => {
+    setLang("en");
+    const long = ev("long", "Quarterly business review with the whole leadership group", at(11), at(12, 30));
+    const choice = triggerChoices({ events: [long], now: at(10), recentApps: [], isDistracting: () => false })[0];
+    const chip = lines.triggerChip(choice, [long]);
+    expect(chip).toContain("(12:30)");
+    expect(chip.length).toBeLessThan(40);
+    expect(chip).toContain("…");
+    const other = ev("other", "Design review", at(11), at(12));
+    const [a, b] = triggerChoices({ events: [team, other], now: at(10), recentApps: [], isDistracting: () => false });
+    expect(lines.triggerChip(a, [team, other])).not.toBe(lines.triggerChip(b, [team, other]));
+  });
+
+  it("still says what it can when the meeting has left the calendar (title only)", () => {
+    setLang("en");
+    expect(lines.triggerChip(pick, [])).toBe("⏱ after “Team sync”");
+    // A long event id is stored as a hash: the chip still finds its meeting.
+    const longId = ev("e".repeat(260), "Offsite", at(14), at(15));
+    const choice = triggerChoices({ events: [longId], now: at(10), recentApps: [], isDistracting: () => false })[0];
+    expect(lines.triggerChip(choice, [longId])).toBe("⏱ after “Offsite” (15:00)");
   });
 });

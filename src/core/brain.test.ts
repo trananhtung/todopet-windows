@@ -802,7 +802,7 @@ describe("Brain and kind moods", () => {
       // "▶ Focus", then back to YouTube at once, typing a comment: only the stunts and the callout can speak now.
       brain.pickAction(b!.id, 0);
       brain.stopFocus();
-      brain.dismissBubble(brain.getSnapshot().bubble!.id, "ignored");
+      brain.dismissBubble(brain.getSnapshot().bubble?.id ?? -1, "ignored");
       watchYouTube({ secondsSinceKey: 1, appSwitchedAt: since });
       while (minutes() < 24) {
         b = step();
@@ -1085,7 +1085,7 @@ describe("Brain and the nudge budget", () => {
       // neutral and changes nothing.)
       brain.pickAction(b!.id, 0);
       brain.stopFocus();
-      brain.dismissBubble(brain.getSnapshot().bubble!.id, "ignored");
+      brain.dismissBubble(brain.getSnapshot().bubble?.id ?? -1, "ignored");
       b = step(10);
       expect(b?.kind).toBe("distract");
     } finally {
@@ -1211,6 +1211,8 @@ function awayAndBack(r: Rig, front: Partial<SystemSample>, minutes: number): Bub
   return r.brain.getSnapshot().bubble;
 }
 const titles = (b: Bubble | null) => b?.actions.map((a) => a.title);
+/** Everything a bubble says: its text and its quiet second line (where you were, on the resume card). */
+const whole = (b: Bubble | null) => [b?.text, b?.detail].filter(Boolean).join("\n");
 
 describe("Brain v0.4: the resume card (Where was I?)", () => {
   /** A rig past the morning greeting, with the browser in front. */
@@ -1226,7 +1228,8 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
     try {
       const left = r.brain.getSnapshot().nudgesLeft;
       const b = awayAndBack(r, DOCS, 6);
-      expect(b?.text).toContain("Next up: “Write the weekly report” · you were in Google Chrome — Spec");
+      expect(b?.text).toContain("Next up: “Write the weekly report”");
+      expect(b?.detail).toBe("Last in: Google Chrome — Spec");
       expect(titles(b)).toEqual(["Reopen ↗ docs.example.com", "▶ Focus 25'", "Something else"]);
       expect(b?.kind).toBeUndefined();
       expect(r.brain.getSnapshot().nudgesLeft).toBe(left);
@@ -1285,7 +1288,7 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       r.brain.pickAction(b.id, 1);
       expect(r.brain.getSnapshot().focus?.task?.id).toBe("1");
       r.brain.stopFocus();
-      r.brain.dismissBubble(r.brain.getSnapshot().bubble!.id, "closed");
+      r.brain.dismissBubble(r.brain.getSnapshot().bubble?.id ?? -1, "closed");
       r.clock.t += 31 * MIN; // one resume card every 30 minutes
       b = awayAndBack(r, DOCS, 6)!;
       r.brain.pickAction(b.id, 2);
@@ -1317,7 +1320,8 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       r.backToWork();
       r.brain.runRules(r.clock.t);
       const b = r.brain.getSnapshot().bubble;
-      expect(b?.text).toContain("Next up: “Write the weekly report” · you were in Google Chrome — Spec");
+      expect(b?.text).toContain("Next up: “Write the weekly report”");
+      expect(b?.detail).toBe("Last in: Google Chrome — Spec");
       expect(b?.text).not.toContain("YouTube");
       expect(b?.kind).toBeUndefined();
     } finally {
@@ -1388,8 +1392,8 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       const pet = { app: { name: "TodoPet", exe: "todopet.exe", title: "TodoPet" }, url: null };
       r.brain.onSample(r.sample(pet));
       const b = awayAndBack(r, pet, 6);
-      expect(b?.text).toContain("in Google Chrome — Spec");
-      expect(b?.text).not.toContain("TodoPet");
+      expect(whole(b)).toContain("Google Chrome — Spec");
+      expect(whole(b)).not.toContain("TodoPet");
     } finally {
       r.brain.stop();
     }
@@ -1405,15 +1409,15 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       // A different page and an automatic snapshot afterwards don't wipe the pin.
       const b = awayAndBack(r, { app: { name: "Notepad", exe: "notepad.exe", title: "todo.txt - Notepad" }, url: null }, 6);
       expect(b?.text).toContain("Fix the retry loop");
-      expect(b?.text).toContain("in Google Chrome — Spec");
+      expect(whole(b)).toContain("Google Chrome — Spec");
       expect(b?.kind).toBeUndefined();
       expect(r.brain.getSnapshot().pinned).toBe(false);
       // Used up: the next absence (a resume card comes every 30 minutes at most) reports where you are then.
       r.brain.dismissBubble(b!.id, "closed");
       r.clock.t += 31 * MIN;
       const again = awayAndBack(r, { app: { name: "Notepad", exe: "notepad.exe", title: "todo.txt - Notepad" }, url: null }, 6);
-      expect(again?.text).not.toContain("Fix the retry loop");
-      expect(again?.text).toContain("Notepad");
+      expect(whole(again)).not.toContain("Fix the retry loop");
+      expect(whole(again)).toContain("Notepad");
     } finally {
       r.brain.stop();
     }
@@ -1471,7 +1475,7 @@ describe("Brain v0.4: the resume card (Where was I?)", () => {
       r.brain.startFocus(call);
       r.brain.pinPlace(null);
       r.brain.stopFocus();
-      r.brain.dismissBubble(r.brain.getSnapshot().bubble!.id, "closed");
+      r.brain.dismissBubble(r.brain.getSnapshot().bubble?.id ?? -1, "closed");
       r.clock.t += 31 * MIN; // one resume card every 30 minutes
       expect(awayAndBack(r, DOCS, 6)?.text).toContain("You were on: “Call client ABC”");
     } finally {
@@ -1739,7 +1743,7 @@ describe("Brain v0.4: meeting bookends", () => {
       quick.brain.onSample(quick.sample({ ...DOCS, appSwitchedAt: quick.clock.t }));
       const b = quick.step(0);
       expect(b?.text).toContain("Meeting's done");
-      expect(b?.text).toContain("Google Chrome");
+      expect(whole(b)).toContain("Google Chrome");
       expect(b?.text).not.toContain("Anything to capture");
     } finally {
       quick.brain.stop();
@@ -2469,8 +2473,8 @@ describe("Brain v0.4 review: where the pet looks", () => {
       front(r, DOCS);
       front(r, DOCS);
       const card = tickTo(r, r.clock.t);
-      expect(card?.text).toContain("Google Chrome — Spec");
-      expect(card?.text).not.toContain("r/aww");
+      expect(whole(card)).toContain("Google Chrome — Spec");
+      expect(whole(card)).not.toContain("r/aww");
     } finally {
       r.brain.stop();
     }
@@ -2497,14 +2501,14 @@ describe("Brain v0.4 review: where the pet looks", () => {
     const SECRET = { app: { name: "Google Chrome", exe: "chrome.exe", title: "Secret plans - Google Chrome" }, url: null };
     const r = await quietRig(meetings(), 9, 30);
     try {
-      expect(awayAndBack(r, SECRET, 6)?.text).toContain("Spec");
+      expect(whole(awayAndBack(r, SECRET, 6))).toContain("Spec");
     } finally {
       r.brain.stop();
     }
     const stuck = await quietRig(meetings(), 9, 30);
     try {
       for (let i = 0; i < 6; i++) front(stuck, SECRET);
-      expect(awayAndBack(stuck, SECRET, 6)?.text).toContain("Secret plans");
+      expect(whole(awayAndBack(stuck, SECRET, 6))).toContain("Secret plans");
     } finally {
       stuck.brain.stop();
     }
@@ -2540,8 +2544,8 @@ describe("Brain v0.4 review: where the pet looks", () => {
     try {
       const secret = { app: { name: "Google Chrome", exe: "chrome.exe", title: "Payroll (InPrivate) - Microsoft Edge" }, url: "https://hr.example.com/payroll" };
       const b = awayAndBack(r, secret, 6)!;
-      expect(b.text).toContain("Google Chrome");
-      expect(b.text).not.toMatch(/Payroll|hr\.example/);
+      expect(whole(b)).toContain("Google Chrome");
+      expect(whole(b)).not.toMatch(/Payroll|hr\.example/);
       expect(titles(b)).toEqual(["▶ Focus 25'", "Something else"]);
     } finally {
       r.brain.stop();
@@ -2552,8 +2556,8 @@ describe("Brain v0.4 review: where the pet looks", () => {
     const r = await quietRig(meetings(), 9, 30, { prefs: { resumeDetails: false } });
     try {
       const b = awayAndBack(r, DOCS, 6)!;
-      expect(b.text).toContain("Google Chrome");
-      expect(b.text).not.toMatch(/Spec|docs\.example/);
+      expect(whole(b)).toContain("Google Chrome");
+      expect(whole(b)).not.toMatch(/Spec|docs\.example/);
       expect(titles(b)).toEqual(["▶ Focus 25'", "Something else"]);
     } finally {
       r.brain.stop();
@@ -2564,11 +2568,14 @@ describe("Brain v0.4 review: where the pet looks", () => {
     const r = await quietRig(meetings(), 9, 30);
     try {
       const first = awayAndBack(r, DOCS, 6)!;
-      expect(first.text).toContain("Next up: “Write the weekly report” · you were in Google Chrome — Spec");
+      expect(first.text).toContain("Next up: “Write the weekly report”");
+      expect(first.detail).toBe("Last in: Google Chrome — Spec");
       r.brain.pickAction(first.id, 2);
       await r.brain.reschedule(sprintOf(r), "today");
       r.clock.t += 31 * MIN;
-      expect(awayAndBack(r, DOCS, 6)?.text).toContain("You were on: “Plan the next sprint” · in Google Chrome — Spec");
+      const again = awayAndBack(r, DOCS, 6);
+      expect(again?.text).toContain("You were on: “Plan the next sprint”");
+      expect(again?.detail).toBe("Last in: Google Chrome — Spec");
     } finally {
       r.brain.stop();
     }

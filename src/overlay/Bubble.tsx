@@ -7,8 +7,11 @@ import { Icon } from "../ui/icons";
  * The speech bubble above the pet. It fades after `seconds` unless hovered or focused; the frame loop
  * positions it. It never takes focus by itself (that would steal keystrokes from the app you are in),
  * but its buttons are in the tab order with a visible focus ring.
+ *
+ * `banner` is the same bubble inside the open board (an urgent one: a meeting, a timed task): a strip under the
+ * header, with the same words and buttons, which the frame loop leaves alone.
  */
-export const BubbleView = forwardRef<HTMLDivElement, { bubble: Bubble; brain: Brain }>(function BubbleView({ bubble, brain }, ref) {
+export const BubbleView = forwardRef<HTMLDivElement, { bubble: Bubble; brain: Brain; banner?: boolean }>(function BubbleView({ bubble, brain, banner = false }, ref) {
   const [leaving, setLeaving] = useState(false);
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -35,11 +38,11 @@ export const BubbleView = forwardRef<HTMLDivElement, { bubble: Bubble; brain: Br
   return (
     <div
       ref={ref}
-      className={`bubble${bubble.urgent ? " urgent" : ""}${leaving ? " leaving" : ""}${paused ? " paused" : ""}`}
+      className={`bubble${banner ? " banner" : ""}${bubble.urgent ? " urgent" : ""}${leaving ? " leaving" : ""}${paused ? " paused" : ""}`}
       data-hit=""
       role="status"
       aria-live={bubble.urgent ? "assertive" : "polite"}
-      style={{ left: -9999, top: -9999 }}
+      style={banner ? undefined : { left: -9999, top: -9999 }}
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
       onFocus={() => {
@@ -51,6 +54,7 @@ export const BubbleView = forwardRef<HTMLDivElement, { bubble: Bubble; brain: Br
       }}
     >
       <div className="bubble-text">{bubble.text}</div>
+      {bubble.detail && <div className="bubble-detail">{bubble.detail}</div>}
       <button className="bubble-close" aria-label={L("Đóng", "Close")} title={L("Đóng", "Close")} onClick={() => brain.dismissBubble(bubble.id, "closed")}>
         <Icon name="close" size={14} />
       </button>
