@@ -37,11 +37,14 @@ export function Effects({
   reveal = null,
   anchor,
   delayFor,
+  now = Date.now,
 }: {
   celebration: CelebrationEvent | null;
   reveal?: Reveal | null;
   anchor: RefObject<EffectsAnchor>;
   delayFor?: (c: CelebrationEvent) => number;
+  /** The brain's clock (the demo's can be moved): celebrations and reveals are stamped with it. */
+  now?: () => number;
 }) {
   const [bursts, setBursts] = useState<Burst[]>([]);
   const [chests, setChests] = useState<ChestPop[]>([]);
@@ -68,16 +71,16 @@ export function Effects({
   useEffect(() => {
     if (!celebration) return;
     const delay = delayFor?.(celebration) ?? 0;
-    if (delay > 0 && Date.now() - celebration.start < delay * 1000) {
-      later(delay * 1000 - (Date.now() - celebration.start), () => fire(celebration));
+    if (delay > 0 && now() - celebration.start < delay * 1000) {
+      later(delay * 1000 - (now() - celebration.start), () => fire(celebration));
       return;
     }
     fire(celebration);
-  }, [celebration, anchor, delayFor]);
+  }, [celebration, anchor, delayFor, now]);
 
   // A chest opened with this task: it pops up beside the pet once the confetti is out (after the same ponder).
   useEffect(() => {
-    if (!reveal || reveal.kind !== "chest" || Date.now() - reveal.at > 3000 || popped.current.has(reveal.id)) return;
+    if (!reveal || reveal.kind !== "chest" || now() - reveal.at > 3000 || popped.current.has(reveal.id)) return;
     // Chests open only with a celebration: wait for it, to share its ponder.
     if (!celebration || Math.abs(celebration.start - reveal.at) > SAME_MOMENT_MS) return;
     const delay = delayFor?.(celebration) ?? 0;
@@ -95,7 +98,7 @@ export function Effects({
     popped.current.add(pop.id);
     setChests((c) => [...c, pop]);
     later(CHEST_MS + delay * 1000, () => setChests((c) => c.filter((x) => x.id !== pop.id)));
-  }, [reveal, anchor, celebration, delayFor]);
+  }, [reveal, anchor, celebration, delayFor, now]);
 
   function fire(celebration: CelebrationEvent) {
     const a = anchor.current;

@@ -46,14 +46,14 @@ export const HomeCorner = memo(function HomeCorner({ items }: { items: readonly 
  */
 export const TripSign = forwardRef<HTMLButtonElement, { trip: Trip; brain: Brain }>(function TripSign({ trip, brain }, ref) {
   const back = timeString(new Date(trip.back));
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => brain.clockNow());
   // Re-render once the souvenir is earned, so the warning goes away on time.
   useEffect(() => {
-    const left = trip.start + SOUVENIR_AFTER_MS - Date.now();
+    const left = trip.start + SOUVENIR_AFTER_MS - brain.clockNow();
     if (left <= 0) return;
-    const id = setTimeout(() => setNow(Date.now()), left + 50);
+    const id = setTimeout(() => setNow(brain.clockNow()), left + 50);
     return () => clearTimeout(id);
-  }, [trip.start, now]);
+  }, [brain, trip.start, now]);
   const text = tripSignText(trip, now);
   return (
     <button

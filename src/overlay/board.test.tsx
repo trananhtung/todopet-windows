@@ -1199,3 +1199,25 @@ describe("a short board (v0.4 evaluation round 2, issue 4)", () => {
     expect(sheet().querySelector(".wrap-wins li.more")?.textContent).toMatch(/and \d+ more/);
   });
 });
+
+describe("the wardrobe and its Home sheet (v0.5)", () => {
+  const esc = (from: Element) => key(from, "Escape");
+  const navButton = (text: string) => [...document.querySelectorAll<HTMLButtonElement>(".sheet-nav button")].find((b) => b.textContent?.includes(text))!;
+
+  it("goes back one step at a time with Escape: Home → wardrobe → list, the keyboard following", async () => {
+    await mount();
+    await click(document.querySelector("[data-wardrobe]")!);
+    expect(document.activeElement?.textContent).toContain("Wardrobe");
+    await click(navButton("Home"));
+    const home = document.activeElement!;
+    expect(home.tagName).toBe("H2");
+    expect(home.textContent).toContain("Home");
+    await esc(home);
+    // Back in the wardrobe, as its Back button would take you, with the keyboard on its heading.
+    expect(document.activeElement?.tagName).toBe("H2");
+    expect(document.activeElement?.textContent).toContain("Wardrobe");
+    await esc(document.activeElement!);
+    expect(document.querySelector("#add-task")).not.toBeNull();
+    expect(document.activeElement?.hasAttribute("data-wardrobe")).toBe(true);
+  });
+});

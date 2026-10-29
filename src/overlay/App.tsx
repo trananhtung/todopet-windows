@@ -98,11 +98,13 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
   const ponderFor = useCallback((cel: CelebrationEvent): number => {
     const p = ponderRef.current;
     if (p.id === cel.id) return p.shift;
-    const fresh = shownMoodRef.current !== "celebrating" && Date.now() - cel.start < 1500;
+    const fresh = shownMoodRef.current !== "celebrating" && brain.clockNow() - cel.start < 1500;
     const shift = fresh ? lifeRef.current!.celebrate(performance.now() / 1000) : 0;
     ponderRef.current = { id: cel.id, shift };
     return shift;
-  }, []);
+  }, [brain]);
+  /** The brain's clock for the confetti (the demo's can be moved). */
+  const clockNow = useCallback(() => brain.clockNow(), [brain]);
 
   const species = speciesInfo(s.prefs.species);
   brain.speciesSound = species.sound[getLang()];
@@ -347,13 +349,13 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
         });
       }
       if (antic === "parade" && motion.s.paradeDone) brain.endAntic();
-      if (antic === "grumble" && st.antic && Date.now() - st.antic.start > 6000) brain.endAntic();
+      if (antic === "grumble" && st.antic && brain.clockNow() - st.antic.start > 6000) brain.endAntic();
       const m = motion.s;
 
       // The pet's little acts: what the user is doing (sampled ~1/s, extrapolated) and where the cursor is.
       if (nowS - meetingAt >= 1) {
         meetingAt = nowS;
-        meeting = currentEvent(st.events, new Date()) !== null;
+        meeting = currentEvent(st.events, new Date(brain.clockNow())) !== null;
       }
       const smp = sampleRef.current;
       const since = smp.at > 0 ? Math.max(0, nowS - smp.at) : 0;
@@ -397,7 +399,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       anchor.current = { x: m.x, top: visualTop, feetY: m.y, size };
 
       if (!hiddenNow) {
-        const celT = cel ? (Date.now() - cel.start) / 1000 - celShift : 99;
+        const celT = cel ? (brain.clockNow() - cel.start) / 1000 - celShift : 99;
         const look = fx.lookAtUser ? null : cursor.current;
         const headY = m.y - size * 0.55;
         const pose = defaultPose({
@@ -581,7 +583,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
           <div ref={svgRef} />
           <PetBadge brain={brain} />
         </div>
-        <Effects celebration={s.celebration} reveal={s.reveal} anchor={anchor} delayFor={ponderFor} />
+        <Effects celebration={s.celebration} reveal={s.reveal} anchor={anchor} delayFor={ponderFor} now={clockNow} />
         {showBubble && s.bubble && <BubbleView key={s.bubble.id} ref={bubbleRef} bubble={s.bubble} brain={brain} />}
         {board && placement && <Board key="board" brain={brain} backend={backend} request={board} placement={placement} onClose={closeBoard} />}
         {demo && <DemoPanel brain={brain} backend={backend} />}

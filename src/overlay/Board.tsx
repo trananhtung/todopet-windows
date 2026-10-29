@@ -168,11 +168,12 @@ export function Board(props: {
       style={{ left: placement.left, bottom: placement.bottom, width: placement.width, maxHeight: placement.height, transformOrigin: origin }}
       aria-label={L("Bảng việc", "Task board")}
       onKeyDown={(e) => {
-        // Escape inside a sheet goes back to the list, like its Back button; from the list it closes the board (App).
+        // Escape inside a sheet goes back like its Back button (to the list; from Home to the wardrobe); from the list
+        // it closes the board (App).
         if (e.key === "Escape" && !e.defaultPrevented && view.kind !== "main" && !needsToken) {
           const busy = ref.current?.querySelector("[aria-busy='true']");
           e.preventDefault();
-          if (!busy) setView({ kind: "main" });
+          if (!busy) setView(view.kind === "home" ? { kind: "wardrobe" } : { kind: "main" });
         }
       }}
     >
@@ -1473,7 +1474,7 @@ function Yarn({ value }: { value: number }) {
 
 /** While the pet is away: where it went, when it's back, and a button to call it home early. */
 function TripBanner({ brain, s }: { brain: Brain; s: BrainState }) {
-  const b = tripBanner(s.trip!, Date.now());
+  const b = tripBanner(s.trip!, brain.clockNow());
   const hint = useId();
   return (
     <div className="trip-banner" role="status">
@@ -1686,7 +1687,7 @@ function Wardrobe({ brain, s, onBack, onHome }: { brain: Brain; s: BrainState; o
       <h2 ref={heading} tabIndex={-1}>
         <Icon name="hanger" size={18} /> {L("Tủ đồ", "Wardrobe")}
       </h2>
-      <ChestStrip s={s} />
+      <ChestStrip brain={brain} s={s} />
       {WARDROBE_GROUPS.map((g) => (
         <AccessoryGroup key={g.id} id={g.id} items={g.items} brain={brain} s={s} />
       ))}
@@ -1744,7 +1745,7 @@ function GroupHead({ id, title, count, aside }: { id: string; title: string; cou
 }
 
 /** Chests held, today's count and the next one, the season in progress, and the published odds. */
-function ChestStrip({ s }: { s: BrainState }) {
+function ChestStrip({ brain, s }: { brain: Brain; s: BrainState }) {
   const [open, setOpen] = useState(false);
   const odds = useId();
   const c = s.chests;
@@ -1771,7 +1772,7 @@ function ChestStrip({ s }: { s: BrainState }) {
         </span>
       </div>
       <div className="chest-row">
-        <span className={`season-chip${s.season ? " on" : ""}`}>{seasonLine(s.season, new Date(), localeTag(getLang()))}</span>
+        <span className={`season-chip${s.season ? " on" : ""}`}>{seasonLine(s.season, new Date(brain.clockNow()), localeTag(getLang()))}</span>
         <button type="button" className="odds-toggle" aria-expanded={open} aria-controls={odds} onClick={() => setOpen(!open)}>
           {L("Tỉ lệ quà", "Odds")}
           <Icon name="chevronDown" size={13} className="chev" />
