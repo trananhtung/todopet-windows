@@ -1027,6 +1027,23 @@ function StickerPage({ s }: { s: BrainState }) {
   );
 }
 
+/** "🔔 5 left today": the unsolicited reminders the pet may still use today; the tooltip says what's free. */
+function NudgeCount({ s }: { s: BrainState }) {
+  const left = s.nudgesLeft;
+  const hold = s.nudgeHoldUntil !== null && s.nudgeHoldUntil > Date.now() ? timeString(new Date(s.nudgeHoldUntil)) : null;
+  const title =
+    L(
+      `Hôm nay còn ${left}/${s.prefs.nudgeBudget} lần nhắc. Việc có giờ, cuộc họp, lời chào buổi sáng và tổng kết cuối ngày không tính.`,
+      `${left} of ${s.prefs.nudgeBudget} reminders left today. Timed tasks, meetings, the morning hello and the end-of-day review don't count.`,
+    ) + (hold ? L(` Đang tạm im tới ${hold}.`, ` Holding reminders until ${hold}.`) : "");
+  return (
+    <span className={`nudges${left === 0 ? " none" : ""}`} title={title} aria-label={title}>
+      <span aria-hidden>{left > 0 && !hold ? "🔔" : "🔕"}</span>
+      {left > 0 ? L(`còn ${left} lượt`, `${left} left today`) : L("hết lượt", "none left")}
+    </span>
+  );
+}
+
 function Footer({ brain, s, onClose }: { brain: Brain; s: BrainState; onClose: () => void }) {
   const quiet = s.quietUntil !== null && s.quietUntil > Date.now();
   const status = s.loading ? L("Đang đồng bộ…", "Syncing…") : s.lastSync ? L(`Đồng bộ ${timeString(new Date(s.lastSync))}`, `Synced ${timeString(new Date(s.lastSync))}`) : "";
@@ -1038,6 +1055,7 @@ function Footer({ brain, s, onClose }: { brain: Brain; s: BrainState; onClose: (
         {err && <span className="foot-error"> · {err}</span>}
       </span>
       <span className="spacer" />
+      {s.hasToken && <NudgeCount s={s} />}
       <button className="btn ghost small icon" onClick={() => void brain.refresh()} title={L("Đồng bộ lại", "Sync now")} aria-label={L("Đồng bộ lại", "Sync now")}>
         <Icon name="refresh" size={15} className={s.loading ? "spin" : undefined} />
       </button>

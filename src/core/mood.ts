@@ -5,7 +5,7 @@ const n = (count: number, noun: string, nouns = `${noun}s`) => `${count} ${count
 import type { Mood } from "./types";
 
 export function moodEmoji(m: Mood): string {
-  return { happy: "😊", normal: "🙂", annoyed: "😒", angry: "😤", sleeping: "😴", focus: "🎯", celebrating: "🥳" }[m];
+  return { happy: "😊", normal: "🙂", annoyed: "😟", angry: "😤", sleeping: "😴", focus: "🎯", celebrating: "🥳" }[m];
 }
 
 export function moodLabel(m: Mood): string {
@@ -15,7 +15,8 @@ export function moodLabel(m: Mood): string {
     case "normal":
       return L("bình thường", "chill");
     case "annoyed":
-      return L("đang nhăn nhó", "annoyed");
+      // Shown as "worried": the pet frets about your day, it doesn't sulk at you.
+      return L("đang lo lắng", "worried");
     case "angry":
       return L("nổi cáu rồi", "grumpy");
     case "sleeping":
@@ -123,6 +124,8 @@ export function evaluateMood(i: MoodInputs): MoodResult {
   if (i.stuck > 0) {
     add(-Math.min(i.stuck, 3) * 3, L(`${i.stuck} việc bị dời mãi`, `${n(i.stuck, "task")} ${i.stuck === 1 ? "keeps" : "keep"} getting postponed`));
   }
+  // Only a distraction you're on right now, in work hours, makes the pet grumpy.
+  const distracted = i.workday && i.inWorkHours && !i.inMeeting && i.distractedMinutes >= 2;
   if (i.workday && i.inWorkHours && !i.inMeeting) {
     if (i.hoursAfterPlanDeadline >= 0 && i.planned < i.target) {
       const gap = i.target - i.planned;
@@ -138,7 +141,7 @@ export function evaluateMood(i: MoodInputs): MoodResult {
         L(`${hours} giờ chưa có tiến triển`, `no progress for ${hours}h`),
       );
     }
-    if (i.distractedMinutes >= 2) {
+    if (distracted) {
       add(
         -Math.min(35, 15 + i.distractedMinutes * 2),
         L(`đang xao nhãng với ${i.distractionApp}`, `distracted by ${i.distractionApp}`),
@@ -158,7 +161,8 @@ export function evaluateMood(i: MoodInputs): MoodResult {
   else if (i.night || i.idleMinutes > 10) mood = "sleeping";
   else if (s >= 75) mood = "happy";
   else if (s >= 50) mood = "normal";
-  else if (s >= 30) mood = "annoyed";
+  // Everything else (overdue, no progress, no plan, hunger, dirt) bottoms out at worried.
+  else if (s >= 30 || !distracted) mood = "annoyed";
   else mood = "angry";
 
   return { score: s, mood, reasons: reasons.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)) };

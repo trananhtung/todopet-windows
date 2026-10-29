@@ -1371,6 +1371,17 @@ body.overlay {
 .board-foot .spacer {
   display: none;
 }
+.board-foot .nudges {
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+  padding: 0 2px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.board-foot .nudges.none {
+  color: var(--ink-2);
+}
 .board-foot .btn.small {
   flex: none;
   gap: 5px;

@@ -44,18 +44,20 @@ export function morning(now: Date, plannedCount: number, openCount: number, next
   return g;
 }
 
+// Outside distractions a low mood is worry, so the worried (and grumpy) lines offer help, never a telling-off.
+
 export function plan(mood: Mood, plannedCount: number, target: number): string {
   const k = target - plannedCount;
   if (mood === "angry") {
     return pick([
-      [`Muộn thế này rồi mà chưa có kế hoạch?! Đặt ngay ${k} việc nữa đi 😤`, `It's this late and still no plan?! Add ${k} more tasks now 😤`],
-      [`Không có kế hoạch = không có tiến độ! Thêm ${k} việc NGAY 💢`, `No plan = no progress! Add ${k} tasks NOW 💢`],
+      [`Mình cùng kéo hôm nay lại nhé: chọn thêm ${k} việc, mình giúp bạn bắt đầu 💪`, `Let's get today back on track: pick ${k} more and I'll help you start 💪`],
+      [`Mình cùng lên nốt kế hoạch hôm nay nhé: còn ${k} việc nữa thôi 📝`, `Let's plan the rest of today together: just ${k} more to go 📝`],
     ]);
   }
   if (mood === "annoyed") {
     return pick([
-      [`Này… hôm nay vẫn chưa đủ ${target} việc đâu nha 😒 (${plannedCount}/${target})`, `Hey… still not ${target} tasks for today 😒 (${plannedCount}/${target})`],
-      [`Hôm nay làm gì vậy? Mình vẫn chờ ${k} việc nữa đó 😑`, `So what are we doing today? Still waiting for ${k} more 😑`],
+      [`Mình hơi lo… hôm nay mới có ${plannedCount}/${target} việc. Chọn thêm ${k} việc cùng mình nhé? 📝`, `I'm a little worried… only ${plannedCount}/${target} planned. Pick ${k} more with me? 📝`],
+      [`Kế hoạch chưa đủ cũng không sao. Chọn ${k} việc nhỏ cho dễ bắt đầu nhé 🌱`, `Not fully planned yet, and that's okay. Pick ${n(k, "small task")} to get going 🌱`],
     ]);
   }
   return pick([
@@ -73,15 +75,15 @@ export function nudge(mood: Mood, next: TodoTask, hoursIdle: number): string {
   }
   if (mood === "annoyed") {
     return pick([
-      [`Ừm… ${q(next)} vẫn nằm đó. Làm 10 phút thôi cũng được mà 😑`, `Ahem… ${q(next)} is still waiting. Even 10 minutes helps 😑`],
-      [`Mình hơi buồn đó… bắt đầu ${q(next)} đi 😒`, `I'm a bit sad… start ${q(next)} 😒`],
+      [`${q(next)} có vẻ khó nhằn? Mình làm 10 phút thôi nhé 🌱`, `${q(next)} feeling heavy? Let's just do 10 minutes 🌱`],
+      [`Mình hơi lo cho ${q(next)}. Bật một phiên tập trung, mình ngồi canh cho nhé? ⏱`, `I'm a little worried about ${q(next)}. Start a focus session and I'll keep watch? ⏱`],
     ]);
   }
   if (mood === "angry") {
     const h = Math.max(1, Math.round(hoursIdle));
     return pick([
-      [`${h} tiếng rồi chưa xong việc nào! Làm ${q(next)} NGAY 😠`, `${h}h and nothing done! Do ${q(next)} NOW 😠`],
-      [`Mình giận thật rồi đó 💢 ${q(next)} — bắt đầu đi!`, `I'm really mad 💢 ${q(next)} — start it!`],
+      [`${h} tiếng chưa có tiến triển. Mình làm bước nhỏ đầu tiên của ${q(next)} nhé 💪`, `${h}h without a win. Let's take the first small step of ${q(next)} 💪`],
+      [`Quay lại với ${q(next)} nha? Mình canh giờ cho bạn tập trung 🛡️`, `Back to ${q(next)}? I'll guard the time while you focus 🛡️`],
     ]);
   }
   return pick([
@@ -90,10 +92,20 @@ export function nudge(mood: Mood, next: TodoTask, hoursIdle: number): string {
   ]);
 }
 
+/** Offers both ways out: today, or a fresh start that moves them all to tomorrow. */
 export function overdue(mood: Mood, count: number): string {
-  if (mood === "angry") return L(`${count} việc QUÁ HẠN kìa!! 💢 Làm hoặc dời đi chứ!`, `${count} OVERDUE tasks!! 💢 Do them or move them!`);
-  return L(`Có ${count} việc quá hạn 😬 Làm luôn hay dời vào hôm nay?`, `${n(count, "overdue task")} 😬 Do them or move to today?`);
+  const them = count === 1 ? "it" : "them";
+  if (mood === "annoyed" || mood === "angry") {
+    return L(
+      `${count} việc quá hạn đang chờ… 😟 Để mình giúp: dời vào hôm nay, hoặc dời hết sang mai để bắt đầu lại.`,
+      `${n(count, "overdue task")} waiting… 😟 Let me help: move ${them} to today, or clear ${them} to tomorrow for a fresh start.`,
+    );
+  }
+  return L(`Có ${count} việc quá hạn 😬 Dời vào hôm nay, hay dời hết sang mai để bắt đầu lại?`, `${n(count, "overdue task")} 😬 Move ${them} to today, or make a fresh start tomorrow?`);
 }
+
+export const freshStart = (count: number) =>
+  L(`🌱 Bắt đầu lại nhé! Đã dời ${count} việc quá hạn sang mai, hôm nay nhẹ hơn rồi.`, `🌱 Fresh start! Moved ${n(count, "overdue task")} to tomorrow. Today is a clean slate.`);
 
 export function distraction(mood: Mood, app: string, left: number, next: TodoTask | null): string {
   if (mood === "angry" && next) {
@@ -185,12 +197,12 @@ export const timeSet = (t: TodoTask, at: Date) =>
 
 export function stuck(s: StuckTask, mood: Mood): string {
   if (mood === "angry") {
-    return L(`${q(s.task)} nằm đó ${s.days} ngày rồi đấy!! 💢 Chia nhỏ hoặc bỏ đi.`, `${q(s.task)} has been sitting there for ${s.days} days!! 💢 Split it or drop it.`);
+    return L(`${q(s.task)} chờ ${s.days} ngày rồi. Để mình giúp chia thành từng bước nhỏ nhé? ✂️`, `${q(s.task)} has waited ${s.days} days. Want help splitting it into tiny steps? ✂️`);
   }
   return pick([
     [
-      `${q(s.task)} bị dời ${s.days} ngày rồi 😑 Chắc nó to quá? Chia thành bước nhỏ cho dễ bắt đầu nhé.`,
-      `${q(s.task)} has been pushed for ${s.days} days 😑 Too big? Let's split it into small steps.`,
+      `${q(s.task)} bị dời ${s.days} ngày rồi 🤔 Chắc nó to quá? Chia thành bước nhỏ cho dễ bắt đầu nhé.`,
+      `${q(s.task)} has been pushed for ${s.days} days 🤔 Too big? Let's split it into small steps.`,
     ],
     [
       `Mình thấy ${q(s.task)} cứ bị dời mãi (${s.days} ngày). Bước nhỏ nhất để bắt đầu là gì?`,
@@ -228,7 +240,7 @@ export const speciesUnlocked = (emoji: string, name: string) =>
   L(`🥚 Bạn mới mở khoá một bạn mới: ${emoji} ${name}! Đổi trong Cài đặt nhé.`, `🥚 New friend unlocked: ${emoji} ${name}! Switch in Settings.`);
 export const streak = (n: number) => L(`🔥 Chuỗi ${n} ngày — giữ nhé!`, `🔥 ${n}-day streak — keep it going!`);
 export const dirty = (dirt: number) =>
-  L(`🪰 Mình bẩn quá… ${dirt} ngày rồi bạn không làm gì. Xong 1 việc để tắm cho mình nhé.`, `🪰 I'm filthy… ${n(dirt, "lazy day")}. Finish a task to give me a bath.`);
+  L(`🛁 Mình hơi lấm lem (lỡ ${dirt} ngày). Xong 1 việc là mình được tắm nè!`, `🛁 I'm a bit grubby (${n(dirt, "missed day")}). Finish one task and I get a bath!`);
 
 // Forgiving streaks: one kind word the morning after, never a scolding. `when` is "yesterday" / "3 days ago".
 

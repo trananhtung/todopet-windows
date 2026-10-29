@@ -121,6 +121,8 @@ export interface LifeState {
   daySeen: boolean;
   /** Seconds spent today in each distracting app or site. */
   distraction: Record<string, number>;
+  /** Unsolicited reminders shown today (the nudge budget), kept across restarts. */
+  dayNudges: number;
 }
 
 export const newLife = (): LifeState => ({
@@ -150,6 +152,7 @@ export const newLife = (): LifeState => ({
   dayBusy: false,
   daySeen: false,
   distraction: {},
+  dayNudges: 0,
 });
 
 const isAccessory = (x: unknown): x is Accessory => typeof x === "string" && (ACCESSORIES as readonly string[]).includes(x);
@@ -202,6 +205,7 @@ export function lifeFromJson(raw: unknown): LifeState {
     // Saved by an older version, the stored day was one it saw.
     daySeen: typeof r.daySeen === "boolean" ? r.daySeen : true,
     distraction,
+    dayNudges: clampInt(r.dayNudges, 0, 1000, 0),
   };
 }
 
@@ -451,6 +455,7 @@ export function closeDay(s: LifeState, today: string, isWorkday: (key: string) =
   s.daySeen = false;
   s.combo = 0;
   s.distraction = {};
+  s.dayNudges = 0;
   s.perfectDays = s.perfectDays.slice(-60);
   r.unlocked = checkUnlocks(s);
   return r;

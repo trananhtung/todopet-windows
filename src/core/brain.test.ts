@@ -1,11 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDemoBackend, type DemoBackend } from "../backend/demo";
 import type { SystemSample } from "../backend/types";
-import { Brain } from "./brain";
+import { Brain, type Bubble } from "./brain";
 import { setLang } from "./l10n";
 import { demoLife, type LifeState } from "./life";
+import { defaultPrefs, type Prefs } from "./prefs";
 
 const MIN = 60_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const at = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m).getTime();
+const YOUTUBE = { app: { name: "Google Chrome", exe: "chrome.exe", title: "Cats - YouTube" }, url: "https://www.youtube.com/watch?v=1" };
 
 describe("Brain with the demo backend", () => {
   let t: number;
@@ -222,5 +226,255 @@ describe("Brain and forgiving streaks", () => {
     expect(brain.getSnapshot().prefs.restDays).toEqual([]);
     expect(brain.getSnapshot().life.dayWorkday).toBe(true);
     brain.stop();
+  });
+});
+
+/**
+ * The demo on Wednesday 28 October, 9:00, with `life` (today's) and `prefs` saved first. `step` moves the clock on
+ * and runs the rules like the heartbeat does (without the hunger clock, so the pet doesn't get hungry).
+ */
+async function rig(opts: { life?: Partial<LifeState>; prefs?: Partial<Prefs> } = {}) {
+  const clock = { t: at(28, 9) };
+  const backend = createDemoBackend({ now: () => clock.t, persist: false });
+  if (opts.life) await backend.storage.save("life", { ...demoLife(), dayKey: "2026-10-28", ...opts.life });
+  if (opts.prefs) await backend.storage.save("prefs", { ...defaultPrefs(clock.t), ...opts.prefs });
+  const sample = (patch: Partial<SystemSample> = {}): SystemSample => ({
+    app: { name: "Visual Studio Code", exe: "code.exe", title: "work" },
+    url: null,
+    idleSeconds: 0,
+    secondsSinceKey: 999,
+    fullscreen: false,
+    appSwitchedAt: clock.t - 60 * MIN,
+    ...patch,
+  });
+  const boot = async () => {
+    const b = await Brain.create(backend, { demo: true, now: () => clock.t, random: () => 0.5 });
+    setLang("en");
+    await b.start();
+    // The demo hello is a reply (urgent, no reason): closing it changes nothing.
+    b.dismissBubble(b.getSnapshot().bubble?.id ?? -1, "closed");
+    b.onSample(sample());
+    return b;
+  };
+  const brain = await boot();
+  const step = (minutes = 1): Bubble | null => {
+    clock.t += minutes * MIN;
+    brain.recompute();
+    brain.runRules(clock.t);
+    return brain.getSnapshot().bubble;
+  };
+  /** Taps the last button (usually "Later" or "Show"), or lets a bubble without buttons fade. */
+  const answer = (b: Bubble) => (b.actions.length > 0 ? brain.pickAction(b.id, b.actions.length - 1) : brain.dismissBubble(b.id, "ignored"));
+  /** Steps a minute at a time, answering other bubbles, until one matches. */
+  const until = (match: (b: Bubble) => boolean, max = 60): Bubble => {
+    for (let i = 0; i < max; i++) {
+      const b = step();
+      if (!b) continue;
+      if (match(b)) return b;
+      answer(b);
+    }
+    throw new Error("no matching bubble");
+  };
+  const watchYouTube = () => brain.onSample(sample({ ...YOUTUBE, appSwitchedAt: clock.t }));
+  const backToWork = () => brain.onSample(sample({ appSwitchedAt: clock.t }));
+  const diary = vi.spyOn(brain.diary, "add");
+  const diaryTexts = (kind?: string) => diary.mock.calls.filter((c) => kind === undefined || c[0] === kind).map((c) => c[1]);
+  return { clock, backend, brain, boot, step, answer, until, watchYouTube, backToWork, diaryTexts };
+}
+
+describe("Brain and kind moods", () => {
+  it("makes mischief only while you're on a distracting app or site", async () => {
+    // Dirty and worried from the start (60 + 8 − 7 − 15 − 3 = 43), with work in front.
+    const { brain, step, answer, watchYouTube } = await rig({ life: { dirt: 3 }, prefs: { bubbleGap: 0 } });
+    expect(brain.getSnapshot().mood).toBe("annoyed");
+    // Twelve worried minutes without a distraction: reminders, but no grumbling and no parade.
+    for (let i = 0; i < 12; i++) {
+      const b = step();
+      expect(brain.getSnapshot().antic).toBeNull();
+      if (b) answer(b);
+    }
+    expect(brain.getSnapshot().mood).toBe("annoyed");
+    // On YouTube for 2 minutes: grumpy now, and called out.
+    watchYouTube();
+    const called = step(2);
+    expect(brain.getSnapshot().mood).toBe("angry");
+    expect(called?.text).toContain("youtube.com");
+    brain.dismissBubble(called!.id, "ignored");
+    // Still on it: now the grumbling starts.
+    step();
+    expect(brain.getSnapshot().antic?.kind.type).toBe("grumble");
+    brain.stop();
+  });
+
+  it("offers a fresh start for overdue tasks: every one that doesn't repeat moves to tomorrow", async () => {
+    const { brain, until, diaryTexts } = await rig({ prefs: { bubbleGap: 0 } });
+    const b = until((x) => x.text.includes("overdue"));
+    expect(b.actions.map((a) => a.title)).toEqual(["Move to today", "Fresh start", "Show"]);
+    brain.pickAction(b.id, 1);
+    await vi.waitFor(() => expect(brain.getSnapshot().day.overdue).toHaveLength(0), { timeout: 3000 });
+    const reply = brain.getSnapshot().bubble;
+    expect(reply?.text).toContain("Fresh start");
+    expect(reply?.reminder).toBe(false);
+    // The task left today's list too: it's due tomorrow now.
+    expect(brain.getSnapshot().day.today.map((t) => t.id)).not.toContain("3");
+    expect(diaryTexts("system").some((t) => t.includes("Fresh start: moved 1 overdue task to tomorrow"))).toBe(true);
+    brain.stop();
+  });
+});
+
+describe("Brain and the nudge budget", () => {
+  it("counts unsolicited reminders, but not urgent ones, replies or the two daily check-ins", async () => {
+    const { brain, clock, step, answer, until } = await rig({ prefs: { bubbleGap: 0 } });
+    const left = () => brain.getSnapshot().nudgesLeft;
+    expect(left()).toBe(8);
+    // The morning greeting is a check-in.
+    let b = step();
+    expect(b?.text).toContain("Good morning");
+    expect(b?.reminder).toBe(true);
+    expect(left()).toBe(8);
+    answer(b!);
+    // A postponed task is a reminder.
+    b = step();
+    expect(b?.kind).toBe("stuck");
+    expect(left()).toBe(7);
+    answer(b!);
+    // The cheer for a finished task is a reply.
+    await brain.complete(brain.getSnapshot().next!);
+    expect(brain.getSnapshot().bubble?.reminder).toBe(false);
+    expect(left()).toBe(7);
+    // A meeting and a timed task are urgent.
+    const meeting = brain.getSnapshot().events[0];
+    clock.t = meeting.start.getTime() - 4 * MIN;
+    b = step(0);
+    expect(b?.text).toContain("Meeting in 4 min");
+    b = step(0);
+    expect(b?.text).toContain("In 4 min");
+    expect(left()).toBe(7);
+    brain.dismissBubble(b!.id, "closed");
+    // Late in the day: every reminder costs one, the end-of-day review costs nothing.
+    clock.t = at(28, 17, 30);
+    let before = left();
+    const review = until((x) => {
+      if (x.text.includes("end of day")) return true;
+      expect(x.kind, x.text).toBeDefined();
+      expect(left()).toBe(before - 1);
+      before = left();
+      return false;
+    });
+    expect(review.reminder).toBe(true);
+    expect(review.kind).toBeUndefined();
+    expect(left()).toBe(before);
+    brain.stop();
+  });
+
+  it("stays quiet once today's budget is spent, with one diary line, and still lets urgent bubbles through", async () => {
+    const { brain, clock, step, answer, diaryTexts } = await rig({ prefs: { bubbleGap: 0, nudgeBudget: 1 } });
+    answer(step()!); // morning greeting
+    const b = step();
+    expect(b?.kind).toBe("stuck");
+    expect(brain.getSnapshot().nudgesLeft).toBe(0);
+    answer(b!);
+    // The overdue task, the time slot…: all due, all quiet.
+    for (let i = 0; i < 20; i++) expect(step()).toBeNull();
+    expect(diaryTexts("hold").filter((t) => t.includes("No reminders left today"))).toHaveLength(1);
+    const meeting = brain.getSnapshot().events[0];
+    clock.t = meeting.start.getTime() - 4 * MIN;
+    expect(step(0)?.text).toContain("Meeting in 4 min");
+    brain.stop();
+  });
+
+  it("backs a reminder off each time you close it, and resets it when you tap one of its buttons", async () => {
+    const { brain, clock, step, answer, watchYouTube } = await rig({ prefs: { antics: false } });
+    // After the 10–11 meeting, so nothing urgent comes up until 12:55.
+    clock.t = at(28, 11);
+    answer(step(0)!); // morning greeting
+    watchYouTube();
+    let b = step(2);
+    expect(b?.kind).toBe("distract");
+    brain.dismissBubble(b!.id, "closed"); // every 10 → 20 minutes
+    expect(step(10)).toBeNull();
+    b = step(10);
+    expect(b?.kind).toBe("distract");
+    brain.dismissBubble(b!.id, "ignored"); // → 40 minutes
+    expect(step(10)).toBeNull();
+    // 20 minutes on, the postponed task gets its turn instead.
+    b = step(10);
+    expect(b?.kind).toBe("stuck");
+    answer(b!);
+    expect(step(10)).toBeNull();
+    b = step(10);
+    expect(b?.kind).toBe("distract");
+    expect(b?.actions[1].title).toBe("Just a quick break (10')");
+    brain.pickAction(b!.id, 1); // back to every 10 minutes (after the break)
+    b = step(11);
+    expect(b?.kind).toBe("distract");
+    brain.stop();
+  });
+
+  it("holds non-urgent bubbles for an hour after three dismissed reminders in a row", async () => {
+    const { brain, clock, step, answer, diaryTexts } = await rig({ prefs: { bubbleGap: 0 } });
+    clock.t = at(28, 11);
+    answer(step(0)!); // morning greeting: "Later" asks again in 30 minutes
+    for (let closed = 0; closed < 3; ) {
+      const b = step();
+      if (!b) continue;
+      expect(b.kind).toBeDefined();
+      brain.dismissBubble(b.id, "closed");
+      closed++;
+    }
+    const until = brain.getSnapshot().nudgeHoldUntil!;
+    expect(until).toBe(clock.t + 60 * MIN);
+    expect(diaryTexts("hold").some((t) => t.includes("3 reminders in a row"))).toBe(true);
+    // The next-task nudge comes due during the hour, and waits.
+    while (clock.t + MIN < until) expect(step()).toBeNull();
+    expect(diaryTexts("hold").some((t) => t.includes("Held a reminder"))).toBe(true);
+    const b = step();
+    expect(clock.t).toBeGreaterThanOrEqual(until);
+    expect(b?.kind).toBe("nudge");
+    brain.stop();
+  });
+
+  it("starts every day with a full budget and no back-off", async () => {
+    const { brain, clock, step, answer, watchYouTube, backToWork } = await rig({ prefs: { bubbleGap: 0, nudgeBudget: 2, antics: false } });
+    clock.t = at(28, 11);
+    answer(step(0)!); // morning greeting
+    watchYouTube();
+    let b = step(2);
+    expect(b?.kind).toBe("distract");
+    brain.dismissBubble(b!.id, "closed"); // every 20 minutes for the rest of today
+    b = step();
+    expect(b?.kind).toBe("stuck");
+    brain.dismissBubble(b!.id, "closed");
+    expect(brain.getSnapshot().nudgesLeft).toBe(0);
+    // Thursday morning, back at work: the greeting is free.
+    backToWork();
+    clock.t = at(29, 9);
+    brain.tick();
+    await sleep(400);
+    expect(brain.getSnapshot().bubble?.text).toContain("Good morning");
+    expect(brain.getSnapshot().life.dayNudges).toBe(0);
+    expect(brain.getSnapshot().nudgesLeft).toBe(2);
+    answer(brain.getSnapshot().bubble!);
+    watchYouTube();
+    b = step(2);
+    expect(b?.kind).toBe("distract");
+    // Mute and unmute from the board: the bubble goes without an answer.
+    brain.quiet(60);
+    brain.quiet(null);
+    expect(step(10)?.kind).toBe("distract");
+    brain.stop();
+  });
+
+  it("remembers how many reminders were used today across a restart", async () => {
+    const r = await rig({ prefs: { bubbleGap: 0 } });
+    r.answer(r.step()!); // morning greeting
+    r.answer(r.until((b) => b.kind !== undefined));
+    r.answer(r.until((b) => b.kind !== undefined));
+    expect(r.brain.getSnapshot().nudgesLeft).toBe(6);
+    r.brain.stop();
+    const again = await r.boot();
+    expect(again.getSnapshot().life.dayNudges).toBe(2);
+    expect(again.getSnapshot().nudgesLeft).toBe(6);
+    again.stop();
   });
 });

@@ -48,6 +48,8 @@ export interface Prefs {
   stillWhileTyping: boolean;
   /** Minimum minutes between two unsolicited bubbles. */
   bubbleGap: number;
+  /** The most unsolicited, non-urgent reminders per day (0–30); check-ins, urgent bubbles and replies are free. */
+  nudgeBudget: number;
   /** Keep the pet's diary (on this PC only, 14 days). */
   keepLog: boolean;
   /** Hide the pet while a full-screen app is in front. */
@@ -92,6 +94,7 @@ export function defaultPrefs(now = Date.now()): Prefs {
     protectFlow: true,
     stillWhileTyping: true,
     bubbleGap: 15,
+    nudgeBudget: 8,
     keepLog: true,
     hideInFullscreen: true,
     firstLaunch: now,
@@ -165,6 +168,7 @@ export function prefsFromJson(raw: unknown, now = Date.now(), today = now): Pref
     protectFlow: bool("protectFlow"),
     stillWhileTyping: bool("stillWhileTyping"),
     bubbleGap: clampInt(r.bubbleGap, 0, 120, d.bubbleGap),
+    nudgeBudget: clampInt(r.nudgeBudget, 0, 30, d.nudgeBudget),
     keepLog: bool("keepLog"),
     hideInFullscreen: bool("hideInFullscreen"),
     firstLaunch: typeof r.firstLaunch === "number" ? r.firstLaunch : d.firstLaunch,

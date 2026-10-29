@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { L } from "../../core/l10n";
 import type { SoundMode } from "../../core/prefs";
 import { useSettings } from "../context";
-import { Group, Notice, Page, Row, Segmented, SwitchRow } from "../controls";
+import { Group, Notice, NumberRow, Page, Row, Segmented, SwitchRow } from "../controls";
 
 function AutostartRow() {
   const { backend } = useSettings();
@@ -82,8 +82,11 @@ export function BehaviorSection() {
       <Group title={L("Tinh nghịch", "Mischief")}>
         <SwitchRow
           k="antics"
-          label={L("Quậy khi bạn lười", "Make mischief when you slack off")}
-          help={L("Càu nhàu, giơ biển, và lật bàn (╯°□°)╯︵ ┻━┻. Tối đa một lần mỗi 20 phút.", "Grumbles, sign parades and the odd table flip (╯°□°)╯︵ ┻━┻. At most one stunt every 20 minutes.")}
+          label={L("Quậy khi bạn xao nhãng", "Make mischief when you get distracted")}
+          help={L(
+            "Càu nhàu, giơ biển, và lật bàn (╯°□°)╯︵ ┻━┻, chỉ khi bạn đang ở ứng dụng hay trang web gây xao nhãng. Tối đa một lần mỗi 20 phút.",
+            "Grumbles, sign parades and the odd table flip (╯°□°)╯︵ ┻━┻, only while you're on a distracting app or site. At most one stunt every 20 minutes.",
+          )}
         />
         <SwitchRow
           k="chaseWhenAngry"
@@ -92,6 +95,15 @@ export function BehaviorSection() {
       </Group>
 
       <Group title={L("Yên tĩnh", "Calm")}>
+        <NumberRow
+          k="nudgeBudget"
+          label={L("Nhắc tối đa mỗi ngày", "Reminders a day, at most")}
+          help={L(
+            "Lời nhắc bạn không yêu cầu. Việc có giờ, cuộc họp, lời chào buổi sáng và tổng kết cuối ngày không tính. Bạn đóng loại nhắc nào thì loại đó thưa dần; bỏ qua 3 lần liền thì thú cưng im một giờ.",
+            "Bubbles you didn't ask for. Timed tasks, meetings, the morning hello and the end-of-day review are free. Close a kind of reminder and it comes less often; pass on 3 in a row and your pet waits an hour.",
+          )}
+          unit={L("lần", "times")}
+        />
         <SwitchRow
           k="protectFlow"
           label={L("Bảo vệ lúc làm sâu", "Protect deep work")}

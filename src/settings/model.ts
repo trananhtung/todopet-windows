@@ -22,6 +22,7 @@ export type NumberKey =
   | "planDeadline"
   | "remindEvery"
   | "bubbleGap"
+  | "nudgeBudget"
   | "focusMinutes"
   | "breakMinutes"
   | "meetingLead"
@@ -35,6 +36,7 @@ export const NUMBER_LIMITS: Readonly<Record<NumberKey, { min: number; max: numbe
   planDeadline: { min: 0, max: 23 },
   remindEvery: { min: 10, max: 240 },
   bubbleGap: { min: 0, max: 120 },
+  nudgeBudget: { min: 0, max: 30 },
   focusMinutes: { min: 5, max: 120 },
   breakMinutes: { min: 1, max: 60 },
   meetingLead: { min: 1, max: 30 },

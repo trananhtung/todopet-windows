@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as calm from "./calm";
 import { adaptiveTarget, busy, eventsOnDay, freeMinutes, freeSlots, joinUrl, suggestSlots, type CalEvent } from "./calendar";
 import { daysBetween, dayKey, hoursText, nextDayKey, parseDate, plainText, shortText, utcString } from "./dates";
@@ -6,7 +6,8 @@ import { asText, parseEntries, summarize } from "./diary";
 import { L, langFromLocale, pick, setLang } from "./l10n";
 import * as life from "./life";
 import { actionable, buildDay, dueTime, nextTask, planned, ranked, statsFromRaw, taskFromRaw, uiPriority, type TodoTask } from "./models";
-import { defaultMoodInputs, evaluateMood } from "./mood";
+import * as lines from "./lines";
+import { defaultMoodInputs, evaluateMood, moodEmoji, moodLabel } from "./mood";
 import { dayRange, defaultPrefs, isWorkday, MAX_REST_DAYS, MAX_REST_RANGE, prefsFromJson } from "./prefs";
 import { appRules, currentDistraction, hostOf, matchSite, siteRules } from "./sites";
 import { findStuck, recordSeen, stuckDays } from "./stuck";
@@ -124,11 +125,34 @@ describe("mood", () => {
     expect(r.reasons[0].delta).toBe(30);
   });
 
-  it("gets grumpy without a plan after the deadline", () => {
+  it("worries (never gets grumpy) without a plan after the deadline", () => {
     const r = evaluateMood({ ...defaultMoodInputs(), hoursAfterPlanDeadline: 2, planned: 0, remaining: 0 });
     // 60 − (12 + 3·6 + 16) = 14
     expect(r.score).toBe(14);
-    expect(r.mood).toBe("angry");
+    expect(r.mood).toBe("annoyed");
+  });
+
+  it("is grumpy only during an active distraction in work hours; everything else bottoms out at worried", () => {
+    const awful = { ...defaultMoodInputs(), overdue: 5, late: 3, satiety: 0, dirt: 3, stuck: 3, hoursAfterPlanDeadline: 3, planned: 0, minutesSinceProgress: 400 };
+    expect(evaluateMood(awful).score).toBe(0);
+    expect(evaluateMood(awful).mood).toBe("annoyed");
+    const yt = { distractedMinutes: 3, distractionApp: "youtube.com" };
+    expect(evaluateMood({ ...awful, ...yt }).mood).toBe("angry");
+    // A glance under 2 minutes, a meeting, or after hours: no distraction, so no grumpiness.
+    expect(evaluateMood({ ...awful, ...yt, distractedMinutes: 1.5 }).mood).toBe("annoyed");
+    expect(evaluateMood({ ...awful, ...yt, inMeeting: true }).mood).toBe("annoyed");
+    expect(evaluateMood({ ...awful, ...yt, inWorkHours: false }).mood).toBe("normal");
+    // A distraction alone on a good day only worries it.
+    expect(evaluateMood({ ...defaultMoodInputs(), planned: 3, remaining: 3, ...yt }).mood).toBe("annoyed");
+  });
+
+  it("calls the second-lowest mood worried", () => {
+    setLang("en");
+    expect(moodLabel("annoyed")).toBe("worried");
+    expect(moodEmoji("annoyed")).toBe("😟");
+    setLang("vi");
+    expect(moodLabel("annoyed")).toBe("đang lo lắng");
+    setLang("en");
   });
 
   it("frowns at distractions, relaxes after work, sleeps when idle", () => {
@@ -148,6 +172,53 @@ describe("mood", () => {
     setLang("vi");
     expect(evaluateMood({ ...defaultMoodInputs(), dirt: 1 }).reasons.map((x) => x.text)).toContain("cần tắm (lỡ 1 ngày)");
     setLang("en");
+  });
+});
+
+describe("kind lines", () => {
+  const t = task("1", { content: "Write the report" });
+  const stuckTask = { task: t, days: 5 };
+  /** Every variant of a line, in both languages. */
+  const variants = (make: () => string) => {
+    const out: string[] = [];
+    for (const lang of ["en", "vi"] as const) {
+      setLang(lang);
+      for (const r of [0, 0.5, 0.99]) {
+        const spy = vi.spyOn(Math, "random").mockReturnValue(r);
+        out.push(make());
+        spy.mockRestore();
+      }
+    }
+    setLang("en");
+    return out;
+  };
+  const scolding = /NOW|NGAY|!!|💢|😤|😠|😒|😑|mad\b|giận|lazy|lười|không làm gì|sad|buồn/;
+
+  it("offers help instead of scolding outside distractions, even when worried or grumpy", () => {
+    for (const mood of ["annoyed", "angry"] as const) {
+      const all = [
+        ...variants(() => lines.plan(mood, 1, 3)),
+        ...variants(() => lines.nudge(mood, t, 3)),
+        ...variants(() => lines.overdue(mood, 2)),
+        ...variants(() => lines.stuck(stuckTask, mood)),
+      ];
+      for (const text of all) expect(text, `${mood}: ${text}`).not.toMatch(scolding);
+    }
+    for (const text of [...variants(() => lines.dirty(2)), ...variants(() => lines.hungry(10, t)), ...variants(() => lines.review(1, 3, 2))]) {
+      expect(text).not.toMatch(scolding);
+    }
+  });
+
+  it("mentions a fresh start for overdue tasks", () => {
+    for (const mood of ["normal", "annoyed", "angry"] as const) {
+      setLang("en");
+      expect(lines.overdue(mood, 2)).toMatch(/fresh start/i);
+      setLang("vi");
+      expect(lines.overdue(mood, 2)).toMatch(/bắt đầu lại/i);
+    }
+    setLang("en");
+    expect(lines.freshStart(2)).toContain("2 overdue tasks");
+    expect(lines.freshStart(1)).toContain("1 overdue task ");
   });
 });
 
@@ -397,6 +468,17 @@ describe("life migration", () => {
     expect(s.dayBusy).toBe(false);
   });
 
+  it("counts today's reminders until the day closes", () => {
+    expect(life.newLife().dayNudges).toBe(0);
+    expect(life.lifeFromJson({ streak: 2 }).dayNudges).toBe(0);
+    expect(life.lifeFromJson({ dayNudges: 5 }).dayNudges).toBe(5);
+    expect(life.lifeFromJson({ dayNudges: -3 }).dayNudges).toBe(0);
+    expect(life.lifeFromJson({ dayNudges: "x" }).dayNudges).toBe(0);
+    const s = seenDay({ dayNudges: 6, dayCompleted: 1 });
+    life.closeDay(s, "2026-10-27", always);
+    expect(s.dayNudges).toBe(0);
+  });
+
   it("clamps broken new fields", () => {
     const s = life.lifeFromJson({ snacks: 9, stickerPage: 0, pageFilled: 42, repair: { streak: "x" } });
     expect(s.snacks).toBe(2);
@@ -535,6 +617,16 @@ describe("prefs", () => {
     const capped = prefsFromJson({ restDays: many }, now).restDays;
     expect(capped).toHaveLength(MAX_REST_DAYS);
     expect(capped[0]).toBe("2026-10-29");
+  });
+
+  it("clamps the daily nudge budget to 0–30, 8 by default", () => {
+    expect(defaultPrefs().nudgeBudget).toBe(8);
+    expect(prefsFromJson({}).nudgeBudget).toBe(8);
+    expect(prefsFromJson({ nudgeBudget: 99 }).nudgeBudget).toBe(30);
+    expect(prefsFromJson({ nudgeBudget: -2 }).nudgeBudget).toBe(0);
+    expect(prefsFromJson({ nudgeBudget: 0 }).nudgeBudget).toBe(0);
+    expect(prefsFromJson({ nudgeBudget: 12.4 }).nudgeBudget).toBe(12);
+    expect(prefsFromJson({ nudgeBudget: "5" }).nudgeBudget).toBe(8);
   });
 
   it("is not a workday on a rest day", () => {

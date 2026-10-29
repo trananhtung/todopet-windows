@@ -44,6 +44,36 @@ import type { Accessory, CelebrationKind, Lang, Mood, SpeciesId } from "./types"
 const MIN = 60_000;
 const NEVER = -8.64e15;
 
+/**
+ * Unsolicited reminders, named after their rule's key. Each one counts against the daily nudge budget and backs off
+ * on its own. Urgent bubbles (timed tasks, meetings), replies and the two daily check-ins (morning greeting, end-of-day
+ * review) have no kind.
+ */
+export type ReminderKind = "welcome" | "distract" | "antic" | "night" | "plan" | "stuck" | "hungry" | "grumble" | "overdue" | "timeblock" | "distractsum" | "nudge" | "tip";
+
+const KIND_NAMES: Readonly<Record<ReminderKind, readonly [string, string]>> = {
+  welcome: ["chào mừng quay lại", "welcome back"],
+  distract: ["xao nhãng", "distraction"],
+  antic: ["nghịch ngợm", "mischief"],
+  night: ["thức khuya", "late night"],
+  plan: ["lên kế hoạch", "planning"],
+  stuck: ["việc bị dời", "postponed task"],
+  hungry: ["đói bụng", "hunger"],
+  grumble: ["càu nhàu", "grumbling"],
+  overdue: ["việc quá hạn", "overdue tasks"],
+  timeblock: ["gắn giờ", "time slot"],
+  distractsum: ["tổng kết xao nhãng", "distraction summary"],
+  nudge: ["việc tiếp theo", "next task"],
+  tip: ["mẹo", "tip"],
+};
+const kindName = (k: ReminderKind) => L(KIND_NAMES[k][0], KIND_NAMES[k][1]);
+/** Each dismissal of a kind doubles its interval, up to this many times the usual. */
+const MAX_BACKOFF = 8;
+/** This many reminders dismissed in a row hold the rest for `HOLD_MINUTES`. */
+const HOLD_AFTER = 3;
+const HOLD_MINUTES = 60;
+const budgetLeft = (s: { prefs: Prefs; life: life.LifeState }) => Math.max(0, s.prefs.nudgeBudget - s.life.dayNudges);
+
 export interface BubbleAction {
   title: string;
   primary?: boolean;
@@ -59,6 +89,8 @@ export interface Bubble {
   urgent: boolean;
   /** Unsolicited (a reminder), as opposed to a reply to something you did. */
   reminder: boolean;
+  /** Set when it counts against the daily budget; closing or ignoring it backs that kind off. */
+  kind?: ReminderKind;
 }
 
 export interface FocusSession {
@@ -122,6 +154,10 @@ export interface BrainState {
   fullscreen: boolean;
   life: life.LifeState;
   prefs: Prefs;
+  /** Reminders left in today's budget (`prefs.nudgeBudget` minus those shown today). */
+  nudgesLeft: number;
+  /** After three dismissed reminders in a row, non-urgent ones wait until then (epoch ms). */
+  nudgeHoldUntil: number | null;
 }
 
 /** What the UI provides: sounds, speech and opening views. All optional. */
@@ -217,6 +253,10 @@ export class Brain {
   /** Kind words that wait until you're around: how the last day was settled, and a repaired streak. */
   private dayNote: string | null = null;
   private repairNote: string | null = null;
+  /** How many times its usual interval each reminder kind waits (1, 2, 4, 8); reset each day. */
+  private backoff = new Map<string, number>();
+  /** Reminders closed or ignored in a row; tapping a reminder's button starts over. */
+  private dismissedInRow = 0;
 
   private constructor(
     readonly backend: Backend,
@@ -261,6 +301,8 @@ export class Brain {
       fullscreen: false,
       life: lifeState,
       prefs,
+      nudgesLeft: budgetLeft({ prefs, life: lifeState }),
+      nudgeHoldUntil: null,
     };
   }
 
@@ -300,6 +342,7 @@ export class Brain {
   private set(patch: Partial<BrainState>): void {
     if (patch.bubble) this.bubbleAt = this.now();
     this.state = { ...this.state, ...patch };
+    if (patch.life || patch.prefs) this.state.nudgesLeft = budgetLeft(this.state);
     for (const fn of this.listeners) fn();
   }
 
@@ -704,6 +747,8 @@ export class Brain {
   private resetDay(): void {
     this.dayKey = dayKey(new Date(this.now()));
     this.fired.clear();
+    this.backoff.clear();
+    this.dismissedInRow = 0;
     this.knownCompleted.clear();
     this.completedViaPet.clear();
     this.didLoadOnce = false;
@@ -921,49 +966,85 @@ export class Brain {
   // ---------- Talking ----------
 
   /**
-   * Shows a bubble. `why` marks it as an unsolicited reminder and records the reason in the diary;
-   * without it the bubble is a reply to something you did.
+   * Shows a bubble; returns whether it did. `why` marks it as an unsolicited reminder and records the reason in the
+   * diary; without it the bubble is a reply to something you did. `kind` makes the reminder count against today's
+   * budget (the rules check `mayRemind` first).
    */
   say(
     b: { text: string; actions?: BubbleAction[]; seconds: number; urgent?: boolean },
-    opts: { chime?: Chime; why?: string; antic?: boolean } = {},
-  ): void {
+    opts: { chime?: Chime; why?: string; antic?: boolean; kind?: ReminderKind } = {},
+  ): boolean {
     const cur = this.state.bubble;
     const actions = b.actions ?? [];
-    if (cur && cur.actions.length > 0 && !b.urgent && actions.length === 0) return;
-    if (cur && cur.urgent && !b.urgent) return;
+    if (cur && cur.actions.length > 0 && !b.urgent && actions.length === 0) return false;
+    if (cur && cur.urgent && !b.urgent) return false;
     const bubble: Bubble = { id: ++this.bubbleSeq, text: b.text, actions, seconds: b.seconds, urgent: b.urgent ?? false, reminder: opts.why !== undefined };
+    if (opts.kind) bubble.kind = opts.kind;
     this.lastBubbleAt = this.now();
     this.set({ bubble });
+    if (opts.kind) {
+      this.mutateLife((s) => {
+        s.dayNudges += 1;
+      });
+    }
     this.play(opts.chime ?? "chatter");
     const quote = `“${shortText(b.text.replace(/\n/g, " "), 90)}”`;
-    if (opts.why !== undefined) this.diary.add(opts.antic ? "antic" : "bubble", `${quote} — ${L("vì ", "because ")}${opts.why}`);
+    const left = opts.kind ? L(` (còn ${this.state.nudgesLeft} lượt nhắc hôm nay)`, ` (${this.state.nudgesLeft} left today)`) : "";
+    if (opts.why !== undefined) this.diary.add(opts.antic ? "antic" : "bubble", `${quote} — ${L("vì ", "because ")}${opts.why}${left}`);
     else this.diary.add("system", L("Pet nói ", "Pet said ") + quote);
+    return true;
   }
 
-  /** The user tapped a bubble button. */
+  /** The user tapped a bubble button. A reminder's button resets that kind's back-off. */
   pickAction(bubbleId: number, index: number): void {
     const b = this.state.bubble;
     if (!b || b.id !== bubbleId) return;
     const a = b.actions[index];
     if (!a) return;
+    if (b.kind) {
+      this.backoff.delete(b.kind);
+      this.dismissedInRow = 0;
+    }
     this.diary.add("response", L(`Bạn bấm “${a.title}”`, `You tapped “${a.title}”`), { tag: "picked" });
     this.set({ bubble: null });
     a.run();
   }
 
-  /** The user closed the bubble, or it faded away on its own. */
+  /**
+   * The user closed the bubble, or it faded away on its own. A closed or unanswered reminder doubles that kind's
+   * interval (a bubble without buttons that fades was read, not refused); three in a row hold the rest for an hour.
+   */
   dismissBubble(bubbleId: number, how: "closed" | "ignored"): void {
     const b = this.state.bubble;
     if (!b || b.id !== bubbleId) return;
+    const refused = b.kind !== undefined && (how === "closed" || b.actions.length > 0);
+    let backoff = "";
+    if (refused && b.kind) {
+      const m = Math.min(MAX_BACKOFF, (this.backoff.get(b.kind) ?? 1) * 2);
+      this.backoff.set(b.kind, m);
+      this.dismissedInRow += 1;
+      backoff = L(` → nhắc “${kindName(b.kind)}” thưa hơn (×${m})`, ` → “${kindName(b.kind)}” reminders back off (×${m})`);
+    }
     if (b.reminder || b.actions.length > 0) {
       this.diary.add(
         "response",
-        how === "closed" ? L("Bạn đóng bong bóng", "You closed the bubble") : L("Bạn không phản hồi (tự ẩn)", "No response (faded away)"),
+        (how === "closed" ? L("Bạn đóng bong bóng", "You closed the bubble") : L("Bạn không phản hồi (tự ẩn)", "No response (faded away)")) + backoff,
         { tag: how },
       );
     }
     this.set({ bubble: null });
+    if (this.dismissedInRow >= HOLD_AFTER) {
+      this.dismissedInRow = 0;
+      const until = this.now() + HOLD_MINUTES * MIN;
+      this.set({ nudgeHoldUntil: until });
+      this.diary.add(
+        "hold",
+        L(
+          `Bạn bỏ qua ${HOLD_AFTER} lời nhắc liên tiếp — mình tạm im tới ${timeString(new Date(until))} (việc gấp vẫn nhắc)`,
+          `You passed on ${HOLD_AFTER} reminders in a row — holding the rest until ${timeString(new Date(until))} (urgent ones still come)`,
+        ),
+      );
+    }
   }
 
   private play(c: Chime): void {
@@ -988,17 +1069,59 @@ export class Brain {
     return true;
   }
 
+  /** Has `key` not fired for `minutes` (times its back-off)? Then it fires now. */
   private every(key: string, minutes: number): boolean {
-    const last = this.fired.get(key);
-    if (last !== undefined && this.now() - last < minutes * MIN) return false;
+    if (!this.isDue(key, minutes)) return false;
     this.fired.set(key, this.now());
     return true;
   }
 
-  /** Without setting it: has `key` not fired for `minutes`? */
+  /** Without setting it: has `key` not fired for `minutes` (times its back-off)? */
   private isDue(key: string, minutes: number): boolean {
     const last = this.fired.get(key);
-    return last === undefined || this.now() - last >= minutes * MIN;
+    return last === undefined || this.now() - last >= minutes * (this.backoff.get(key) ?? 1) * MIN;
+  }
+
+  /**
+   * May an unsolicited reminder speak now? Not once today's budget is spent (one diary line), nor while reminders
+   * are held after three dismissed in a row (each skip goes in the diary). Checked before a rule fires, so a held
+   * reminder comes as soon as the hold ends.
+   */
+  private mayRemind(kind: ReminderKind): boolean {
+    const s = this.state;
+    if (s.life.dayNudges >= s.prefs.nudgeBudget) {
+      if (this.once(`budget-${this.dayKey}`)) {
+        this.diary.add(
+          "hold",
+          L(
+            `Hôm nay hết lượt nhắc (tối đa ${s.prefs.nudgeBudget}): mình im lặng tới mai, trừ việc gấp`,
+            `No reminders left today (budget ${s.prefs.nudgeBudget}): staying quiet until tomorrow, except for urgent ones`,
+          ),
+        );
+      }
+      return false;
+    }
+    const until = s.nudgeHoldUntil;
+    if (until !== null && this.now() < until) {
+      const time = timeString(new Date(until));
+      this.diary.add(
+        "hold",
+        L(`Giữ lời nhắc “${kindName(kind)}” tới ${time}: bạn vừa bỏ qua ${HOLD_AFTER} lời nhắc liên tiếp`, `Held a reminder (${kindName(kind)}) until ${time}: you passed on ${HOLD_AFTER} in a row`),
+        { throttle: `hold-dismissed-${kind}`, every: 15 },
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /** `every` for an unsolicited reminder: due, and allowed by the budget and the hold. */
+  private remindEvery(kind: ReminderKind, minutes: number): boolean {
+    return this.isDue(kind, minutes) && this.mayRemind(kind) && this.every(kind, minutes);
+  }
+
+  /** `once` for an unsolicited reminder. */
+  private remindOnce(kind: ReminderKind, key: string): boolean {
+    return !this.fired.has(key) && this.mayRemind(kind) && this.once(key);
   }
 
   quiet(minutes: number | null): void {
@@ -1029,6 +1152,7 @@ export class Brain {
       void this.refreshCalendar(true);
     }
     if (this.state.hiddenUntil !== null && nowMs >= this.state.hiddenUntil) this.set({ hiddenUntil: null });
+    if (this.state.nudgeHoldUntil !== null && nowMs >= this.state.nudgeHoldUntil) this.set({ nudgeHoldUntil: null });
     const f = this.state.focus;
     if (f && nowMs >= f.end) this.finishFocus();
     const stale = this.state.lastSync === null || nowMs - this.state.lastSync > 3 * MIN;
@@ -1199,10 +1323,10 @@ export class Brain {
       const minutes = Math.trunc((nowMs - this.awaySince) / MIN);
       this.awaySince = null;
       this.diary.add("system", L(`Bạn quay lại sau ${minutes} phút`, `You came back after ${minutes} minutes`));
-      if (minutes > 15 && ctx.inWork && next) {
+      if (minutes > 15 && ctx.inWork && next && this.mayRemind("welcome")) {
         this.say(
           { text: lines.welcomeBack(next), actions: [this.focusAction(next), this.laterAction()], seconds: 30 },
-          { why: L(`bạn vừa quay lại sau ${minutes} phút`, `you just came back after ${minutes} minutes`) },
+          { why: L(`bạn vừa quay lại sau ${minutes} phút`, `you just came back after ${minutes} minutes`), kind: "welcome" },
         );
         return;
       }
@@ -1235,20 +1359,21 @@ export class Brain {
     // Distracting apps and sites come first: there's no concentration to protect right then.
     // Grumpy and stuck on one for 5+ minutes: the pet jumps in the way.
     const d = this.distraction();
-    if (s.prefs.antics && ctx.inWork && s.mood === "angry" && nowMs > this.anticSnoozedUntil && open.length > 0 && d && d.minutes >= 5 && this.every("antic", 20)) {
+    if (s.prefs.antics && ctx.inWork && s.mood === "angry" && nowMs > this.anticSnoozedUntil && open.length > 0 && d && d.minutes >= 5 && this.remindEvery("antic", 20)) {
       this.startAntic({ type: "block" }, nowMs);
       this.say(
         { text: lines.block(d.app, next), actions: [this.focusAction(next), this.spareAction()], seconds: 25, urgent: true },
         {
           chime: "grumble",
           antic: true,
+          kind: "antic",
           why: L(`đang cáu và ở ${d.app} ${Math.trunc(d.minutes)} phút → nhảy lên chắn màn hình`, `grumpy and on ${d.app} for ${Math.trunc(d.minutes)} min → jumped in the way`),
         },
       );
       this.speak(lines.voiceBlock(d.app));
       return;
     }
-    if (ctx.inWork && open.length > 0 && d && d.minutes >= 2 && this.every("distract", 10)) {
+    if (ctx.inWork && open.length > 0 && d && d.minutes >= 2 && this.remindEvery("distract", 10)) {
       this.say(
         {
           text: lines.distraction(s.mood, d.app, open.length, next),
@@ -1260,17 +1385,17 @@ export class Brain {
           ],
           seconds: 30,
         },
-        { why: L(`ở ${d.app} ${Math.trunc(d.minutes)} phút trong giờ làm`, `on ${d.app} for ${Math.trunc(d.minutes)} min during work hours`) },
+        { why: L(`ở ${d.app} ${Math.trunc(d.minutes)} phút trong giờ làm`, `on ${d.app} for ${Math.trunc(d.minutes)} min during work hours`), kind: "distract" },
       );
       return;
     }
 
-    if (ctx.night && now.getHours() >= 23 && this.once(`night-${this.dayKey}`)) {
-      this.say({ text: lines.lateNight(), seconds: 10 }, { why: L("đã quá 23 giờ mà bạn vẫn dùng máy", "past 11pm and you're still at it") });
+    if (ctx.night && now.getHours() >= 23 && this.remindOnce("night", `night-${this.dayKey}`)) {
+      this.say({ text: lines.lateNight(), seconds: 10 }, { why: L("đã quá 23 giờ mà bạn vẫn dùng máy", "past 11pm and you're still at it"), kind: "night" });
       return;
     }
 
-    // 2. Everything finished.
+    // 2. Everything finished: a reply to your last task, so it doesn't count against the budget.
     if (day.completed.length > 0 && day.today.length === 0 && day.overdue.length === 0 && this.once(`alldone-${this.dayKey}`)) {
       this.celebrateUntil = nowMs + 4000;
       this.recompute();
@@ -1313,7 +1438,7 @@ export class Brain {
 
     if (!ctx.workday) return;
 
-    // 3. Morning greeting, with planning if today has fewer than `target` tasks.
+    // 3. Morning greeting, with planning if today has fewer than `target` tasks. A daily check-in: never counted.
     if (ctx.inWork && this.once(`morning-${this.dayKey}`)) {
       const needsPlan = planned(day) < target;
       if (needsPlan) this.fired.set("plan", nowMs);
@@ -1334,17 +1459,20 @@ export class Brain {
     }
 
     // 4. Not planned enough: nag every 30 minutes once the planning deadline passed.
-    if (ctx.inWork && planned(day) < target && ctx.hoursAfterPlanDeadline >= 0 && this.every("plan", 30)) {
+    if (ctx.inWork && planned(day) < target && ctx.hoursAfterPlanDeadline >= 0 && this.remindEvery("plan", 30)) {
       this.say(
         { text: lines.plan(s.mood, planned(day), target), actions: this.planActions(), seconds: 60 },
-        { why: L(`đã qua ${s.prefs.planDeadline}h mà mới có ${planned(day)}/${target} việc`, `past ${s.prefs.planDeadline}:00 with only ${planned(day)}/${target} planned`) },
+        {
+          why: L(`đã qua ${s.prefs.planDeadline}h mà mới có ${planned(day)}/${target} việc`, `past ${s.prefs.planDeadline}:00 with only ${planned(day)}/${target} planned`),
+          kind: "plan",
+        },
       );
       return;
     }
 
     // 6. A task that keeps getting postponed: offer to split it (or drop it). Once per task per day.
     const stuck = s.stuck.find((x) => !this.fired.has(`stuck-${x.task.id}-${this.dayKey}`));
-    if (ctx.inWork && stuck && this.every("stuck", 120)) {
+    if (ctx.inWork && stuck && this.remindEvery("stuck", 120)) {
       this.fired.set(`stuck-${stuck.task.id}-${this.dayKey}`, nowMs);
       this.say(
         {
@@ -1356,73 +1484,87 @@ export class Brain {
           ],
           seconds: 60,
         },
-        { why: L(`“${shortText(taskTitle(stuck.task), 30)}” nằm trong danh sách ${stuck.days} ngày`, `“${shortText(taskTitle(stuck.task), 30)}” has been on your list ${stuck.days} days`) },
+        {
+          why: L(`“${shortText(taskTitle(stuck.task), 30)}” nằm trong danh sách ${stuck.days} ngày`, `“${shortText(taskTitle(stuck.task), 30)}” has been on your list ${stuck.days} days`),
+          kind: "stuck",
+        },
       );
       return;
     }
 
     // 6b. A hungry pet begs for a finished task.
-    if (ctx.inWork && life.isHungry(s.life) && this.every("hungry", 60)) {
+    if (ctx.inWork && life.isHungry(s.life) && this.remindEvery("hungry", 60)) {
       this.say(
         { text: lines.hungry(s.life.satiety, next), actions: next ? [this.focusAction(next), this.laterAction()] : [], seconds: 30 },
-        { why: L(`độ no còn ${Math.trunc(s.life.satiety)}%`, `only ${Math.trunc(s.life.satiety)}% full`) },
+        { why: L(`độ no còn ${Math.trunc(s.life.satiety)}%`, `only ${Math.trunc(s.life.satiety)}% full`), kind: "hungry" },
       );
       this.speak(lines.voiceHungry());
       return;
     }
 
-    // 6c. Mischief that escalates while you slack: grumbling, then a parade with the task on a sign.
-    // Never while you're typing (that's work, even if no task got ticked off yet).
-    if (s.prefs.antics && ctx.inWork && nowMs > this.anticSnoozedUntil && this.sample.secondsSinceKey > 60 && next) {
-      if (this.angrySince !== null && nowMs - this.angrySince >= 10 * MIN && this.every("antic", 20)) {
+    // 6c. Mischief, only while you're on a distracting app or site (never after a slow or missed day): grumbling,
+    // then a parade with the task on a sign. Never while you're typing (that's work, even if no task got ticked off yet).
+    if (s.prefs.antics && ctx.inWork && d && d.minutes >= 2 && nowMs > this.anticSnoozedUntil && this.sample.secondsSinceKey > 60 && next) {
+      if (this.angrySince !== null && nowMs - this.angrySince >= 10 * MIN && this.remindEvery("antic", 20)) {
         const minutes = Math.trunc((nowMs - this.angrySince) / MIN);
         this.startAntic({ type: "parade", title: taskTitle(next) }, nowMs);
         this.say(
           { text: lines.parade(next), actions: [this.focusAction(next), this.spareAction()], seconds: 25, urgent: true },
-          { chime: "grumble", antic: true, why: L(`đã cáu ${minutes} phút, không gõ phím → diễu hành với biển`, `grumpy for ${minutes} min, not typing → sign parade`) + this.reasonSuffix() },
+          {
+            chime: "grumble",
+            antic: true,
+            kind: "antic",
+            why: L(`cáu ${minutes} phút vì ${d.app}, không gõ phím → diễu hành với biển`, `grumpy for ${minutes} min over ${d.app}, not typing → sign parade`) + this.reasonSuffix(),
+          },
         );
         this.speak(lines.voiceAngry(next));
         return;
       }
-      if (this.annoyedSince !== null && nowMs - this.annoyedSince >= 10 * MIN && this.every("grumble", 30)) {
+      if (this.annoyedSince !== null && nowMs - this.annoyedSince >= 10 * MIN && this.remindEvery("grumble", 30)) {
         const minutes = Math.trunc((nowMs - this.annoyedSince) / MIN);
         this.startAntic({ type: "grumble" }, nowMs);
         this.say(
           { text: lines.grumble(next), actions: [this.focusAction(next), this.spareAction()], seconds: 15 },
-          { chime: "grumble", antic: true, why: L(`đã nhăn nhó ${minutes} phút`, `annoyed for ${minutes} min`) + this.reasonSuffix() },
+          {
+            chime: "grumble",
+            antic: true,
+            kind: "grumble",
+            why: L(`tâm trạng đi xuống ${minutes} phút, đang ở ${d.app}`, `in a low mood for ${minutes} min and on ${d.app}`) + this.reasonSuffix(),
+          },
         );
         this.speak(lines.voiceGrumble());
         return;
       }
     }
 
-    // 7. Overdue tasks.
-    if (ctx.inWork && day.overdue.length > 0 && this.every("overdue", 90)) {
-      this.say(
-        {
-          text: lines.overdue(s.mood, day.overdue.length),
-          actions: [
+    // 7. Overdue tasks: move them to today, or a fresh start (all of them to tomorrow). Recurring ones stay put.
+    if (ctx.inWork && day.overdue.length > 0 && this.remindEvery("overdue", 90)) {
+      const movable = day.overdue.some((t) => !isRecurring(t));
+      const actions: BubbleAction[] = movable
+        ? [
             { title: L("Dời vào hôm nay", "Move to today"), primary: true, run: () => void this.pullOverdueToToday() },
-            { title: L("Xem", "Show"), run: () => this.effects.openBoard?.(false) },
-          ],
-          seconds: 45,
-        },
-        { why: L(`${day.overdue.length} việc quá hạn (nhắc tối đa 90 phút/lần)`, `${day.overdue.length} overdue task(s) (at most every 90 min)`) },
+            { title: L("Bắt đầu lại", "Fresh start"), run: () => void this.freshStart() },
+          ]
+        : [];
+      actions.push({ title: L("Xem", "Show"), primary: !movable, run: () => this.effects.openBoard?.(false) });
+      this.say(
+        { text: lines.overdue(s.mood, day.overdue.length), actions, seconds: 45 },
+        { why: L(`${day.overdue.length} việc quá hạn (nhắc tối đa 90 phút/lần)`, `${day.overdue.length} overdue task(s) (at most every 90 min)`), kind: "overdue" },
       );
       return;
     }
 
     // 8. Give the next task a concrete time slot (implementation intention), once a day.
     const slot = s.suggestions[0];
-    if (ctx.inWork && planned(day) >= target && slot && slot.start.getTime() - nowMs < 3 * 60 * MIN && this.once(`timeblock-${this.dayKey}`)) {
+    if (ctx.inWork && planned(day) >= target && slot && slot.start.getTime() - nowMs < 3 * 60 * MIN && this.remindOnce("timeblock", `timeblock-${this.dayKey}`)) {
       this.say(
         { text: lines.timeBlock(slot), actions: [{ title: L("⏰ Đặt giờ", "⏰ Set time"), primary: true, run: () => void this.schedule(slot) }, this.laterAction()], seconds: 60 },
-        { why: L("gợi ý khung giờ trống (mỗi ngày một lần)", "a free time slot (once a day)") },
+        { why: L("gợi ý khung giờ trống (mỗi ngày một lần)", "a free time slot (once a day)"), kind: "timeblock" },
       );
       return;
     }
 
-    // 9. End-of-day review (shutdown ritual).
+    // 9. End-of-day review (shutdown ritual). A daily check-in: never counted.
     if (ctx.inWork && nowMs >= ctx.reviewTime && day.today.length > 0 && this.once(`review-${this.dayKey}`)) {
       this.say(
         {
@@ -1439,10 +1581,13 @@ export class Brain {
     }
 
     // 9b. A sulky end-of-day report on time spent in distracting apps and sites.
-    if (ctx.inWork && nowMs >= ctx.reviewTime && life.distractionTotal(s.life) >= 10 * 60 && this.once(`distractsum-${this.dayKey}`)) {
+    if (ctx.inWork && nowMs >= ctx.reviewTime && life.distractionTotal(s.life) >= 10 * 60 && this.remindOnce("distractsum", `distractsum-${this.dayKey}`)) {
       this.say(
         { text: lines.distractionSummary(s.life.distraction), seconds: 25 },
-        { why: L(`cuối ngày, xao nhãng ${Math.trunc(life.distractionTotal(s.life) / 60)} phút`, `end of day, ${Math.trunc(life.distractionTotal(s.life) / 60)} min of distractions`) },
+        {
+          why: L(`cuối ngày, xao nhãng ${Math.trunc(life.distractionTotal(s.life) / 60)} phút`, `end of day, ${Math.trunc(life.distractionTotal(s.life) / 60)} min of distractions`),
+          kind: "distractsum",
+        },
       );
       this.speak(lines.voiceSummary(Math.trunc(life.distractionTotal(s.life) / 60)));
       return;
@@ -1450,7 +1595,7 @@ export class Brain {
 
     // 10. Regular nudge with the next task.
     const minutes = s.prefs.remindEvery;
-    if (ctx.inWork && next && nowMs - this.lastBubbleAt > minutes * MIN && this.every("nudge", minutes)) {
+    if (ctx.inWork && next && nowMs - this.lastBubbleAt > minutes * MIN && this.remindEvery("nudge", minutes)) {
       const idleHours = (nowMs - this.lastProgress()) / (60 * MIN);
       this.say(
         { text: lines.nudge(s.mood, next, idleHours), actions: [this.focusAction(next), this.completeAction(next), this.laterAction()], seconds: 45 },
@@ -1459,14 +1604,15 @@ export class Brain {
             `${minutes} phút chưa nhắc; ${idleHours.toFixed(1)} giờ chưa có tiến triển`,
             `${minutes} min since the last reminder; no progress for ${idleHours.toFixed(1)}h`,
           ),
+          kind: "nudge",
         },
       );
       return;
     }
 
     // 11. A tip now and then, only when the mood is good.
-    if (ctx.inWork && (s.mood === "happy" || s.mood === "normal") && nowMs - this.lastBubbleAt > 40 * MIN && this.every("tip", 150)) {
-      this.say({ text: lines.tip(), seconds: 14 }, { why: L("pet đang vui và đã im lặng 40 phút", "the pet is in a good mood and quiet for 40 min") });
+    if (ctx.inWork && (s.mood === "happy" || s.mood === "normal") && nowMs - this.lastBubbleAt > 40 * MIN && this.remindEvery("tip", 150)) {
+      this.say({ text: lines.tip(), seconds: 14 }, { why: L("pet đang vui và đã im lặng 40 phút", "the pet is in a good mood and quiet for 40 min"), kind: "tip" });
     }
   }
 
@@ -1654,6 +1800,20 @@ export class Brain {
     this.lastPlanAction = this.now();
     await this.rescheduleAll(tasks, "today");
     await this.refresh();
+  }
+
+  /** "Fresh start" from the overdue bubble: every overdue task that doesn't repeat moves to tomorrow. */
+  async freshStart(): Promise<void> {
+    const tasks = this.state.day.overdue.filter((t) => !isRecurring(t));
+    this.lastPlanAction = this.now();
+    const moved = await this.rescheduleAll(tasks, "tomorrow");
+    await this.refresh();
+    if (moved === 0) return;
+    this.diary.add(
+      "system",
+      L(`Bắt đầu lại: dời ${moved} việc quá hạn sang mai`, `Fresh start: moved ${plural(moved, "", "overdue task", "overdue tasks").trim()} to tomorrow`),
+    );
+    this.say({ text: lines.freshStart(moved), seconds: 8, urgent: true });
   }
 
   async moveTodayToTomorrow(): Promise<void> {
