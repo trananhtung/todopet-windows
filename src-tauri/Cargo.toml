@@ -13,7 +13,7 @@ serde_json = "1"
 
 [package]
 name = "todopet"
-version = "0.1.0"
+version = "0.2.0"
 description = "A desktop pet for Windows that reads your Todoist tasks and gets happy when you work."
 authors = ["Tran Anh Tung"]
 edition.workspace = true
