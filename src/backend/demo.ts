@@ -41,6 +41,12 @@ export interface DemoControls {
   command(c: AppCommand): void;
   /** Give today's tasks long Todoist durations (about 11 hours in all), so the overbooked warning has something to say. */
   setHeavyDay(on: boolean): void;
+  /** The demo's clock: the real one, unless `setClock` moved it (the next morning, a Friday). The Brain runs on it. */
+  now(): number;
+  /** Moves the clock to this moment (epoch ms) and keeps ticking from there; null puts it back to the real time. */
+  setClock(ms: number | null): void;
+  /** Has `setClock` moved the clock? */
+  clockMoved(): boolean;
 }
 
 export interface DemoBackend extends Backend {
@@ -121,11 +127,25 @@ const pause = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 const HEAVY_MINUTES: Readonly<Record<string, number>> = { "1": 240, "2": 180, "4": 240 };
 
 export function createDemoBackend(opts: { now?: () => number; persist?: boolean } = {}): DemoBackend {
-  const now = opts.now ?? Date.now;
+  // The demo panel can move the clock (opts.now, from tests, stays as it is): the next morning, a Friday.
+  let clockShift = 0;
+  const now = opts.now ?? (() => Date.now() + clockShift);
   const persist = (opts.persist ?? true) && storageAvailable;
   // Created on the first sync, once the Brain has picked the app language.
   let active: RawTask[] | null = null;
-  const tasksNow = () => (active ??= sampleTasks(new Date(now())));
+  /** Tasks moved off today's list (to a later day or no date). */
+  const elsewhere: RawTask[] = [];
+  const tasksNow = () => {
+    active ??= sampleTasks(new Date(now()));
+    // A task moved to a later day is back once that day is here, as Todoist's "today | overdue" would list it.
+    const today = localDay(new Date(now()));
+    for (let j = 0; j < elsewhere.length; ) {
+      const due = elsewhere[j].due?.date.slice(0, 10);
+      if (due && due <= today) active.push(...elsewhere.splice(j, 1));
+      else j++;
+    }
+    return active;
+  };
   let doneList: RawTask[] | null = null;
   const doneNow = () => (doneList ??= sampleDone(new Date(now())));
   let counter = 100;
@@ -172,8 +192,6 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
   }
 
   const find = (id: string) => tasksNow().findIndex((t) => t.id === id);
-  /** Tasks moved off today's list (to a later day or no date). */
-  const elsewhere: RawTask[] = [];
 
   const backend: DemoBackend = {
     kind: "demo",
@@ -339,7 +357,8 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
         }
       },
       async save(key, value) {
-        if (!persist) {
+        // While the clock is moved (the next morning, a Friday) nothing is written to the browser: a reload starts from the real day.
+        if (!persist || clockShift !== 0) {
           memoryStore.set(key, structuredClone(value));
           return;
         }
@@ -355,7 +374,7 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
         const lines = memoryDiary.get(day) ?? [];
         lines.push(line);
         memoryDiary.set(day, lines);
-        if (persist) {
+        if (persist && clockShift === 0) {
           try {
             localStorage.setItem(`todopet:diary:${day}`, JSON.stringify(lines.slice(-500)));
           } catch {
@@ -407,6 +426,16 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean 
       setHeavyDay(on) {
         heavyDay = on;
       },
+      now,
+      setClock(ms) {
+        if (opts.now) return;
+        clockShift = ms === null ? 0 : ms - Date.now();
+        // Whoever is at the keyboard is here, not away for however long the jump was.
+        lastInput = now();
+        lastKey = 0;
+        switchedAt = now();
+      },
+      clockMoved: () => clockShift !== 0,
     },
   };
   return backend;

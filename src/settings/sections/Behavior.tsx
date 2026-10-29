@@ -98,10 +98,19 @@ export function BehaviorSection() {
         <NumberRow
           k="nudgeBudget"
           label={L("Nhắc tối đa mỗi ngày", "Reminders a day, at most")}
-          help={L(
-            "Lời nhắc bạn không yêu cầu. Việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp, cảnh báo quá tải và việc bạn tự hẹn giờ không tính. Bạn đóng loại nhắc nào thì loại đó thưa dần; bỏ qua 3 lần liền thì thú cưng im một giờ.",
-            "Bubbles you didn't ask for. Timed tasks, meetings, the morning hello, the end-of-day review, the “where was I?” card, the question after a meeting, the overbooked check and plans you set yourself are free. Close a kind of reminder and it comes less often; pass on 3 in a row and your pet waits an hour.",
-          )}
+          help={
+            <>
+              <b>{L("Không tính: ", "Never counted: ")}</b>
+              {L(
+                "việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp, cảnh báo quá tải và việc bạn tự hẹn giờ.",
+                "timed tasks, meetings, the morning hello, the end-of-day review, the “where was I?” card, the question after a meeting, the overbooked check and plans you set yourself.",
+              )}{" "}
+              {L(
+                "Chỉ lời nhắc bạn không yêu cầu mới tính. Bạn đóng loại nào thì loại đó thưa dần; bỏ qua 3 lần liền thì thú cưng im một giờ.",
+                "Only bubbles you didn't ask for count. Close a kind and it comes less often; pass on 3 in a row and your pet waits an hour.",
+              )}
+            </>
+          }
           unit={L("lần", "times")}
         />
         <SwitchRow
@@ -110,6 +119,14 @@ export function BehaviorSection() {
           help={L("Gõ phím đều tay 10 phút là đang vào guồng: lời nhắc không gấp sẽ chờ.", "After 10 minutes of steady typing you're in the zone: non-urgent bubbles wait.")}
         />
         <SwitchRow k="stillWhileTyping" label={L("Đứng yên khi bạn gõ phím", "Keep still while I type")} />
+        <SwitchRow
+          k="resumeDetails"
+          label={L("Thẻ “bạn đang làm gì” nêu tên trang", "Name the page on the “where was I?” card")}
+          help={L(
+            "Tắt thì thẻ chỉ có việc và ứng dụng: không tiêu đề trang, không địa chỉ, không nút Mở lại. Cửa sổ riêng tư (InPrivate, Ẩn danh…) luôn chỉ hiện tên ứng dụng.",
+            "Off, the card shows only the task and the app: no page title, no address, no Reopen. Private windows (InPrivate, Incognito…) only ever show the app.",
+          )}
+        />
         <SwitchRow
           k="hideInFullscreen"
           label={L("Ẩn khi có ứng dụng toàn màn hình", "Hide during full-screen apps")}

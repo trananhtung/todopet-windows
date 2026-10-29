@@ -10,7 +10,7 @@ import { accessoryEmoji, accessoryName, stageName } from "./life";
 import { isRecurring, taskTitle, type TodoTask } from "./models";
 import type { ResumeSummary } from "./resume";
 import type { StuckTask } from "./stuck";
-import { LUNCH_HOUR, type StartTrigger } from "./triggers";
+import { eventKey, LUNCH_HOUR, type StartTrigger } from "./triggers";
 import { emojiOf, itemName, placeName, type TripReturn } from "./trips";
 import { weekRecap, type WeekStats } from "./chapters";
 import type { Accessory, Mood, StageIndex } from "./types";
@@ -195,15 +195,39 @@ export function done(t: TodoTask, completed: number, target: number, sound: stri
 export const allDone = () =>
   L("Xong hết việc hôm nay rồi! 🎉 Nghỉ ngơi, hoặc chọn sẵn 3 việc cho mai nhé.", "Everything's done for today! 🎉 Rest, or pick tomorrow's 3 tasks.");
 
-export const review = (completed: number, plannedCount: number, left: number) =>
-  L(
-    `Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc. Còn ${left} việc — tổng kết ngày, hay dời hết sang mai?`,
-    `Almost end of day: ${completed}/${plannedCount} done. Wrap up the day, or move the remaining ${left} to tomorrow?`,
-  );
+/**
+ * `day` in `review`, `wrappedUp` and `movedToTomorrow` is the next workday's name ("Monday", "Thứ Hai") when it isn't tomorrow, else null: the day
+ * the wrap-up really moves things to (the same name as the Wrap up sheet's buttons).
+ */
+export const review = (completed: number, plannedCount: number, left: number, day: string | null = null) =>
+  left === 0
+    ? // Nothing left to move: only the wrap-up is offered.
+      completed > 0
+        ? L(`Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc 🎉 Mình tổng kết ngày nhé?`, `Almost end of day: ${completed}/${plannedCount} done 🎉 Wrap up the day?`)
+        : L("Sắp hết giờ làm. Danh sách hôm nay đã trống. Mình tổng kết ngày nhé?", "Almost end of day, and the list is clear. Wrap up the day?")
+    : L(
+        `Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc. Còn ${left} việc — tổng kết ngày, hay dời hết sang ${day ?? "mai"}?`,
+        `Almost end of day: ${completed}/${plannedCount} done. Wrap up the day, or move the remaining ${left} to ${day ?? "tomorrow"}?`,
+      );
 
-/** "Done for today": a good evening, naming the frog that starts tomorrow when you picked one. */
-export const wrappedUp = (frog: TodoTask | null) =>
-  L("Xong ngày rồi 🌙 Nghỉ ngơi nhé.", "All wrapped up 🌙 Rest well.") + (frog ? L(` Mai mình bắt đầu với ${q(frog)} 🐸`, ` Tomorrow starts with ${q(frog)} 🐸`) : "");
+/** "Done for today": a good evening, naming the frog that starts the next workday when you picked one. */
+export const wrappedUp = (frog: TodoTask | string | null, day: string | null = null) => {
+  const name = frog === null ? null : typeof frog === "string" ? `“${shortText(frog, 60)}”` : q(frog);
+  return L("Xong ngày rồi 🌙 Nghỉ ngơi nhé.", "All wrapped up 🌙 Rest well.") + (name ? L(` ${day ?? "Mai"} mình bắt đầu với ${name} 🐸`, ` ${day ?? "Tomorrow"} starts with ${name} 🐸`) : "");
+};
+
+// The Wrap up sheet's own words that name the day it is for (`day`: the next workday's name, or null for tomorrow).
+
+export const wrapIntro = (day: string | null = null) =>
+  L(`Vài cú chạm là xong, không có đúng sai: chỉ là dọn bàn cho ${day ?? "mai"}.`, `A few taps, no right answers: just a tidy desk for ${day ?? "tomorrow"}.`);
+export const wrapNoWins = (day: string | null = null) =>
+  L(`Hôm nay chưa tick việc nào, và vậy cũng không sao. ${day ?? "Mai"} là một trang mới 🌱`, `Nothing ticked off today, and that's okay. ${day ?? "Tomorrow"} is a fresh page 🌱`);
+export const wrapForLabel = (day: string | null = null) => L(`Cho ${day ?? "ngày mai"}`, `For ${day ?? "tomorrow"}`);
+export const wrapFrogLabel = (day: string | null = null) => (day ? L(`Làm đầu tiên vào ${day}`, `First on ${day}`) : L("Làm đầu tiên ngày mai", "First tomorrow"));
+export const wrapDecideLater = (day: string | null = null) => L(`${day ?? "Mai"} mình chọn sau`, `I'll decide ${day ? `on ${day}` : "tomorrow"}`);
+export const wrapFrogDone = (title: string, day: string | null = null) =>
+  L(`“${title}” đã xong rồi, giỏi quá! Chọn việc khác hoặc để ${day ?? "mai"} tính.`, `“${title}” is already done, nice! Pick another, or decide ${day ? `on ${day}` : "tomorrow"}.`);
+export const wrapNoteLabel = (day: string | null = null) => L(`${day ?? "Mai"} mình bắt đầu từ đâu?`, `Where do I start ${day ? `on ${day}` : "tomorrow"}?`);
 
 export const backToWork = () => L("Mình dậy rồi 🌤 Cần gì cứ gọi mình nhé.", "I'm up again 🌤 Call me whenever you need me.");
 
@@ -235,8 +259,8 @@ export const error = (e: string) => L(`Mình không kết nối được Todoist
 export const connected = () => L("Kết nối Todoist thành công! 🎉", "Connected to Todoist! 🎉");
 export const demoHello = () =>
   L("Đang chạy demo với dữ liệu giả 🎭 Bấm vào mình để mở bảng việc nhé!", "Demo mode with sample tasks 🎭 Click me to open the task board!");
-export const movedToTomorrow = (count: number) =>
-  L(`Đã dời ${count} việc sang mai. Nghỉ ngơi nhé 🌙`, `Moved ${n(count, "task")} to tomorrow. Rest well 🌙`);
+export const movedToTomorrow = (count: number, day: string | null = null) =>
+  L(`Đã dời ${count} việc sang ${day ?? "mai"}. Nghỉ ngơi nhé 🌙`, `Moved ${n(count, "task")} to ${day ?? "tomorrow"}. Rest well 🌙`);
 
 // Calendar
 
@@ -248,13 +272,16 @@ export const meetingSoon = (e: CalEvent, minutes: number, related: TodoTask[] = 
   ) + (related.length > 0 ? `\n${L("Liên quan: ", "Related: ")}${related.slice(0, 2).map((t) => `“${shortText(taskTitle(t), 40)}”`).join(", ")}` : "");
 
 /**
- * After a meeting of 15+ minutes: a kind question. `next` is the following meeting when it starts within 15 minutes,
- * and then a short breather is suggested.
+ * After a meeting of 15+ minutes: a kind question. `next` is the following meeting when there is time for a breather
+ * before it (`breather` minutes, at most 5), and then a short one is suggested.
  */
-export const meetingOver = (e: CalEvent, next: CalEvent | null = null) =>
+export const meetingOver = (e: CalEvent, next: CalEvent | null = null, breather = 5) =>
   L(`“${shortText(e.title)}” xong rồi. Có gì cần ghi lại không?`, `“${shortText(e.title)}” is over. Anything to capture?`) +
   (next
-    ? `\n${L(`“${shortText(next.title)}” bắt đầu lúc ${timeString(next.start)} — nghỉ 5 phút trước nhé?`, `“${shortText(next.title)}” starts at ${timeString(next.start)} — a 5-minute breather first?`)}`
+    ? `\n${L(
+        `“${shortText(next.title)}” bắt đầu lúc ${timeString(next.start)} — nghỉ ${breather} phút trước nhé?`,
+        `“${shortText(next.title)}” starts at ${timeString(next.start)} — a ${breather}-minute breather first?`,
+      )}`
     : "");
 
 export function calendarDay(meetings: number, busyMinutes: number, free: number, target: number, reduced: boolean): string {
@@ -295,6 +322,21 @@ export function loadDetail(load: DayLoad): string {
   return `${parts}, ${L(`trong ${span(load.capacity)} làm việc còn lại`, `in ${span(load.capacity)} of work time left`)}${over}.`;
 }
 
+/** How far the day runs over, for the strip and the "lighten the day" banner: "~3h45 over". */
+export const loadOver = (load: DayLoad) => L(`quá ~${span(load.overBy)}`, `~${span(load.overBy)} over`);
+
+/** The line that goes with it when the board is open to move tasks; `day` is "tomorrow" or the next workday's name. */
+export const lightenHint = (day: string) => L(`Dời vài việc sang ${day} cho thoáng nhé.`, `Move a few to ${day} to make room.`);
+
+/** What moving a task bought back, for the note that follows it: a 3 h task inside a meeting frees 2 h, not 3. */
+export const freesTime = (minutes: number) => L(` (bớt được ${span(minutes)})`, ` (frees ${span(minutes)})`);
+
+/** The board's note once the day fits again. */
+export const dayFits = () => L("Hay lắm, ngày hôm nay đủ chỗ rồi ✓", "Nice, today fits now ✓");
+
+/** The estimate on a task's row while lightening the day: "30'", "1h30", "4h". */
+export const estimateLabel = (minutes: number): string => (minutes < 60 ? `${Math.round(minutes)}'` : hoursText(minutes));
+
 export const timeBlock = (s: SlotSuggestion) =>
   L(
     `Gắn giờ cho dễ bắt đầu: ${timeString(s.start)}–${timeString(s.end)} làm ${q(s.task)} nhé?`,
@@ -313,16 +355,30 @@ export function resumeCard(r: ResumeSummary, reason: ResumeReason = "away"): str
     reason === "meeting"
       ? L("Họp xong rồi nhé 👋", "Meeting's done 👋")
       : reason === "distraction"
-        ? L("Mình cùng quay lại nhé 🌱", "Ready to pick it back up? 🌱")
+        ? L("Không vội đâu, khi nào sẵn sàng nhé 🌱", "No rush, whenever you're ready 🌱")
         : L("Bạn về rồi! 👋", "Welcome back! 👋");
   const task = r.task ? `“${shortText(r.task, 60)}”` : null;
   const parts = [lead];
-  if (task && r.where) parts.push(L(`Bạn đang làm: ${task} · trong ${r.where}`, `You were on: ${task} · in ${r.where}`));
+  // The task, alone on its line; where you were is `resumePlace`, the quiet line under it.
+  if (task && r.taskIsNext) parts.push(L(`Việc tiếp theo: ${task}`, `Next up: ${task}`));
   else if (task) parts.push(L(`Bạn đang làm: ${task}`, `You were on: ${task}`));
   else if (r.where) parts.push(L(`Bạn đang ở: ${r.where}`, `You were in: ${r.where}`));
   if (r.note) parts.push(L(`📌 Bước tiếp theo: ${r.note}`, `📌 Next step: ${r.note}`));
   return parts.join("\n");
 }
+
+/**
+ * Where you were, as the quiet line under the task ("Last in: Google Chrome — Q4 plan"). Empty when there is no task to
+ * put it under (the card already says "You were in …") or no place.
+ */
+export const resumePlace = (r: ResumeSummary): string => (r.task && r.where ? L(`Bạn vừa ở: ${r.where}`, `Last in: ${r.where}`) : "");
+
+/** The Reopen button: "Reopen ↗ docs.google.com" (the host is cut when it is long). */
+export const reopenTitle = (host: string | null) => L("Mở lại ↗", "Reopen ↗") + (host ? ` ${shortText(host, 28)}` : "");
+
+/** Reopen didn't work. */
+export const reopenFailed = () =>
+  L("Mình chưa mở lại được trang đó 😅 Lịch sử trình duyệt chắc còn giữ nó.", "Couldn't reopen that page 😅 Your browser's history should still have it.");
 
 /** What the diary keeps of a resume card: never the app, the page or the note. */
 export const resumeDiary = (task: string | null, hasNote: boolean) =>
@@ -334,14 +390,13 @@ export const pinned = () => L("📌 Đã ghim chỗ này. Mình sẽ nhắc khi 
 
 export const asPlanned = (t: TodoTask) => L(`Như đã định: ${q(t)}`, `As planned: ${q(t)}`);
 
-/** The chip on a task with a plan: "⏱ after 14:00 meeting". */
+/** The chip on a task with a plan: "⏱ after “Team sync” (12:00)", the same words as its menu entry (the title cut short). */
 export function triggerChip(trigger: StartTrigger, events: CalEvent[]): string {
   switch (trigger.kind) {
     case "afterMeeting": {
-      const e = events.find((x) => x.id === trigger.eventId);
-      return e
-        ? L(`⏱ sau họp ${timeString(e.start)}`, `⏱ after ${timeString(e.start)} meeting`)
-        : L(`⏱ sau “${shortText(trigger.title, 18)}”`, `⏱ after “${shortText(trigger.title, 18)}”`);
+      const e = events.find((x) => eventKey(x.id) === trigger.eventId);
+      const title = shortText(trigger.title || e?.title || "", 18);
+      return L(`⏱ sau họp “${title}”${e ? ` (${timeString(e.end)})` : ""}`, `⏱ after “${title}”${e ? ` (${timeString(e.end)})` : ""}`);
     }
     case "appOpen":
       return L(`⏱ khi mở ${shortText(trigger.app, 18)}`, `⏱ when I open ${shortText(trigger.app, 18)}`);
@@ -354,7 +409,7 @@ export function triggerChip(trigger: StartTrigger, events: CalEvent[]): string {
 export function triggerChoice(trigger: StartTrigger, events: CalEvent[], max = 30): string {
   switch (trigger.kind) {
     case "afterMeeting": {
-      const e = events.find((x) => x.id === trigger.eventId);
+      const e = events.find((x) => eventKey(x.id) === trigger.eventId);
       const title = shortText(trigger.title || e?.title || "", max);
       return L(`Sau họp “${title}”${e ? ` (${timeString(e.end)})` : ""}`, `After “${title}”${e ? ` (${timeString(e.end)})` : ""}`);
     }
@@ -365,6 +420,30 @@ export function triggerChoice(trigger: StartTrigger, events: CalEvent[], max = 3
   }
 }
 
+/** What the diary says about a plan: its kind only, never the meeting's title or the app's name. */
+export function triggerKindText(trigger: StartTrigger): string {
+  switch (trigger.kind) {
+    case "afterMeeting":
+      return L("sau một cuộc họp", "after a meeting");
+    case "appOpen":
+      return L("khi một ứng dụng mở", "when an app opens");
+    case "afterLunch":
+      return L("sau bữa trưa", "after lunch");
+  }
+}
+
+/** "Another app…": what the typed name matches among the apps seen lately. */
+export const appSeen = (name: string) => L(`Khớp với ${shortText(name, 30)}, ứng dụng bạn vừa dùng ✓`, `Matches ${shortText(name, 30)}, which you used lately ✓`);
+
+/** "Another app…": a name that matches nothing seen so far is still kept, and the pet says so. */
+export const appUnseen = () => L("Mình chưa thấy ứng dụng nào tên vậy, mình sẽ để ý nhé 👀", "I haven't seen an app called that yet; I'll watch for it 👀");
+
+/** "Try 2 minutes" while a focus session runs: ask before replacing it. */
+export const switchToStarter = (minutesIn: number) =>
+  minutesIn < 1
+    ? L("Bạn vừa bắt đầu một phiên tập trung. Chuyển sang thử 2 phút nhé?", "You just started a focus session. Switch to 2 minutes?")
+    : L(`Bạn đã tập trung được ${minutesIn} phút rồi. Chuyển sang thử 2 phút nhé?`, `You're ${n(minutesIn, "minute")} into a focus session. Switch to 2 minutes?`);
+
 export const starterStart = (t: TodoTask | null, minutes = 2) =>
   t
     ? L(`Chỉ ${minutes} phút thôi cho ${q(t)}. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")} on ${q(t)}. Open it and see, that's all 🌱`)
@@ -374,6 +453,11 @@ export const starterEnd = (t: TodoTask | null) =>
   t
     ? L(`Xong 2 phút rồi, bạn đã bắt đầu ${q(t)}! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?`, `Two minutes done, you've started ${q(t)}! 🌱 Keep going with a full session, or stop here for now?`)
     : L("Xong 2 phút rồi, bạn đã bắt đầu! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?", "Two minutes done, you've started! 🌱 Keep going with a full session, or stop here for now?");
+
+export const starterGone = (t: TodoTask | null) =>
+  t
+    ? L(`Xong 2 phút rồi, và ${q(t)} cũng đã xong! 🌱`, `Two minutes done, and ${q(t)} is already off your list! 🌱`)
+    : starterEnd(null);
 
 export const starterEnough = () => L("Hay lắm, bắt đầu là phần khó nhất 🌱 Lần sau sẽ dễ hơn.", "Nice, starting is the hardest part 🌱 It gets easier next time.");
 

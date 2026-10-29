@@ -1,20 +1,19 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type Ref } from "react";
 import type { Backend } from "../backend/types";
-import { errorMessage, type Brain, type BrainState, type DueChoice } from "../core/brain";
+import { errorMessage, showsOverBoard, type Brain, type BrainState, type DueChoice } from "../core/brain";
 import { currentEvent, freeMinutes } from "../core/calendar";
-import { addDays, atHour, daysAgo, dayKey, hoursText, parseDate, timeString } from "../core/dates";
+import { atHour, daysAgo, dayKey, hoursText, parseDate, timeString } from "../core/dates";
 import { getLang, L, plural } from "../core/l10n";
 import * as life from "../core/life";
 import * as lines from "../core/lines";
 import { dueDay, dueTime, isRecurring, planned, taskTitle, uiPriority, type TodoTask } from "../core/models";
 import { decorName, homeDecor } from "../core/craft";
-import { dayStrip } from "../core/load";
 import { moodEmoji, moodLabel } from "../core/mood";
 import { isWorkday, MAX_HOME_ITEMS } from "../core/prefs";
-import type { StartTrigger } from "../core/triggers";
+import { MIN_APP_NAME, normalizeAppName, type StartTrigger } from "../core/triggers";
 import { itemName, placeName, SOUVENIRS } from "../core/trips";
 import { DECOR_IDS, SPECIES_IDS, type Accessory, type DecorId, type SpeciesId, type StageIndex } from "../core/types";
-import { canMove, canWrapUp, chooseFrog, chooseMove, moveAllToTomorrow, MAX_NOTE_LENGTH, setNote, wrapMoves, type WrapDraft, type WrapMove } from "../core/wrapup";
+import { canMove } from "../core/wrapup";
 import { defaultPose, petBounds, renderDecor, renderPet, speciesInfo } from "../pets";
 import { Icon, type IconName } from "../ui/icons";
 import { localeTag } from "../ui/lang";
@@ -35,14 +34,33 @@ import {
   yarnText,
   type WardrobeGroupId,
 } from "./boardGame";
+import { BubbleView } from "./Bubble";
+import { DayStripCard } from "./DayStrip";
 import type { BoardPlacement } from "./placement";
 import { Popover } from "./Popover";
+import { nextWorkdayName, WrapUpSheet } from "./WrapUp";
 
 type View = { kind: "main" } | { kind: "split"; task: TodoTask } | { kind: "wardrobe" } | { kind: "home" } | { kind: "wrapup" };
 
 /** Priority text colors (AA on the board's surfaces) and check-circle colors, P1…P4. */
 const PRIO_INK = ["", "var(--p1-ink)", "var(--p2-ink)", "var(--p3-ink)", "var(--p4-ink)"];
 const PRIO_LINE = ["", "var(--p1-line)", "var(--p2-line)", "var(--p3-line)", "var(--p4-line)"];
+
+/**
+ * A sheet that replaces the list takes the keyboard to its heading when it opens. Without it a mouse click on a button
+ * of the list leaves the focus on the page (that button is gone), and Escape would close the whole board instead of
+ * going back to the list.
+ */
+function useHeadingFocus() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true });
+  }, []);
+  return heading;
+}
+
+/** A board shorter than this (px) is "compact": the Wrap up sheet fits its list in. */
+const COMPACT_BELOW = 600;
 
 /** "Start when…" lists this many of today's meetings. */
 const MAX_MEETING_CHOICES = 4;
@@ -64,6 +82,8 @@ function IconButton({
   ref?: Ref<HTMLButtonElement>;
   "aria-expanded"?: boolean;
   "aria-haspopup"?: "menu" | "dialog";
+  "data-split"?: "";
+  "data-wardrobe"?: "";
 }) {
   return (
     <button ref={ref} type="button" className={`btn ghost icon${danger ? " danger" : ""}`} title={label} aria-label={label} onClick={onClick} {...aria}>
@@ -82,12 +102,15 @@ export function Board(props: {
   const { brain, backend, request, placement, onClose } = props;
   const s = useSyncExternalStore(brain.subscribe, brain.getSnapshot);
   const [view, setView] = useState<View>(request.split ? { kind: "split", task: request.split } : request.wrapUp ? { kind: "wrapup" } : { kind: "main" });
+  // "Lighten the day": the board opened to move tasks off an overbooked day (it ends when the day fits, or with its close button).
+  const [lighten, setLighten] = useState(request.lighten);
   const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (request.split) setView({ kind: "split", task: request.split });
     else if (request.wrapUp) setView({ kind: "wrapup" });
-    else if (request.focusAdd) setView({ kind: "main" });
+    else if (request.focusAdd || request.lighten || request.focusTaskId) setView({ kind: "main" });
+    setLighten(request.lighten);
   }, [request]);
 
   // Fresh data whenever the board opens (like clicking the macOS pet).
@@ -100,21 +123,61 @@ export function Board(props: {
     if (request.fromKeyboard && !request.focusAdd) ref.current?.focus({ preventScroll: true });
   }, [request]);
 
+  // Back from a sheet: focus goes to the button that opened it (the Wrap up button, the task's Split, the Wardrobe button).
+  const lastView = useRef<View>(view);
+  useEffect(() => {
+    const was = lastView.current;
+    lastView.current = view;
+    if (was.kind === view.kind || view.kind !== "main") return;
+    // (Unless something else asked for the focus: a bubble's "Open" on a task.)
+    if (request.focusTaskId) return;
+    const board = ref.current;
+    if (!board) return;
+    let target: HTMLElement | null = null;
+    if (was.kind === "wrapup") target = board.querySelector<HTMLElement>("[data-wrap-up]");
+    else if (was.kind === "wardrobe") target = board.querySelector<HTMLElement>("[data-wardrobe]");
+    else if (was.kind === "split") {
+      const row = [...board.querySelectorAll<HTMLElement>("li.task")].find((e) => e.dataset.taskId === was.task.id);
+      target = row?.querySelector<HTMLElement>("[data-split]") ?? row ?? null;
+    }
+    (target ?? board).focus({ preventScroll: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
   const needsToken = !s.hasToken || s.authError;
+  // A board that is short (it opened above the pet, or the screen is) gives its sheets a tighter layout.
+  const compact = placement.height < COMPACT_BELOW;
   const origin = placement.side === "left" ? "100% 100%" : placement.side === "right" ? "0% 100%" : "50% 100%";
+  // An urgent bubble (a meeting, a timed task) is not held back by the open board: it shows here, with its buttons.
+  const banner = s.bubble && showsOverBoard(s.bubble) && !brain.bubbleStale(s.bubble) ? s.bubble : null;
+  // A check-in shown here ("Move some?") is read here: once the board closes it isn't shown again over the pet.
+  const bannerId = banner?.id ?? null;
+  useEffect(() => {
+    if (bannerId !== null) brain.bannerRead(bannerId);
+  }, [brain, bannerId]);
+  useEffect(() => () => brain.boardClosed(), [brain]);
 
   return (
     <section
       ref={ref}
       tabIndex={-1}
       role="dialog"
-      className={`board side-${placement.side}`}
+      className={`board side-${placement.side}${compact ? " compact" : ""}`}
       data-hit=""
       // Anchored by its bottom edge and as tall as its content, up to the room it was given.
       style={{ left: placement.left, bottom: placement.bottom, width: placement.width, maxHeight: placement.height, transformOrigin: origin }}
       aria-label={L("Bảng việc", "Task board")}
+      onKeyDown={(e) => {
+        // Escape inside a sheet goes back to the list, like its Back button; from the list it closes the board (App).
+        if (e.key === "Escape" && !e.defaultPrevented && view.kind !== "main" && !needsToken) {
+          const busy = ref.current?.querySelector("[aria-busy='true']");
+          e.preventDefault();
+          if (!busy) setView({ kind: "main" });
+        }
+      }}
     >
       <Header s={s} backend={backend} onClose={onClose} onWardrobe={() => setView({ kind: "wardrobe" })} />
+      {banner && <BubbleView key={banner.id} bubble={banner} brain={brain} banner />}
       <div className="board-body">
         {needsToken ? (
           <Connect brain={brain} backend={backend} error={s.errorText} authError={s.hasToken && s.authError} />
@@ -125,7 +188,7 @@ export function Board(props: {
         ) : view.kind === "home" ? (
           <HomeSheet brain={brain} s={s} onBack={() => setView({ kind: "wardrobe" })} />
         ) : view.kind === "wrapup" ? (
-          <WrapUpSheet brain={brain} s={s} onBack={() => setView({ kind: "main" })} onDone={onClose} />
+          <WrapUpSheet brain={brain} s={s} compact={compact} onBack={() => setView({ kind: "main" })} onDone={onClose} />
         ) : (
           <Main
             brain={brain}
@@ -134,6 +197,9 @@ export function Board(props: {
             focusAdd={request.focusAdd}
             prefill={request.prefill}
             seq={request.seq}
+            focusTaskId={request.focusTaskId}
+            lighten={lighten}
+            onLighten={setLighten}
             onSplit={(task) => setView({ kind: "split", task })}
             onWrapUp={() => setView({ kind: "wrapup" })}
           />
@@ -203,7 +269,7 @@ function Header({ s, backend, onClose, onWardrobe }: { s: BrainState; backend: B
         </div>
       </div>
       <div className="head-tools">
-        <IconButton icon="hanger" label={L("Tủ đồ & thành tích", "Wardrobe & achievements")} onClick={onWardrobe} />
+        <IconButton icon="hanger" label={L("Tủ đồ & thành tích", "Wardrobe & achievements")} onClick={onWardrobe} data-wardrobe="" />
         <IconButton icon="book" label={L("Nhật ký của pet", "Pet diary")} onClick={() => void backend.system.openWindow("diary")} />
         <IconButton icon="gear" label={L("Cài đặt", "Settings")} onClick={() => void backend.system.openWindow("settings")} />
         <IconButton icon="close" label={L("Đóng (Esc)", "Close (Esc)")} onClick={onClose} />
@@ -426,7 +492,7 @@ function Connect({ brain, backend, error, authError }: { brain: Brain; backend: 
 
 /** "Take today off": shown on days that would be workdays (the demo always works), pressed on a rest day. */
 function DayOffToggle({ brain, s }: { brain: Brain; s: BrainState }) {
-  const now = new Date();
+  const now = new Date(brain.clockNow());
   const dayOff = s.prefs.restDays.includes(dayKey(now));
   if (!dayOff && !s.isDemo && !isWorkday({ ...s.prefs, restDays: [] }, now)) return null;
   return (
@@ -453,6 +519,9 @@ function Main({
   focusAdd,
   prefill,
   seq,
+  focusTaskId,
+  lighten,
+  onLighten,
   onSplit,
   onWrapUp,
 }: {
@@ -462,17 +531,105 @@ function Main({
   focusAdd: boolean;
   prefill: string | null;
   seq: number;
+  focusTaskId: string | null;
+  lighten: boolean;
+  onLighten: (on: boolean) => void;
   onSplit: (t: TodoTask) => void;
   onWrapUp: () => void;
 }) {
   const day = s.day;
   const stuckIds = new Map(s.stuck.map((x) => [x.task.id, x.days]));
   const done = day.completed.length;
-  const dayOff = s.prefs.restDays.includes(dayKey(new Date()));
+  const dayOff = s.prefs.restDays.includes(dayKey(new Date(brain.clockNow())));
   // Nothing to plan on a day off, nor once the day is wrapped up (what you moved to tomorrow was on purpose).
   const toPlan = dayOff || s.doneUntil !== null ? 0 : s.target - planned(day);
   // One confirmation line under the add form, for adds and for moves.
   const [note, setNote] = useState<Note | null>(null);
+
+  // Opening the lighten view answers the "Move some?" bubble: it isn't shown again.
+  useEffect(() => {
+    brain.setLightening(lighten);
+  }, [brain, lighten]);
+  // Lightening the day: it goes on until the day fits (the strip updates as tasks move), or you close it.
+  const load = brain.currentLoad();
+  const over = load.overBy;
+  const fits = over <= 0;
+  // A move that makes it fit says so in its own note ("Moved … ✓ Nice, today fits now ✓"); any other way says it here.
+  const moving = useRef(false);
+  useEffect(() => {
+    if (!lighten || !fits) return;
+    onLighten(false);
+    if (!moving.current) setNote({ n: Date.now(), text: lines.dayFits(), error: false });
+  }, [lighten, fits, onLighten]);
+  // After a task leaves the list, the keyboard stays in the board instead of falling to the page: on the next row's
+  // "→ Tomorrow" (the one before it when it was the last), or, when that move made the day fit and the view closed,
+  // on the add field.
+  const listRef = useRef<HTMLElement>(null);
+  const refocus = useRef<{ index: number; until: number } | null>(null);
+  useEffect(() => {
+    const at = refocus.current;
+    if (!at) return;
+    refocus.current = null;
+    if (Date.now() > at.until) return;
+    const rows = [...(listRef.current?.querySelectorAll<HTMLElement>("li.task") ?? [])];
+    const goOf = (r: HTMLElement) => r.querySelector<HTMLButtonElement>(".lighten-go:not(:disabled)");
+    const stays = lighten && !fits;
+    let target: HTMLElement | null | undefined;
+    if (stays) {
+      target = rows.slice(at.index).map(goOf).find(Boolean) ?? rows.slice(0, at.index).reverse().map(goOf).find(Boolean) ?? listRef.current?.querySelector<HTMLElement>(".lighten-banner button");
+    } else {
+      // The day fits and the view closed: back to the top of the board, where the add field and the note about it are
+      // (not on the next row's tick: a second Enter would finish a task you only meant to move).
+      target = listRef.current?.closest(".board")?.querySelector<HTMLElement>("#add-task");
+    }
+    (target ?? listRef.current?.closest<HTMLElement>(".board"))?.focus({ preventScroll: true });
+  }, [day.today.length]);
+  // The view opens on its first "→ Tomorrow" (whoever opened it: the chip, a bubble's button), so the keyboard
+  // continues in the list; when it ends and the focus has nowhere to be, it goes to the chip it came from.
+  const wasLightening = useRef(false);
+  useEffect(() => {
+    if (lighten && !wasLightening.current) {
+      wasLightening.current = true;
+      const go = listRef.current?.querySelector<HTMLElement>(".lighten-go:not(:disabled)");
+      go?.focus({ preventScroll: true });
+      // The timeline folds away over a fifth of a second; once it has, the first rows are brought into view (scrolling
+      // before would aim at where they were).
+      const id = window.setTimeout(() => {
+        const body = go?.closest(".board-body");
+        const rows = [...(listRef.current?.querySelectorAll<HTMLElement>("li.task") ?? [])];
+        if (!go || !body || rows.length === 0) return;
+        // The first few rows all in view: that is what lightening is about. If they are not, the list starts at the top.
+        const b = body.getBoundingClientRect();
+        const first = rows[0].getBoundingClientRect();
+        const last = rows[Math.min(rows.length, 3) - 1].getBoundingClientRect();
+        if (first.top < b.top || last.bottom > b.bottom) listRef.current?.scrollIntoView?.({ block: "start" });
+      }, 260);
+      return () => window.clearTimeout(id);
+    } else if (!lighten && wasLightening.current) {
+      const a = document.activeElement;
+      if (!a || a === document.body || !a.isConnected) {
+        const board = listRef.current?.closest<HTMLElement>(".board");
+        (board?.querySelector<HTMLElement>(".ds-over") ?? board?.querySelector<HTMLElement>("#add-task") ?? board)?.focus({ preventScroll: true });
+      }
+    }
+    wasLightening.current = lighten;
+  }, [lighten]);
+
+  // "Open" on a meeting's related task: scroll to it, give it the focus, and flash it so the eye finds it.
+  const [flash, setFlash] = useState<string | null>(null);
+  const focused = useRef(-1);
+  useEffect(() => {
+    if (!focusTaskId || focused.current === seq) return;
+    const li = [...document.querySelectorAll<HTMLElement>(".board [data-task-id]")].find((e) => e.dataset.taskId === focusTaskId);
+    if (!li) return;
+    focused.current = seq;
+    li.scrollIntoView?.({ block: "nearest" });
+    li.focus({ preventScroll: true });
+    setFlash(focusTaskId);
+    setTimeout(() => setFlash(null), 2400);
+  }, [focusTaskId, seq, day]);
+
+  const dayName = nextWorkdayName(brain);
   return (
     <>
       {s.trip && <TripBanner brain={brain} s={s} />}
@@ -480,7 +637,7 @@ function Main({
 
       <AddTask brain={brain} focusAdd={focusAdd} prefill={prefill} seq={seq} note={note} setNote={setNote} />
 
-      <DayStripCard brain={brain} s={s} onWrapUp={onWrapUp} />
+      <DayStripCard brain={brain} s={s} lighten={lighten} onLighten={() => onLighten(!lighten)} onWrapUp={onWrapUp} />
       <PlanNote s={s} />
 
       {day.overdue.length > 0 && (
@@ -496,13 +653,13 @@ function Main({
           </div>
           <ul className="tasks">
             {day.overdue.map((t) => (
-              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} onSplit={onSplit} onNote={setNote} />
+              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} flash={flash === t.id} onSplit={onSplit} onNote={setNote} />
             ))}
           </ul>
         </section>
       )}
 
-      <section className="section" aria-labelledby="sec-today">
+      <section className="section" aria-labelledby="sec-today" ref={listRef}>
         <div className="sec-head">
           <h2 id="sec-today">
             {L("Hôm nay", "Today")} <span className="count">{day.today.length}</span>
@@ -512,12 +669,40 @@ function Main({
           <PinPlace brain={brain} s={s} onNote={setNote} compact={toPlan > 0} />
           <DayOffToggle brain={brain} s={s} />
         </div>
+        {lighten && (
+          <div className="lighten-banner" role="status">
+            <Icon name="hourglass" size={15} />
+            <span className="lighten-text">
+              <b>{lines.loadOver(load)}</b> {lines.lightenHint(dayName ?? L("ngày mai", "tomorrow"))}
+            </span>
+            <button type="button" className="btn ghost icon" aria-label={L("Đóng", "Close")} title={L("Đóng", "Close")} onClick={() => onLighten(false)}>
+              <Icon name="close" size={14} />
+            </button>
+          </div>
+        )}
         {day.today.length === 0 ? (
           <div className="tasks empty">{done > 0 ? L("Xong hết rồi! 🎉", "All done! 🎉") : L("Chưa có việc nào. Thêm 3 việc quan trọng nhất nhé.", "Nothing yet. Add your 3 most important tasks.")}</div>
         ) : (
           <ul className="tasks">
             {day.today.map((t) => (
-              <TaskRow key={t.id} t={t} brain={brain} s={s} stuckDays={stuckIds.get(t.id)} onSplit={onSplit} onNote={setNote} />
+              <TaskRow
+                key={t.id}
+                t={t}
+                brain={brain}
+                s={s}
+                stuckDays={stuckIds.get(t.id)}
+                flash={flash === t.id}
+                lighten={lighten}
+                dayName={dayName}
+                onMoved={(phase, ok) => {
+                  moving.current = phase === "start";
+                  if (phase === "start") refocus.current = { index: day.today.findIndex((x) => x.id === t.id), until: Date.now() + 4000 };
+                  // It didn't move: nothing leaves the list, so the keyboard stays on the button it is on.
+                  else if (ok === false) refocus.current = null;
+                }}
+                onSplit={onSplit}
+                onNote={setNote}
+              />
             ))}
           </ul>
         )}
@@ -560,6 +745,10 @@ function TaskRow({
   brain,
   s,
   stuckDays,
+  flash = false,
+  lighten = false,
+  dayName = null,
+  onMoved,
   onSplit,
   onNote,
 }: {
@@ -567,10 +756,17 @@ function TaskRow({
   brain: Brain;
   s: BrainState;
   stuckDays?: number;
+  /** Just opened from a bubble: the row flashes once. */
+  flash?: boolean;
+  /** Lightening the day: the row shows its estimate and a one-tap move to the next workday. */
+  lighten?: boolean;
+  /** The next workday's name when it isn't tomorrow. */
+  dayName?: string | null;
+  onMoved?: (phase: "start" | "end", ok?: boolean) => void;
   onSplit: (t: TodoTask) => void;
   onNote: (n: Note) => void;
 }) {
-  const [pop, setPop] = useState<"move" | "delete" | "more" | "when" | null>(null);
+  const [pop, setPop] = useState<"move" | "delete" | "more" | "when" | "whenApp" | "replace" | null>(null);
   const moveRef = useRef<HTMLButtonElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
   const moreRef = useRef<HTMLButtonElement>(null);
@@ -578,10 +774,54 @@ function TaskRow({
   const title = taskTitle(t);
   const time = dueTime(t);
   const day = dueDay(t);
-  const today = dayKey(new Date());
-  const late = time !== null && time < new Date();
+  const clock = new Date(brain.clockNow());
+  const today = dayKey(clock);
+  const late = time !== null && time < clock;
   const prio = uiPriority(t);
+  const est = lighten ? brain.estimateOf(t) : null;
+  const where = dayName ?? L("ngày mai", "tomorrow");
+  const moveOne = () => {
+    onMoved?.("start");
+    const name = short(title, 40);
+    const before = brain.currentLoad();
+    void brain.moveToNextWorkday(t).then((ok) => {
+      onMoved?.("end", ok);
+      const after = brain.currentLoad();
+      // What it bought back (a task inside a meeting frees less than its estimate), so the arithmetic is no surprise.
+      const freed = Math.round(before.taskMinutes - after.taskMinutes);
+      onNote(
+        ok
+          ? {
+              n: Date.now(),
+              text: L(`Đã dời “${name}” sang ${where} ✓`, `Moved “${name}” to ${where} ✓`) + (freed >= 15 ? lines.freesTime(freed) : "") + (after.overBy <= 0 ? ` ${lines.dayFits()}` : ""),
+              error: false,
+            }
+          : { n: Date.now(), text: brain.getSnapshot().errorText ?? L("Chưa dời được, thử lại nhé.", "Couldn't move it, try again."), error: true },
+      );
+    });
+  };
+  // Up and down the "→ Tomorrow" buttons, like the rows of a list.
+  const goKeys = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+    if (!keys.includes(e.key)) return;
+    const gos = [...(e.currentTarget.closest("ul")?.querySelectorAll<HTMLButtonElement>(".lighten-go:not(:disabled)") ?? [])];
+    const i = gos.indexOf(e.currentTarget);
+    const to = e.key === "ArrowDown" ? gos[Math.min(gos.length - 1, i + 1)] : e.key === "ArrowUp" ? gos[Math.max(0, i - 1)] : e.key === "Home" ? gos[0] : gos[gos.length - 1];
+    if (!to) return;
+    e.preventDefault();
+    to.focus();
+  };
   const meta = [
+    est && (
+      <span
+        key="est"
+        className={`chip est${est.own ? "" : " dflt"}`}
+        title={est.own ? L(`${est.minutes} phút, theo Todoist`, `${est.minutes} min, from Todoist`) : L(`${est.minutes} phút: ước tính mặc định của bạn`, `${est.minutes} min: your default estimate`)}
+      >
+        <span className="sr-only">{L("Ước tính ", "Estimate ")}</span>
+        {lines.estimateLabel(est.minutes)}
+      </span>
+    ),
     s.next?.id === t.id && (
       <span key="next" className="chip frog">
         🐸 {L("làm trước", "do first")}
@@ -599,7 +839,7 @@ function TaskRow({
     ),
     day && day < today && (
       <span key="ago" className="chip late">
-        {daysAgo(day)}
+        {daysAgo(day, clock)}
       </span>
     ),
     stuckDays !== undefined && (
@@ -626,10 +866,17 @@ function TaskRow({
   const closePop = (restoreFocus: boolean) => {
     const which = pop;
     setPop(null);
-    if (restoreFocus) (which === "move" ? moveRef : which === "more" || which === "when" ? moreRef : deleteRef).current?.focus();
+    if (restoreFocus) (which === "move" ? moveRef : which === "more" || which === "when" || which === "whenApp" || which === "replace" ? moreRef : deleteRef).current?.focus();
   };
+  // Try 2 minutes replaces a running session: ask first, so a focus you are in the middle of is never lost by a tap.
+  const running = s.focus && !s.focus.isBreak ? s.focus : null;
   return (
-    <li className={`task${pop ? " active" : ""}`} style={{ ["--prio" as string]: PRIO_LINE[prio] }}>
+    <li
+      className={`task${pop ? " active" : ""}${lighten ? " lightening" : ""}${flash ? " flash" : ""}`}
+      style={{ ["--prio" as string]: PRIO_LINE[prio] }}
+      data-task-id={t.id}
+      tabIndex={-1}
+    >
       <button className="check" aria-label={L(`Xong: ${title}`, `Complete: ${title}`)} title={L("Xong", "Complete")} onClick={(e) => e.detail < 2 && void brain.complete(t)}>
         <Icon name="check" size={12} />
       </button>
@@ -639,13 +886,29 @@ function TaskRow({
         </div>
         {meta.length > 0 && <div className="t-meta">{meta}</div>}
       </div>
-      <div className="t-actions">
-        <IconButton icon="play" label={L("Tập trung", "Focus")} onClick={() => brain.startFocus(t)} />
-        <IconButton icon="scissors" label={L("Chia nhỏ", "Split")} onClick={() => onSplit(t)} />
-        <IconButton ref={moveRef} icon="reschedule" label={L("Dời", "Move")} aria-haspopup="menu" aria-expanded={pop === "move"} onClick={() => setPop(pop === "move" ? null : "move")} />
-        <IconButton ref={moreRef} icon="more" label={L("Thêm: thử 2 phút, bắt đầu khi…", "More: try 2 minutes, start when…")} aria-haspopup="menu" aria-expanded={pop === "more" || pop === "when"} onClick={() => setPop(pop === "more" || pop === "when" ? null : "more")} />
-        <IconButton ref={deleteRef} icon="trash" danger label={L("Xoá", "Delete")} aria-haspopup="dialog" aria-expanded={pop === "delete"} onClick={() => setPop(pop === "delete" ? null : "delete")} />
-      </div>
+      {/* Lightening the day, a row is its tick and its "→ Tomorrow": five hover icons would cover its title and add Tab stops. */}
+      {!lighten && (
+        <div className="t-actions">
+          <IconButton icon="play" label={L("Tập trung", "Focus")} onClick={() => brain.startFocus(t)} />
+          <IconButton icon="scissors" label={L("Chia nhỏ", "Split")} onClick={() => onSplit(t)} data-split="" />
+          <IconButton ref={moveRef} icon="reschedule" label={L("Dời", "Move")} aria-haspopup="menu" aria-expanded={pop === "move"} onClick={() => setPop(pop === "move" ? null : "move")} />
+          <IconButton ref={moreRef} icon="more" label={L("Thêm: thử 2 phút, bắt đầu khi…", "More: try 2 minutes, start when…")} aria-haspopup="menu" aria-expanded={pop === "more" || pop === "when" || pop === "whenApp" || pop === "replace"} onClick={() => setPop(pop === "more" || pop === "when" || pop === "whenApp" || pop === "replace" ? null : "more")} />
+          <IconButton ref={deleteRef} icon="trash" danger label={L("Xoá", "Delete")} aria-haspopup="dialog" aria-expanded={pop === "delete"} onClick={() => setPop(pop === "delete" ? null : "delete")} />
+        </div>
+      )}
+      {lighten && (
+        <button
+          type="button"
+          className="btn small lighten-go"
+          disabled={!canMove(t)}
+          title={canMove(t) ? L(`Dời “${short(title, 40)}” sang ${where}`, `Move “${short(title, 40)}” to ${where}`) : L("Việc lặp lại giữ lịch riêng của nó", "A repeating task keeps its own schedule")}
+          aria-label={L(`Dời “${short(title, 40)}” sang ${where}`, `Move “${short(title, 40)}” to ${where}`)}
+          onClick={(e) => e.detail < 2 && moveOne()}
+          onKeyDown={goKeys}
+        >
+          <span aria-hidden>→</span> {dayName ?? L("Ngày mai", "Tomorrow")}
+        </button>
+      )}
       {pop === "move" && (
         <Popover anchor={moveRef} role="menu" label={L(`Dời “${short(title, 40)}”`, `Move “${short(title, 40)}”`)} className="menu" onClose={closePop}>
           {(
@@ -660,7 +923,7 @@ function TaskRow({
               type="button"
               role="menuitem"
               onClick={() => {
-                setPop(null);
+                closePop(true);
                 const name = short(title, 40);
                 const where = due === "today" ? L("hôm nay", "today") : due === "tomorrow" ? L("ngày mai", "tomorrow") : L("ngoài kế hoạch", "off the plan");
                 void (due === "no date" ? brain.unplan(t) : brain.reschedule(t, due)).then((ok) =>
@@ -685,7 +948,11 @@ function TaskRow({
               type="button"
               role="menuitem"
               onClick={() => {
-                setPop(null);
+                if (running) {
+                  setPop("replace");
+                  return;
+                }
+                closePop(true);
                 brain.startTwoMinutes(t);
               }}
             >
@@ -700,9 +967,35 @@ function TaskRow({
           </div>
         </Popover>
       )}
+      {pop === "replace" && running && (
+        <Popover anchor={moreRef} role="alertdialog" label={L("Đổi sang thử 2 phút", "Switch to 2 minutes")} className="confirm switch-form" onClose={closePop}>
+          <p>{lines.switchToStarter(Math.max(0, Math.trunc((brain.clockNow() - running.start) / 60_000)))}</p>
+          <div className="pop-actions">
+            <button type="button" className="btn small" data-autofocus onClick={() => closePop(true)}>
+              {L("Tiếp tục phiên này", "Keep going")}
+            </button>
+            <button
+              type="button"
+              className="btn small primary"
+              onClick={() => {
+                closePop(true);
+                brain.startTwoMinutes(t);
+              }}
+            >
+              <Icon name="play" size={14} />
+              {L("Chuyển sang 2 phút", "Switch to 2 minutes")}
+            </button>
+          </div>
+        </Popover>
+      )}
       {pop === "when" && (
         <Popover anchor={moreRef} role="menu" label={L("Bắt đầu khi…", "Start when…")} className="menu" onClose={closePop}>
-          <WhenMenu brain={brain} s={s} t={t} plan={plan?.trigger ?? null} onClose={() => setPop(null)} onNote={onNote} />
+          <WhenMenu brain={brain} s={s} t={t} plan={plan?.trigger ?? null} onClose={() => closePop(true)} onAnotherApp={() => setPop("whenApp")} onNote={onNote} />
+        </Popover>
+      )}
+      {pop === "whenApp" && (
+        <Popover anchor={moreRef} role="dialog" label={L("Ứng dụng khác", "Another app")} className="confirm pin-form app-form" onClose={closePop}>
+          <AnotherApp brain={brain} s={s} t={t} onClose={closePop} onNote={onNote} />
         </Popover>
       )}
       {pop === "delete" && (
@@ -730,13 +1023,14 @@ function TaskRow({
   );
 }
 
-/** "Start when…": after one of today's meetings, when I open an app (a recent one, or typed), or after lunch. */
+/** "Start when…": after one of today's meetings, when I open an app (a recent one, or another that opens its own dialog), or after lunch. */
 function WhenMenu({
   brain,
   s,
   t,
   plan,
   onClose,
+  onAnotherApp,
   onNote,
 }: {
   brain: Brain;
@@ -744,9 +1038,9 @@ function WhenMenu({
   t: TodoTask;
   plan: StartTrigger | null;
   onClose: () => void;
+  onAnotherApp: () => void;
   onNote: (n: Note) => void;
 }) {
-  const [app, setApp] = useState("");
   const title = taskTitle(t);
   // The next few meetings are enough; the list stays short on a day full of them.
   const choices = useMemo(() => {
@@ -763,11 +1057,6 @@ function WhenMenu({
       text: ok ? `⏱ “${short(title, 28)}”: ${lines.triggerChoice(trigger, s.events)}` : L("Chưa hẹn được, thử lại nhé.", "Couldn't set that, try again."),
       error: !ok,
     });
-  };
-  const typed = app.trim();
-  // Arrow, Home and End move the caret in the app field, not between the menu's items.
-  const keepKeys = (e: React.KeyboardEvent) => {
-    if (e.key === "Home" || e.key === "End" || e.key.startsWith("Arrow")) e.stopPropagation();
   };
   return (
     <div className="menu-body">
@@ -787,21 +1076,10 @@ function WhenMenu({
           {same(c, plan) && <Icon name="check" size={14} className="menu-end" />}
         </button>
       ))}
-      <form
-        className="menu-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (typed) choose({ kind: "appOpen", app: typed });
-        }}
-      >
-        <label className="sr-only" htmlFor={`when-app-${t.id}`}>
-          {L("Ứng dụng khác", "Another app")}
-        </label>
-        <input id={`when-app-${t.id}`} className="field" autoComplete="off" maxLength={60} placeholder={L("Mở ứng dụng khác…", "When I open another app…")} value={app} onChange={(e) => setApp(e.target.value)} onKeyDown={keepKeys} />
-        <button className="btn small" disabled={!typed}>
-          {L("Đặt", "Set")}
-        </button>
-      </form>
+      <button type="button" role="menuitem" aria-haspopup="dialog" onClick={onAnotherApp}>
+        <Icon name="reschedule" size={15} />
+        <span className="menu-label">{L("Ứng dụng khác…", "Another app…")}</span>
+      </button>
       {plan && (
         <button
           type="button"
@@ -820,11 +1098,90 @@ function WhenMenu({
   );
 }
 
+/**
+ * The dialog behind "Another app…": the name of an app to wait for (3+ characters), with its own focus and Escape. The
+ * start of a name is enough ("fig"), and so is the program's name as Task Manager shows it ("Figma.exe"). It says
+ * which app lately in front the name matches, and when none does it still sets the plan, and says so kindly.
+ */
+function AnotherApp({
+  brain,
+  s,
+  t,
+  onClose,
+  onNote,
+}: {
+  brain: Brain;
+  s: BrainState;
+  t: TodoTask;
+  onClose: (restoreFocus: boolean) => void;
+  onNote: (n: Note) => void;
+}) {
+  const [app, setApp] = useState("");
+  const id = useId();
+  const typed = normalizeAppName(app);
+  const ok = typed.length >= MIN_APP_NAME;
+  // What it matches among the apps used lately, worked out from what is typed (nothing to say before 3 letters).
+  const match = ok ? brain.recentAppMatch(typed) : null;
+  const submit = () => {
+    if (!ok) return;
+    onClose(true);
+    const trigger: StartTrigger = { kind: "appOpen", app: typed };
+    const set = brain.setStartTrigger(t, trigger);
+    onNote({
+      n: Date.now(),
+      text: set
+        ? `⏱ “${short(taskTitle(t), 28)}”: ${lines.triggerChoice(trigger, s.events)}${match ? "" : `. ${lines.appUnseen()}`}`
+        : L("Chưa hẹn được, thử lại nhé.", "Couldn't set that, try again."),
+      error: !set,
+    });
+  };
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <label htmlFor={`${id}-app`}>{L("Mở ứng dụng nào thì bắt đầu?", "Start when I open which app?")}</label>
+      <input
+        id={`${id}-app`}
+        className="field"
+        data-autofocus
+        autoComplete="off"
+        maxLength={60}
+        aria-describedby={`${id}-hint ${id}-match`}
+        placeholder={L("Ví dụ: Figma", "e.g. Figma")}
+        value={app}
+        onChange={(e) => setApp(e.target.value)}
+      />
+      <p id={`${id}-hint`} className="hint">
+        {L(
+          `Ít nhất ${MIN_APP_NAME} chữ. Gõ đầu tên là đủ: “fig” là Figma, “chrome.exe” là Chrome.`,
+          `At least ${MIN_APP_NAME} letters. The start of the name is enough: “fig” finds Figma, “chrome.exe” finds Chrome.`,
+        )}
+      </p>
+      <p id={`${id}-match`} className={`hint app-match${match ? " seen" : ""}`} aria-live="polite">
+        {ok ? (match ? lines.appSeen(match.name) : lines.appUnseen()) : ""}
+      </p>
+      <div className="pop-actions">
+        <button type="button" className="btn small" onClick={() => onClose(true)}>
+          {L("Huỷ", "Cancel")}
+        </button>
+        <button type="submit" className="btn small primary" disabled={!ok}>
+          {L("Đặt", "Set")}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /** **📌 Pin my place** in the Today header: keeps what you're on (never saved to disk) with an optional next step. */
 function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; onNote: (n: Note) => void; compact: boolean }) {
   const [open, setOpen] = useState(false);
+  // The last note stays (in this window's memory) so pinning again starts from it; unpinning clears it.
   const [text, setText] = useState("");
   const ref = useRef<HTMLButtonElement>(null);
+  const describedBy = useId();
   const label = L("Ghim chỗ này", "Pin my place");
   const shown = s.pinned ? L("Đã ghim", "Pinned") : label;
   const explain = L(
@@ -837,8 +1194,7 @@ function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; 
   };
   const submit = () => {
     const ok = brain.pinPlace(text);
-    setOpen(false);
-    setText("");
+    close(true);
     onNote({ n: Date.now(), text: ok ? lines.pinned() : L("Chưa có gì để ghim, mở một ứng dụng hoặc ghi một dòng nhé.", "Nothing to pin yet: open an app, or write a line."), error: !ok });
   };
   return (
@@ -850,13 +1206,16 @@ function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; 
         data-pinned={s.pinned}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`${shown}. ${explain}`}
+        aria-describedby={describedBy}
         title={`${label}: ${explain}`}
         onClick={() => setOpen(!open)}
       >
         <Icon name="pin" size={14} />
         <span className={compact ? "sr-only" : undefined}>{shown}</span>
       </button>
+      <span id={describedBy} className="sr-only">
+        {explain}
+      </span>
       {open && (
         <Popover anchor={ref} role="dialog" label={label} className="confirm pin-form" onClose={close}>
           <form
@@ -886,6 +1245,7 @@ function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; 
                   className="btn small"
                   onClick={() => {
                     brain.unpinPlace();
+                    setText("");
                     close(true);
                   }}
                 >
@@ -904,92 +1264,6 @@ function PinPlace({ brain, s, onNote, compact }: { brain: Brain; s: BrainState; 
   );
 }
 
-const hh = (h: number) => `${String(h).padStart(2, "0")}:00`;
-
-/** "08:00", or "Mon 08:00" when that is not tomorrow. */
-function untilLabel(ms: number): string {
-  const d = new Date(ms);
-  const near = [dayKey(new Date()), addDays(dayKey(new Date()), 1)].includes(dayKey(d));
-  const weekday = near ? "" : `${d.toLocaleDateString(localeTag(getLang()), { weekday: "short" })} `;
-  return `${weekday}${timeString(d)}`;
-}
-
-/**
- * The work day at a glance (SPEC v0.4 §4): meetings and timed tasks on a strip with a marker for now, and what is
- * still ahead against the time left ("~6h / 7h left"), calm until the day runs an hour over. After 15:00 it also holds
- * the **Wrap up** button; once the day is done it says so, with a way back.
- */
-function DayStripCard({ brain, s, onWrapUp }: { brain: Brain; s: BrainState; onWrapUp: () => void }) {
-  // The marker and the time left move on their own.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 30_000);
-    return () => clearInterval(id);
-  }, []);
-  const strip = dayStrip(brain.dayInput());
-  const done = s.doneUntil !== null;
-  const wrapUpOpen = canWrapUp(Date.now());
-  if (!strip.hasContent && !wrapUpOpen && !done) return null;
-  const now = new Date(brain.loadClock());
-  const t0 = atHour(strip.startHour, 0, now).getTime();
-  const length = atHour(strip.endHour, 0, now).getTime() - t0;
-  const timeAt = (f: number) => timeString(new Date(t0 + f * length));
-  const meetings = strip.segments.filter((x) => x.kind === "meeting").length;
-  const timed = strip.segments.length - meetings;
-  const detail = lines.loadDetail(strip.load);
-  const summary = L(
-    `Ngày làm việc ${hh(strip.startHour)} đến ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. Bây giờ là ${timeString(now)}.`,
-    `Work day ${hh(strip.startHour)} to ${hh(strip.endHour)}: ${plural(meetings, "cuộc họp", "meeting", "meetings")}, ${plural(timed, "việc có giờ", "timed task", "timed tasks")}. It is ${timeString(now)} now.`,
-  );
-  return (
-    <section className={`daystrip level-${done ? "ok" : strip.level}${done ? " is-done" : ""}`} aria-label={L("Ngày làm việc hôm nay", "Today's work day")}>
-      <div className="ds-head">
-        <span className="ds-load" title={done ? undefined : detail}>
-          <Icon name={done ? "moon" : "hourglass"} size={14} />
-          <span className="ds-text">
-            {done ? L(`Xong hôm nay · yên tĩnh tới ${untilLabel(s.doneUntil!)}`, `Done for today · quiet until ${untilLabel(s.doneUntil!)}`) : lines.loadMeter(strip.load)}
-          </span>
-          {!done && <span className="sr-only">{detail}</span>}
-        </span>
-        {!done && strip.hasContent && strip.load.capacity > 0 && (
-          <span className="ds-meter" aria-hidden>
-            <i style={{ width: `${strip.ratio * 100}%` }} />
-          </span>
-        )}
-        <span className="spacer" />
-        {done ? (
-          <button type="button" className="btn small" onClick={() => brain.resumeDay()} title={L("Pet thức dậy và nhắc việc lại như thường", "Wake the pet and get the usual reminders back")}>
-            <Icon name="sun" size={14} />
-            {L("Làm tiếp", "Back to work")}
-          </button>
-        ) : (
-          wrapUpOpen && (
-            <button type="button" className="btn small wrap-btn" onClick={onWrapUp} title={L("Dọn nốt ngày: dời việc, chọn việc đầu tiên cho mai, ghi một dòng", "Close the day: move what's left, pick tomorrow's first task, leave a note")}>
-              <Icon name="moon" size={14} />
-              {L("Tổng kết ngày", "Wrap up")}
-            </button>
-          )
-        )}
-      </div>
-      <div className="ds-track" role="img" aria-label={summary}>
-        {strip.segments.map((seg) => (
-          <i
-            key={`${seg.kind}-${seg.id}`}
-            className={`ds-seg ${seg.kind === "meeting" ? "meeting" : "timed"}`}
-            style={{ left: `${seg.start * 100}%`, width: `${(seg.end - seg.start) * 100}%` }}
-            title={`${seg.kind === "meeting" ? "📅" : "⏰"} ${seg.title} · ${timeAt(seg.start)}–${timeAt(seg.end)}`}
-          />
-        ))}
-        <i className="ds-past" style={{ width: `${strip.now * 100}%` }} />
-        <b className="ds-now" style={{ left: `${strip.now * 100}%` }} title={L(`Bây giờ ${timeString(now)}`, `Now ${timeString(now)}`)} />
-      </div>
-      <div className="ds-axis" aria-hidden>
-        <span>{hh(strip.startHour)}</span>
-        <span>{hh(strip.endHour)}</span>
-      </div>
-    </section>
-  );
-}
 
 /** The note you left yourself last time you wrapped up, all day. */
 function PlanNote({ s }: { s: BrainState }) {
@@ -1006,161 +1280,6 @@ function PlanNote({ s }: { s: BrainState }) {
   );
 }
 
-/**
- * **Wrap up** (SPEC v0.4 §3): today's wins, each unfinished task (Tomorrow / No date / Keep), tomorrow's frog, one line
- * for tomorrow, and **Done for today**. The choices are made here and applied together when you press the button.
- */
-function WrapUpSheet({ brain, s, onBack, onDone }: { brain: Brain; s: BrainState; onBack: () => void; onDone: () => void }) {
-  const [draft, setDraft] = useState<WrapDraft>(() => brain.wrapDraft());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const tasks = s.day.today;
-  const wins = s.day.completed;
-  const { tomorrow, none } = wrapMoves(draft, tasks);
-  const choices: [WrapMove, string][] = [
-    ["tomorrow", L("Ngày mai", "Tomorrow")],
-    ["none", L("Không hạn", "No date")],
-    ["keep", L("Giữ", "Keep")],
-  ];
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    const result = await brain.wrapUp(draft);
-    setBusy(false);
-    if (result.ok) onDone();
-    else setError(result.error ?? L("Chưa dời được hết, thử lại nhé.", "Couldn't move everything, try again."));
-  };
-  const plan = [
-    tomorrow.length > 0 && L(`dời ${tomorrow.length} việc sang mai`, `move ${plural(tomorrow.length, "", "task", "tasks").trim()} to tomorrow`),
-    none.length > 0 && L(`bỏ ${none.length} việc khỏi kế hoạch`, `take ${plural(none.length, "", "task", "tasks").trim()} off the plan`),
-  ].filter(Boolean);
-  return (
-    <div className="sheet wrap">
-      <div>
-        <button className="btn ghost small" onClick={onBack}>
-          <Icon name="arrowLeft" size={14} /> {L("Quay lại", "Back")}
-        </button>
-      </div>
-      <h2>
-        <Icon name="moon" size={18} /> {L("Tổng kết ngày", "Wrap up the day")}
-      </h2>
-      <p className="muted wrap-intro">{L("Vài cú chạm là xong, không có đúng sai: chỉ là dọn bàn cho mai.", "A few taps, no right answers: just a tidy desk for tomorrow.")}</p>
-
-      <section aria-labelledby="wrap-wins">
-        <h3 id="wrap-wins">
-          {L("Hôm nay bạn đã làm", "Today's wins")} <span className="count good">{wins.length}</span>
-        </h3>
-        {wins.length === 0 ? (
-          <p className="wrap-empty">{L("Chưa tick việc nào, và vậy cũng không sao: bạn đã có mặt 🌱", "Nothing ticked off yet, and that's okay: you showed up 🌱")}</p>
-        ) : (
-          <ul className="wrap-wins">
-            {wins.slice(0, 4).map((t) => (
-              <li key={t.id} title={taskTitle(t)}>
-                <Icon name="check" size={13} />
-                <span>{taskTitle(t)}</span>
-              </li>
-            ))}
-            {wins.length > 4 && <li className="more">{L(`và ${wins.length - 4} việc nữa`, `and ${wins.length - 4} more`)}</li>}
-          </ul>
-        )}
-      </section>
-
-      <section aria-labelledby="wrap-open">
-        <div className="wrap-head">
-          <h3 id="wrap-open">
-            {L("Còn dang dở", "Still open")} <span className="count">{tasks.length}</span>
-          </h3>
-          <span className="spacer" />
-          {tasks.some(canMove) && (
-            <button type="button" className="btn small" onClick={() => setDraft((d) => moveAllToTomorrow(d, tasks))}>
-              {L("Tất cả sang mai", "All to tomorrow")}
-            </button>
-          )}
-        </div>
-        {tasks.length === 0 ? (
-          <p className="wrap-empty">{L("Không còn việc nào dang dở 🎉", "Nothing left open 🎉")}</p>
-        ) : (
-          <ul className="wrap-tasks">
-            {tasks.map((t) => {
-              const title = taskTitle(t);
-              const move = draft.moves[t.id] ?? "keep";
-              const movable = canMove(t);
-              return (
-                <li key={t.id} className={`wrap-row${move === "none" ? " off" : ""}`}>
-                  <div className="wrap-title" title={title}>
-                    {title}
-                  </div>
-                  <div className="wrap-ctl">
-                    <div className="seg" role="group" aria-label={L(`Làm gì với “${short(title, 40)}”`, `What to do with “${short(title, 40)}”`)}>
-                      {choices.map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          aria-pressed={move === value}
-                          disabled={value !== "keep" && !movable}
-                          onClick={() => setDraft((d) => chooseMove(d, tasks, t.id, value))}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    {!movable && (
-                      <span className="chip" title={L("Việc lặp lại giữ lịch riêng của nó", "A repeating task keeps its own schedule")}>
-                        🔁
-                      </span>
-                    )}
-                    <label className="frog-pick" title={L("Con ếch của ngày mai: việc làm đầu tiên", "Tomorrow's frog: the first thing to do")}>
-                      <input type="radio" name="wrap-frog" checked={draft.frogId === t.id} disabled={move === "none"} onChange={() => setDraft((d) => chooseFrog(d, tasks, t.id))} />
-                      <span>🐸 {L("Đầu tiên mai", "First tomorrow")}</span>
-                      <span className="sr-only">{`: ${title}`}</span>
-                    </label>
-                  </div>
-                </li>
-              );
-            })}
-            <li className="wrap-row nofrog">
-              <label className="frog-pick">
-                <input type="radio" name="wrap-frog" checked={draft.frogId === null} onChange={() => setDraft((d) => chooseFrog(d, tasks, null))} />
-                <span>{L("Mai mình chọn sau", "I'll decide tomorrow")}</span>
-              </label>
-            </li>
-          </ul>
-        )}
-      </section>
-
-      <div className="wrap-note">
-        <label htmlFor="wrap-note">{L("Mai mình bắt đầu từ đâu?", "Where do I start tomorrow?")}</label>
-        <input
-          id="wrap-note"
-          className="field"
-          autoComplete="off"
-          maxLength={MAX_NOTE_LENGTH}
-          placeholder={L("Một dòng cho chính mình…", "One line for future you…")}
-          value={draft.note}
-          onChange={(e) => setDraft((d) => setNote(d, e.target.value))}
-        />
-      </div>
-
-      <p className="muted wrap-summary" role="status">
-        {plan.length > 0 ? `${plan.join(L(" và ", " and ")).replace(/^./, (c) => c.toLocaleUpperCase())}. ` : ""}
-        {L(
-          `Pet sẽ ngủ và im lặng tới khi ngày làm việc tới bắt đầu (${hh(s.prefs.workStart)}). Cuộc họp và việc có giờ vẫn được nhắc.`,
-          `Your pet will sleep and stay quiet until the next workday starts (${hh(s.prefs.workStart)}). Meetings and timed tasks still get through.`,
-        )}
-      </p>
-      {error && <div className="error">{error}</div>}
-      <div className="wrap-actions">
-        <button className="btn primary" disabled={busy} onClick={() => void submit()}>
-          <Icon name="moon" size={15} />
-          {busy ? "…" : L("Xong hôm nay", "Done for today")}
-        </button>
-        <button className="btn" onClick={onBack} disabled={busy}>
-          {L("Chưa đâu", "Not yet")}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function addedNote(due: DueChoice, title: string): string {
   const q = `“${short(title, 32)}”`;
@@ -1208,13 +1327,14 @@ function AddTask({
   }, [focusAdd, seq]);
   useEffect(() => {
     if (prefill === null) return;
-    setText(prefill);
+    // Whatever you were typing stays: the prefill only fills an empty field.
+    setText((draft) => (draft.trim() ? draft : prefill));
     // After the value lands, with the cursor at its end so typing goes on from "Team sync: ".
     const id = requestAnimationFrame(() => {
       const el = input.current;
       if (!el) return;
       el.focus();
-      el.setSelectionRange(prefill.length, prefill.length);
+      el.setSelectionRange(el.value.length, el.value.length);
     });
     return () => cancelAnimationFrame(id);
   }, [prefill, seq]);
@@ -1317,7 +1437,7 @@ function FocusCard({ brain, s }: { brain: Brain; s: BrainState }) {
     return () => clearInterval(id);
   }, []);
   const f = s.focus!;
-  const left = Math.max(0, Math.round((f.end - Date.now()) / 1000));
+  const left = Math.max(0, Math.round((f.end - brain.clockNow()) / 1000));
   return (
     <div className="focus-card">
       <span className="clock">
@@ -1382,7 +1502,7 @@ function CalendarCard({ brain, backend, s }: { brain: Brain; backend: Backend; s
     if (open) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [open]);
   if (!s.prefs.useCalendar || s.events.length === 0) return null;
-  const now = new Date();
+  const now = new Date(brain.clockNow());
   const start = atHour(s.prefs.workStart, 0, now);
   const end = atHour(s.prefs.workEnd, 0, now);
   const free = freeMinutes(s.events, start, end);
@@ -1482,6 +1602,7 @@ function SplitSheet({ brain, s, task, onDone }: { brain: Brain; s: BrainState; t
     else setError(brain.getSnapshot().errorText ?? L("Không lưu được.", "Couldn't save."));
   };
   const days = s.stuck.find((x) => x.task.id === task.id)?.days;
+  const heading = useHeadingFocus();
   return (
     <div className="sheet">
       <div>
@@ -1489,7 +1610,7 @@ function SplitSheet({ brain, s, task, onDone }: { brain: Brain; s: BrainState; t
           <Icon name="arrowLeft" size={14} /> {L("Quay lại", "Back")}
         </button>
       </div>
-      <h2>
+      <h2 ref={heading} tabIndex={-1}>
         <Icon name="scissors" size={18} /> {L("Chia nhỏ việc", "Split the task")}
       </h2>
       <div className="muted sheet-sub" title={title}>
@@ -1547,10 +1668,11 @@ function SplitSheet({ brain, s, task, onDone }: { brain: Brain; s: BrainState; t
 }
 
 function Wardrobe({ brain, s, onBack, onHome }: { brain: Brain; s: BrainState; onBack: () => void; onHome: () => void }) {
-  const today = new Date();
+  const today = new Date(brain.clockNow());
   const days = Array.from({ length: 30 }, (_, i) => dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29 + i)));
   const perfect = new Set(s.life.perfectDays);
   const locked = SPECIES_IDS.map(speciesInfo).filter((x) => x.unlock);
+  const heading = useHeadingFocus();
   return (
     <div className="sheet">
       <div className="sheet-nav">
@@ -1561,7 +1683,7 @@ function Wardrobe({ brain, s, onBack, onHome }: { brain: Brain; s: BrainState; o
           <Icon name="home" size={14} /> {L("Góc nhà", "Home")}
         </button>
       </div>
-      <h2>
+      <h2 ref={heading} tabIndex={-1}>
         <Icon name="hanger" size={18} /> {L("Tủ đồ", "Wardrobe")}
       </h2>
       <ChestStrip s={s} />
@@ -1787,6 +1909,7 @@ function HomeSheet({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: 
   const shown = homeDecor(s.prefs.homeItems, owned);
   const [note, setNote] = useState<string | null>(null);
   const head = useId();
+  const heading = useHeadingFocus();
   const knit = Math.round(s.life.craft * 100);
   const pick = (d: DecorId) => {
     const next = toggleHomeItem(s.prefs.homeItems, owned, d);
@@ -1810,7 +1933,7 @@ function HomeSheet({ brain, s, onBack }: { brain: Brain; s: BrainState; onBack: 
           <Icon name="arrowLeft" size={14} /> {L("Tủ đồ", "Wardrobe")}
         </button>
       </div>
-      <h2>
+      <h2 ref={heading} tabIndex={-1}>
         <Icon name="home" size={18} /> {L("Góc nhà", "Home")}
       </h2>
       <p className="sheet-lead">

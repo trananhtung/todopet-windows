@@ -31,6 +31,8 @@ export interface PlacementInput {
   /** Things the board must not cover, such as the demo controls panel. */
   avoid?: Rect[];
   margin?: number;
+  /** Room kept above a board that is as tall as the screen allows (more than `margin`: it should not sit flush to the top). */
+  topMargin?: number;
   maxWidth?: number;
   minWidth?: number;
   maxHeight?: number;
@@ -66,6 +68,7 @@ function dodge(c: BoardPlacement, a: Rect, i: Required<Omit<PlacementInput, "avo
 export function placeBoard(input: PlacementInput): BoardPlacement {
   const i = {
     margin: 8,
+    topMargin: 16,
     maxWidth: 404,
     minWidth: 372,
     maxHeight: 660,
@@ -75,7 +78,7 @@ export function placeBoard(input: PlacementInput): BoardPlacement {
   const { stageWidth: W, stageHeight: H, petX, petSize, margin: m } = i;
   const ground = H - m;
   const half = petSize * 0.42;
-  const tall = Math.max(0, Math.min(i.maxHeight, H - 2 * m));
+  const tall = Math.max(0, Math.min(i.maxHeight, H - m - i.topMargin));
 
   const candidates: BoardPlacement[] = [];
   {
@@ -90,7 +93,8 @@ export function placeBoard(input: PlacementInput): BoardPlacement {
   }
   {
     const width = Math.min(i.maxWidth, W - 2 * m);
-    const height = Math.min(i.maxHeight, i.headTop - 2 * m);
+    // The same room above it as a side board has (`topMargin`), not flush to the top of the screen.
+    const height = Math.min(i.maxHeight, i.headTop - m - i.topMargin);
     const left = Math.min(Math.max(petX - width / 2, m), W - width - m);
     candidates.push({ side: "above", left, top: i.headTop - m - height, width, height, bottom: H - i.headTop + m });
   }
@@ -124,14 +128,26 @@ export function placeBoard(input: PlacementInput): BoardPlacement {
   return { ...best, left: Math.round(best.left), top, width: Math.round(best.width), height, bottom: H - (top + height) };
 }
 
-/** Where a popover goes next to `anchor`: below it, or above when there is more room there. */
-export function placePopover(anchor: Rect, size: { width: number; height: number }, viewport: { width: number; height: number }, gap = 4, margin = 8) {
+/**
+ * Where a popover goes next to `anchor`: below it, or above when there is more room there. `viewport.bounds` is the
+ * board it was opened from (its left edge and width): the popover stays inside it when it can.
+ */
+export function placePopover(
+  anchor: Rect,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number; bounds?: { left: number; width: number } },
+  gap = 4,
+  margin = 8,
+) {
   const below = viewport.height - (anchor.top + anchor.height) - gap - margin;
   const above = anchor.top - gap - margin;
   const up = size.height > below && above > below;
   let top = up ? anchor.top - gap - size.height : anchor.top + anchor.height + gap;
   top = Math.max(margin, Math.min(top, viewport.height - size.height - margin));
+  const lo = Math.max(margin, (viewport.bounds?.left ?? 0) + margin);
+  const hi = Math.min(viewport.width, viewport.bounds ? viewport.bounds.left + viewport.bounds.width : viewport.width) - size.width - margin;
   let left = anchor.left + anchor.width - size.width;
-  left = Math.max(margin, Math.min(left, viewport.width - size.width - margin));
+  // A board narrower than the popover can't hold it: keep it on screen at least.
+  left = hi < lo ? Math.max(margin, Math.min(left, viewport.width - size.width - margin, lo)) : Math.max(lo, Math.min(left, hi));
   return { left: Math.round(left), top: Math.round(top), up };
 }

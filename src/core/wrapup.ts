@@ -1,7 +1,7 @@
 // Shutdown ritual (SPEC v0.4 §3): what the Wrap up sheet decides, tomorrow's frog and note, and "done for today".
 // Pure: the brain keeps the state and the board draws the sheet.
 import { addDays, atHour, dayKey, isDayKey, parseDate } from "./dates";
-import { isRecurring, ranked, type TodoTask } from "./models";
+import { isRecurring, ranked, taskTitle, type TodoTask } from "./models";
 
 /** The Wrap up sheet is in the board menu from this hour on. */
 export const WRAP_UP_HOUR = 15;
@@ -15,7 +15,15 @@ const MAX_DONE_DAYS = 75;
 /** Looking for the next workday: a bit past the 60 rest days there can be in a row. */
 const LOOKAHEAD_DAYS = 70;
 
-export const canWrapUp = (now: Date | number): boolean => new Date(now).getHours() >= WRAP_UP_HOUR;
+/**
+ * The sheet opens from 15:00, or from the end-of-day review's time (half an hour before the work day ends) when that is
+ * earlier.
+ */
+export function canWrapUp(now: Date | number, workEnd = 18): boolean {
+  const d = new Date(now);
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  return minutes >= Math.min(WRAP_UP_HOUR * 60, workEnd * 60 - 30);
+}
 
 const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
 function clip(text: string, max: number): string {
@@ -130,6 +138,10 @@ export interface WrapDraft {
   frogId: string | null;
   /** The note as typed (tidied when saved). */
   note: string;
+  /** You chose the frog yourself (or it comes from a plan you saved): syncs don't change it. */
+  picked?: boolean;
+  /** The title of a frog that was finished while the sheet was open (shown in one small line), else null. */
+  frogDone?: string | null;
 }
 
 /** A repeating task keeps its own schedule: moving it would break the repeat, so it can only stay. */
@@ -137,12 +149,31 @@ export const canMove = (t: TodoTask): boolean => !isRecurring(t);
 
 const noMove = (draft: WrapDraft, id: string): boolean => (draft.moves[id] ?? "keep") === "none";
 
-/** The sheet's starting point: nothing moves; the frog and note you already chose for tomorrow, else the top task and no note. */
-export function newDraft(tasks: TodoTask[], previous: DayPlan | null = null): WrapDraft {
-  const kept = previous?.frogId && tasks.some((t) => t.id === previous.frogId) ? previous.frogId : null;
+/**
+ * The sheet's starting point: nothing moves; the frog and note you already chose for tomorrow (the frog is kept even
+ * when it isn't on today's list any more, because moving it to tomorrow takes it off, unless it is `completed`), else
+ * the top task and no note.
+ */
+export function newDraft(tasks: TodoTask[], previous: DayPlan | null = null, completed: TodoTask[] = []): WrapDraft {
+  const done = previous?.frogId ? completed.find((t) => t.id === previous.frogId) : undefined;
+  if (done) return { moves: {}, frogId: null, note: previous?.note ?? "", picked: true, frogDone: taskTitle(done) };
+  if (previous?.frogId) return { moves: {}, frogId: previous.frogId, note: previous.note ?? "", picked: true, frogDone: null };
   // A plan that already chose "no frog" (only a note) stays that way.
-  const frogId = kept ?? (previous && previous.frogId === null ? null : (ranked(tasks)[0]?.id ?? null));
-  return { moves: {}, frogId, note: previous?.note ?? "" };
+  if (previous) return { moves: {}, frogId: null, note: previous.note ?? "", picked: true, frogDone: null };
+  return { moves: {}, frogId: ranked(tasks)[0]?.id ?? null, note: "", picked: false, frogDone: null };
+}
+
+/**
+ * The draft after a sync: a frog finished elsewhere becomes "decide tomorrow" with its title in `frogDone`, and a
+ * default frog you haven't touched follows the list. The same object when nothing changed.
+ */
+export function reconcileDraft(draft: WrapDraft, open: TodoTask[], completed: TodoTask[]): WrapDraft {
+  if (!draft.picked) {
+    const top = ranked(open)[0]?.id ?? null;
+    return top === draft.frogId ? draft : { ...draft, frogId: top };
+  }
+  const done = draft.frogId === null ? undefined : completed.find((t) => t.id === draft.frogId);
+  return done ? { ...draft, frogId: null, frogDone: taskTitle(done) } : draft;
 }
 
 export function chooseMove(draft: WrapDraft, tasks: TodoTask[], id: string, move: WrapMove): WrapDraft {
@@ -157,15 +188,15 @@ export function chooseMove(draft: WrapDraft, tasks: TodoTask[], id: string, move
 
 /** `null` means "decide tomorrow". */
 export function chooseFrog(draft: WrapDraft, tasks: TodoTask[], id: string | null): WrapDraft {
-  if (id === null) return { ...draft, frogId: null };
+  if (id === null) return { ...draft, frogId: null, picked: true, frogDone: null };
   if (!tasks.some((t) => t.id === id) || noMove(draft, id)) return draft;
-  return { ...draft, frogId: id };
+  return { ...draft, frogId: id, picked: true, frogDone: null };
 }
 
-/** Every task that can move goes to tomorrow; repeating ones stay. */
+/** Every task that can move goes to tomorrow, except those you took off the plan; repeating ones stay. */
 export function moveAllToTomorrow(draft: WrapDraft, tasks: TodoTask[]): WrapDraft {
   const moves = { ...draft.moves };
-  for (const t of tasks) if (canMove(t)) moves[t.id] = "tomorrow";
+  for (const t of tasks) if (canMove(t) && !noMove(draft, t.id)) moves[t.id] = "tomorrow";
   return { ...draft, moves };
 }
 
@@ -180,13 +211,13 @@ export function wrapMoves(draft: WrapDraft, tasks: TodoTask[]): { tomorrow: Todo
   return { tomorrow: pick("tomorrow"), none: pick("none") };
 }
 
-/** The frog if it is still on the list and not going off the plan. */
-export function draftFrog(draft: WrapDraft, tasks: TodoTask[]): TodoTask | null {
-  if (draft.frogId === null || noMove(draft, draft.frogId)) return null;
-  return tasks.find((t) => t.id === draft.frogId) ?? null;
-}
-
-/** What to remember for `day`: the frog and the tidy note (both null when there is nothing to remember). */
-export function planFromDraft(draft: WrapDraft, tasks: TodoTask[], day: string): DayPlan {
-  return { day, frogId: draftFrog(draft, tasks)?.id ?? null, note: tidyNote(draft.note) };
+/**
+ * What to remember for `day`: the frog and the tidy note (both null when there is nothing to remember). The frog is kept
+ * when it is one of the `known` tasks (on today's list, or already chosen for that day), unless it is going off the plan
+ * or has been finished (`completed`): a frog that moved to tomorrow has left today's list but is still the frog.
+ */
+export function planFromDraft(draft: WrapDraft, known: ReadonlySet<string>, completed: ReadonlySet<string>, day: string): DayPlan {
+  const id = draft.frogId;
+  const frogId = id !== null && known.has(id) && !completed.has(id) && !noMove(draft, id) ? id : null;
+  return { day, frogId, note: tidyNote(draft.note) };
 }

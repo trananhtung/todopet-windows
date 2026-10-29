@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as calm from "./calm";
 import { adaptiveTarget, busy, eventsOnDay, freeMinutes, freeSlots, joinUrl, suggestSlots, type CalEvent } from "./calendar";
 import { daysBetween, dayKey, hoursText, nextDayKey, parseDate, plainText, shortText, utcString } from "./dates";
@@ -228,7 +228,7 @@ describe("kind lines", () => {
     distraction: moods.flatMap((m) => [[m, "youtube.com", 2, t], [m, "Discord", 1, null]]),
     done: [[t, 1, 3, "meow"], [t, 3, 3, "meow"]],
     allDone: [[]],
-    review: [[1, 3, 2]],
+    review: [[1, 3, 2], [1, 3, 2, "Monday"], [1, 3, 2, "Thứ Hai"], [3, 3, 0], [0, 0, 0]],
     overbooked: [
       [{ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 }],
       [{ taskMinutes: 200, meetingMinutes: 0, capacity: 90, overBy: 110 }],
@@ -245,7 +245,7 @@ describe("kind lines", () => {
       [{ taskMinutes: 360, meetingMinutes: 180, capacity: 420, overBy: 120 }],
       [{ taskMinutes: 90, meetingMinutes: 0, capacity: 0, overBy: 90 }],
     ],
-    wrappedUp: [[t], [null]],
+    wrappedUp: [[t], [null], [t, "Monday"], [t, "Thứ Hai"]],
     backToWork: [[]],
     welcomeBack: [[t]],
     soon: [[t, 5]],
@@ -260,15 +260,33 @@ describe("kind lines", () => {
     error: [["offline"]],
     connected: [[]],
     demoHello: [[]],
-    movedToTomorrow: [[2]],
+    movedToTomorrow: [[2], [2, "Monday"], [2, "Thứ Hai"]],
+    wrapIntro: [[null], ["Monday"], ["Thứ Hai"]],
+    wrapNoWins: [[null], ["Monday"], ["Thứ Hai"]],
+    wrapForLabel: [[null], ["Monday"], ["Thứ Hai"]],
+    wrapFrogLabel: [[null], ["Monday"], ["Thứ Hai"]],
+    wrapDecideLater: [[null], ["Monday"], ["Thứ Hai"]],
+    wrapFrogDone: [["Write the report", null], ["Write the report", "Monday"], ["Write the report", "Thứ Hai"]],
+    wrapNoteLabel: [[null], ["Monday"], ["Thứ Hai"]],
     meetingSoon: [[ev, 5], [ev, 5, [t, t]]],
-    meetingOver: [[ev, null], [ev, { ...ev, title: "Design review", start: new Date(2026, 9, 28, 11, 10) }]],
+    meetingOver: [[ev, null], [ev, { ...ev, title: "Design review", start: new Date(2026, 9, 28, 11, 10) }], [ev, { ...ev, title: "Design review", start: new Date(2026, 9, 28, 11, 10) }, 4]],
     resumeCard: [
-      [{ task: "Write the weekly report", where: "Visual Studio Code — brain.ts", note: "Fix the retry loop", canReopen: true }, "away"],
-      [{ task: null, where: "Notepad", note: null, canReopen: false }, "meeting"],
-      [{ task: "Reply to the boss", where: null, note: null, canReopen: false }, "distraction"],
-      [{ task: null, where: null, note: "Call mum", canReopen: false }, "away"],
+      [{ task: "Write the weekly report", where: "Visual Studio Code — brain.ts", note: "Fix the retry loop", canReopen: true, host: null, taskIsNext: false }, "away"],
+      [{ task: "Write the weekly report", where: "Visual Studio Code — brain.ts", note: null, canReopen: false, host: null, taskIsNext: true }, "away"],
+      [{ task: "Write the weekly report", where: null, note: null, canReopen: false, host: null, taskIsNext: true }, "meeting"],
+      [{ task: null, where: "Notepad", note: null, canReopen: false, host: null, taskIsNext: false }, "meeting"],
+      [{ task: "Reply to the boss", where: null, note: null, canReopen: false, host: null, taskIsNext: false }, "distraction"],
+      [{ task: null, where: null, note: "Call mum", canReopen: false, host: null, taskIsNext: false }, "away"],
     ],
+    resumePlace: [
+      [{ task: "Write the weekly report", where: "Google Chrome — Q4 plan - Google Docs", note: null, canReopen: true, host: "docs.google.com", taskIsNext: true }],
+      [{ task: "Write the weekly report", where: "Visual Studio Code — brain.ts", note: null, canReopen: false, host: null, taskIsNext: false }],
+      [{ task: null, where: "Notepad", note: null, canReopen: false, host: null, taskIsNext: false }],
+    ],
+    reopenTitle: [["docs.google.com"], [null]],
+    reopenFailed: [[]],
+    triggerKindText: [[{ kind: "afterMeeting", eventId: "e", title: "Sync" }], [{ kind: "appOpen", app: "Figma" }], [{ kind: "afterLunch" }]],
+    starterGone: [[t], [null]],
     resumeDiary: [["Write the weekly report", true], [null, false]],
     pinned: [[]],
     asPlanned: [[t]],
@@ -283,6 +301,17 @@ describe("kind lines", () => {
       [{ kind: "appOpen", app: "Figma" }, []],
       [{ kind: "afterLunch" }, []],
     ],
+    appSeen: [["Figma"], ["Visual Studio Code"]],
+    appUnseen: [[]],
+    switchToStarter: [[0], [1], [12]],
+    loadOver: [
+      [{ taskMinutes: 600, meetingMinutes: 105, capacity: 480, overBy: 225 }],
+      [{ taskMinutes: 90, meetingMinutes: 0, capacity: 0, overBy: 90 }],
+    ],
+    lightenHint: [["tomorrow"], ["Monday"]],
+    dayFits: [[]],
+    freesTime: [[20], [120]],
+    estimateLabel: [[15], [30], [90], [240]],
     starterStart: [[t], [null]],
     starterEnd: [[t], [null]],
     starterEnough: [[]],
@@ -1072,5 +1101,37 @@ describe("diary", () => {
       expect(e.count).toBeUndefined();
       expect(e.day).toBeUndefined();
     }
+  });
+});
+
+describe("lines that name the next workday (v0.4 evaluation round 2, issue 3)", () => {
+  afterEach(() => setLang("en"));
+
+  it("keeps 'tomorrow' for a weekday, and says the day's name when it isn't tomorrow, in both languages", () => {
+    setLang("en");
+    expect(lines.wrapNoteLabel()).toBe("Where do I start tomorrow?");
+    expect(lines.wrapNoteLabel("Monday")).toBe("Where do I start on Monday?");
+    expect(lines.wrapDecideLater("Monday")).toBe("I'll decide on Monday");
+    expect(lines.wrapForLabel("Monday")).toBe("For Monday");
+    expect(lines.wrapIntro("Monday")).toContain("a tidy desk for Monday");
+    expect(lines.wrapNoWins("Monday")).toContain("Monday is a fresh page");
+    expect(lines.wrapFrogDone("Report", "Monday")).toContain("or decide on Monday");
+    expect(lines.review(1, 3, 2, "Monday")).toContain("move the remaining 2 to Monday?");
+    expect(lines.wrappedUp("Report", "Monday")).toBe("All wrapped up 🌙 Rest well. Monday starts with “Report” 🐸");
+    expect(lines.movedToTomorrow(2, "Monday")).toBe("Moved 2 tasks to Monday. Rest well 🌙");
+    setLang("vi");
+    expect(lines.wrapNoteLabel()).toBe("Mai mình bắt đầu từ đâu?");
+    expect(lines.wrapNoteLabel("Thứ Hai")).toBe("Thứ Hai mình bắt đầu từ đâu?");
+    expect(lines.wrapDecideLater("Thứ Hai")).toBe("Thứ Hai mình chọn sau");
+    expect(lines.wrapForLabel("Thứ Hai")).toBe("Cho Thứ Hai");
+    expect(lines.wrapIntro("Thứ Hai")).toContain("dọn bàn cho Thứ Hai");
+    expect(lines.wrapNoWins("Thứ Hai")).toContain("Thứ Hai là một trang mới");
+    expect(lines.review(1, 3, 2, "Thứ Hai")).toContain("dời hết sang Thứ Hai?");
+    expect(lines.wrappedUp("Report", "Thứ Hai")).toContain("Thứ Hai mình bắt đầu với “Report” 🐸");
+    expect(lines.movedToTomorrow(2, "Thứ Hai")).toContain("sang Thứ Hai");
+    // On a weekday nothing changes.
+    expect(lines.review(1, 3, 2)).toContain("dời hết sang mai?");
+    setLang("en");
+    expect(lines.review(1, 3, 2)).toContain("move the remaining 2 to tomorrow?");
   });
 });

@@ -38,7 +38,15 @@ export function Popover({
       // Stay inside the overlay's stage (above the taskbar; the demo draws a fake one at the bottom).
       const stage = document.querySelector(".stage")?.getBoundingClientRect();
       const bounds = { width: stage?.right ?? window.innerWidth, height: stage?.bottom ?? window.innerHeight };
-      setPos(placePopover({ left: r.left, top: r.top, width: r.width, height: r.height }, { width: el.offsetWidth, height: el.offsetHeight }, bounds));
+      // Opened from the board: stay inside it (a wide dialog under a button near its edge would hang out over the pet).
+      const board = a.closest(".board")?.getBoundingClientRect();
+      setPos(
+        placePopover(
+          { left: r.left, top: r.top, width: r.width, height: r.height },
+          { width: el.offsetWidth, height: el.offsetHeight },
+          board && board.width > 0 ? { ...bounds, bounds: { left: board.left, width: board.width } } : bounds,
+        ),
+      );
     };
     place();
   }, [anchor]);
@@ -70,8 +78,8 @@ export function Popover({
           close.current(true);
           return;
         }
-        // A confirmation keeps focus inside until it is answered.
-        const items = [...ref.current.querySelectorAll<HTMLElement>("button")];
+        // A dialog keeps focus inside until it is answered: its fields and buttons, not the disabled ones.
+        const items = [...ref.current.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])")];
         const i = items.indexOf(document.activeElement as HTMLElement);
         items[(i + (e.shiftKey ? -1 : 1) + items.length) % items.length]?.focus();
       }

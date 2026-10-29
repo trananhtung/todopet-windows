@@ -9,12 +9,15 @@ import { SPECIES_IDS, type SpeciesId } from "../core/types";
 import { speciesInfo } from "../pets";
 
 /** A fake Windows desktop and taskbar, so the overlay can be tried in a plain browser. */
-export function DemoDesktop() {
-  const [now, setNow] = useState(new Date());
+export function DemoDesktop({ brain }: { brain: Brain }) {
+  // The taskbar's clock is the demo's (it moves with "Next morning" and "Friday"), and follows every beat of the pet.
+  useSyncExternalStore(brain.subscribe, brain.getSnapshot);
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 15_000);
+    const id = setInterval(() => setTick((n) => n + 1), 15_000);
     return () => clearInterval(id);
   }, []);
+  const now = new Date(brain.clockNow());
   return (
     <div className="demo-desktop" aria-hidden>
       <div className="demo-window">
@@ -49,13 +52,35 @@ const FIGMA = { name: "Figma", exe: "figma.exe", title: "Landing page - Figma" }
 const DOCS = { name: "Google Chrome", exe: "chrome.exe", title: "Q4 plan - Google Docs - Google Chrome" };
 const DOCS_URL = "https://docs.google.com/document/d/q4-plan/edit#heading=h.1";
 
+/** The coming Friday at 16:30 (today, when today is Friday): a good moment to wrap up the week. */
+function friday(now: number): number {
+  const d = new Date(now);
+  d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7));
+  d.setHours(16, 30, 0, 0);
+  return d.getTime();
+}
+
 export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }) {
   const s = useSyncExternalStore(brain.subscribe, brain.getSnapshot);
   const [open, setOpen] = useState(true);
   const [heavy, setHeavy] = useState(false);
+  // The demo's clock can be moved (the next morning, a Friday); `friday` is whether it is on the Friday that shows "Monday".
+  const [, setMoved] = useState(0);
+  const [onFriday, setOnFriday] = useState(false);
   const fake = isDemoBackend(backend) ? backend.demo : null;
   // One trip a day: once today's is over the button says so (an early call-back frees the day again).
-  const tripDone = !s.trip && s.life.tripDay === dayKey(new Date());
+  const tripDone = !s.trip && s.life.tripDay === dayKey(new Date(brain.clockNow()));
+  /** Moves the clock and lets the pet notice: the day changes, the tasks you moved come back, the morning greeting. */
+  const jumpTo = (ms: number | null, weekends: boolean) => {
+    if (!fake) return;
+    brain.setDemoWeekends(weekends);
+    fake.setClock(ms);
+    setMoved((n) => n + 1);
+    brain.tick();
+    // The day settles and the tasks sync first; the greeting comes with the next beat.
+    setTimeout(() => brain.tick(), 1500);
+    setTimeout(() => brain.tick(), 4000);
+  };
   // Pretend you've been on YouTube for 3 minutes, so the mood drop and the reminder show at once.
   const watchYouTube = () => {
     fake?.setForeground(YOUTUBE, YOUTUBE_URL);
@@ -111,6 +136,47 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             <button className="btn" title={L("Mở bảng “Tổng kết ngày” (cuối ngày) ở bất kỳ giờ nào", "Open the end-of-day “Wrap up” sheet, at any hour")} onClick={() => brain.demoWrapUp()}>
               🌙 {L("Tổng kết", "Wrap up")}
             </button>
+            <button className="btn" title={L("Lời nhắc cuối ngày (mở bảng Tổng kết), bỏ qua khoảng cách giữa các bong bóng", "The end-of-day review bubble (it opens Wrap up), past the gap between bubbles")} onClick={() => brain.demoReview()}>
+              🔔 {L("Cuối ngày", "Day's end")}
+            </button>
+            {fake && (
+              <button
+                className="btn"
+                title={L("Sang sáng hôm sau: việc đã dời sang mai thành việc hôm nay, kèm lời chào, con ếch và ghi chú", "Wake up the next morning: what you moved to tomorrow is today's task, with the greeting, the frog and the note")}
+                onClick={() => jumpTo(brain.nextMorning(), onFriday)}
+              >
+                ☀️ {L("Sáng mai", "Next morning")}
+              </button>
+            )}
+            {fake && (
+              <button
+                className="btn"
+                aria-pressed={onFriday}
+                title={
+                  onFriday
+                    ? L("Về lại hôm nay (cuối tuần lại là ngày làm việc)", "Back to today (weekends are workdays again)")
+                    : L("Thứ Sáu 16:30, cuối tuần là ngày nghỉ: “Mai” thành “Thứ Hai”", "Friday 16:30, with weekends off: “tomorrow” becomes “Monday”")
+                }
+                onClick={() => {
+                  setOnFriday(!onFriday);
+                  jumpTo(onFriday ? null : friday(fake.now()), !onFriday);
+                }}
+              >
+                📆 {onFriday ? L("Hôm nay", "Back to today") : L("Thứ Sáu", "Friday")}
+              </button>
+            )}
+            {fake?.clockMoved() && !onFriday && (
+              <button
+                className="btn"
+                title={L("Trả đồng hồ demo về giờ thật", "Put the demo's clock back to the real time")}
+                onClick={() => {
+                  jumpTo(null, false);
+                  setOnFriday(false);
+                }}
+              >
+                ↺ {L("Giờ thật", "Real time")}
+              </button>
+            )}
             {fake && (
               <button
                 className="btn"

@@ -1,12 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ForegroundApp, SystemSample } from "../backend/types";
 import type { CalEvent } from "./calendar";
-import { dayLoad, DEFAULT_ESTIMATE, isOverbooked, taskEstimate, timeline, type DayLoadInput } from "./load";
+import { dayLoad, dayStrip, DEFAULT_ESTIMATE, isOverbooked, taskEstimate, timeline, type DayLoadInput } from "./load";
+import { nextWorkday, nextWorkdayStart } from "./wrapup";
 import { taskFromRaw, type TodoTask } from "./models";
 import { normalizeWords, relatedTasks, significantWords } from "./related";
 import { isConferencing, isNotWorkApp, resumeSummary, shouldOfferResume, snapshot, withNote, workUrl, type WorkContext } from "./resume";
 import {
   appMatches,
+  normalizeAppName,
   clearTrigger,
   dueTriggers,
   markFired,
@@ -179,12 +181,106 @@ describe("day load", () => {
   });
 });
 
+// The project has no Node typings; the time zone is switched through the environment.
+const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
+
+describe("day load and timeline, after review", () => {
+  const input = (patch: Partial<DayLoadInput> = {}): DayLoadInput => ({ tasks: [], events: [], now: at(10), workStart: 8, workEnd: 18, defaultEstimate: 30, ...patch });
+  const timedAt = (local: string) => ({ date: local, string: null, isRecurring: false, datetime: local });
+
+  it("doesn't count a timed task twice when it falls inside a meeting", () => {
+    const meeting = ev("m", "Review", at(11), at(12));
+    const inside = task("t", "Demo", { due: timedAt("2026-10-28T11:00:00"), durationMinutes: 30 });
+    const load = dayLoad(input({ events: [meeting], tasks: [inside] }));
+    expect(load.meetingMinutes).toBe(60);
+    expect(load.taskMinutes).toBe(0);
+    // Half in, half out: only the part outside the meeting is extra work.
+    const edge = task("e", "Edge", { due: timedAt("2026-10-28T11:45:00"), durationMinutes: 30 });
+    expect(dayLoad(input({ events: [meeting], tasks: [edge] })).taskMinutes).toBe(15);
+    // A meeting that is over has no minutes left to count, so it doesn't swallow the task.
+    expect(dayLoad(input({ events: [meeting], tasks: [inside], now: at(13) })).taskMinutes).toBe(30);
+    // Outside, or without a time: counted in full.
+    const outside = task("o", "After", { due: timedAt("2026-10-28T14:00:00"), durationMinutes: 30 });
+    expect(dayLoad(input({ events: [meeting], tasks: [outside, task("u")] })).taskMinutes).toBe(60);
+  });
+
+  it("copes with a work day that ends at 24", () => {
+    const load = dayLoad(input({ workEnd: 24, now: at(10) }));
+    expect(load.capacity).toBe(14 * 60);
+    const t = timeline(input({ workEnd: 24, now: at(12), events: [ev("late", "Late", at(22), at(23))] }));
+    expect(t.now).toBeCloseTo(4 / 16);
+    expect(t.segments[0].start).toBeCloseTo(14 / 16);
+    expect(t.segments[0].end).toBeCloseTo(15 / 16);
+    expect(dayStrip(input({ workEnd: 24 })).endHour).toBe(24);
+  });
+
+  it("puts blocks that overlap in a second lane", () => {
+    const events = [ev("a", "A", at(10), at(11)), ev("b", "B", at(10, 30), at(11, 30)), ev("c", "C", at(11), at(12)), ev("d", "D", at(14), at(15))];
+    const tasks = [task("t", "Timed", { due: timedAt("2026-10-28T10:45:00"), durationMinutes: 30 })];
+    const strip = dayStrip(input({ events, tasks }));
+    const lane = (id: string) => strip.segments.find((x) => x.id === id)?.lane;
+    expect(lane("a")).toBe(0);
+    expect(lane("b")).toBe(1);
+    expect(lane("t")).toBe(2);
+    // C starts when A ends: it takes the first lane that is free.
+    expect(lane("c")).toBe(0);
+    expect(lane("d")).toBe(0);
+    expect(strip.lanes).toBe(3);
+    expect(dayStrip(input({ events: [events[0], events[3]] })).lanes).toBe(1);
+    expect(dayStrip(input()).lanes).toBe(1);
+  });
+
+  describe("on the day the clocks change", () => {
+    const zone = env.TZ;
+    afterEach(() => {
+      if (zone === undefined) delete env.TZ;
+      else env.TZ = zone;
+    });
+
+    it("keeps the work day, its capacity and the strip sane when it is 25 hours long", () => {
+      env.TZ = "America/New_York";
+      // Sunday 1 November 2026: 02:00 happens twice.
+      const day = (h: number, m = 0) => new Date(2026, 10, 1, h, m);
+      expect(day(0).getTimezoneOffset()).not.toBe(day(12).getTimezoneOffset());
+      const events = [ev("m", "Sync", day(9), day(10))];
+      const strip = dayStrip(input({ now: day(8), events, workStart: 8, workEnd: 18 }));
+      // 08:00 to 18:00 on the wall is 10 real hours: the repeated hour comes before 08:00.
+      expect(strip.load.capacity).toBe(10 * 60);
+      expect(strip.load.meetingMinutes).toBe(60);
+      expect(strip.segments[0].start).toBeCloseTo(0.1);
+      expect(strip.now).toBe(0);
+      const night = dayStrip(input({ now: day(1), events: [], workStart: 0, workEnd: 24 }));
+      // From the first 01:00 to midnight: 24 real hours.
+      expect(night.load.capacity).toBe(24 * 60);
+      expect(night.now).toBeGreaterThanOrEqual(0);
+      expect(night.now).toBeLessThanOrEqual(1);
+    });
+
+    it("finds the next workday and its start across a spring-forward weekend", () => {
+      env.TZ = "America/New_York";
+      // Friday 6 March 2026, wrapped up at 16:00; the clocks go forward on Sunday the 8th.
+      const friday = new Date(2026, 2, 6, 16);
+      const isWork = (d: Date) => d.getDay() !== 0 && d.getDay() !== 6;
+      expect(nextWorkday(friday, isWork)).toBe("2026-03-09");
+      expect(nextWorkdayStart(friday, 8, isWork)).toBe(new Date(2026, 2, 9, 8).getTime());
+      // Wrapped up on Saturday night, the PC left on: still Monday.
+      expect(nextWorkday(new Date(2026, 2, 7, 23, 30), isWork)).toBe("2026-03-09");
+      // And the fall-back weekend.
+      const fri = new Date(2026, 9, 30, 16);
+      expect(nextWorkday(fri, isWork)).toBe("2026-11-02");
+      expect(nextWorkdayStart(fri, 8, isWork)).toBe(new Date(2026, 10, 2, 8).getTime());
+    });
+  });
+});
+
 describe("if-then triggers", () => {
   const trig = (taskId: string, trigger: TaskTrigger["trigger"], patch: Partial<TaskTrigger> = {}): TaskTrigger => ({
     taskId,
     day: DAY,
     trigger,
     fired: false,
+    setAt: 0,
+    notBefore: null,
     ...patch,
   });
   const ctx = (patch: Partial<TriggerContext> = {}): TriggerContext => ({
@@ -192,6 +288,7 @@ describe("if-then triggers", () => {
     now: at(11),
     events: [ev("e1", "Standup", at(9), at(10)), ev("e2", "Design", at(10, 30), at(11, 30)), ev("e5", "Exact", at(10), at(11))],
     app: null,
+    appSwitchedAt: at(10).getTime(),
     endedEventIds: [],
     ...patch,
   });
@@ -213,14 +310,86 @@ describe("if-then triggers", () => {
     const figma = app("Figma", "Figma.exe", "Homepage");
     const list = [
       trig("1", { kind: "appOpen", app: "figma" }),
-      trig("2", { kind: "appOpen", app: "FIG" }),
+      trig("2", { kind: "appOpen", app: "FIGMA" }),
+      trig("5", { kind: "appOpen", app: "fig" }),
       trig("3", { kind: "appOpen", app: "photoshop" }),
       trig("4", { kind: "appOpen", app: "   " }),
     ];
-    expect(ids(dueTriggers(list, ctx({ app: figma })))).toEqual(["1", "2"]);
+    expect(ids(dueTriggers(list, ctx({ app: figma })))).toEqual(["1", "2", "5"]);
     expect(dueTriggers(list, ctx({ app: null }))).toEqual([]);
     expect(appMatches(app("Visual Studio Code", "code.exe"), "code")).toBe(true);
     expect(appMatches(app("Excel", "excel.exe"), "")).toBe(false);
+    // The start of a word counts too, from 3 letters: "fig" is Figma (the v0.4 evaluation).
+    expect(appMatches(figma, "fig")).toBe(true);
+  });
+
+  describe("typed app names (v0.4 evaluation, issue 2)", () => {
+    const figma = app("Figma", "Figma.exe", "Homepage");
+    const code = app("Visual Studio Code", "code.exe", "brain.ts");
+    const chrome = app("Google Chrome", "chrome.exe", "Docs");
+    const password = app("Password Manager", "pwmanager.exe");
+
+    it("strips a trailing .exe and the spaces around the name", () => {
+      expect(normalizeAppName("Figma.exe")).toBe("Figma");
+      expect(normalizeAppName("  figma.EXE ")).toBe("figma");
+      expect(normalizeAppName("Figma .exe")).toBe("Figma");
+      expect(normalizeAppName("  Visual   Studio  ")).toBe("Visual Studio");
+      expect(normalizeAppName(".exe")).toBe("");
+      expect(normalizeAppName("exe")).toBe("exe");
+    });
+
+    it("matches the program's name as Task Manager shows it", () => {
+      expect(appMatches(figma, "Figma.exe")).toBe(true);
+      expect(appMatches(figma, "figma.exe ")).toBe(true);
+      expect(appMatches(figma, "FIGMA")).toBe(true);
+      expect(appMatches(code, "code.exe")).toBe(true);
+      expect(appMatches(figma, "Photoshop.exe")).toBe(false);
+    });
+
+    it("matches word prefixes of 3+ letters, ignoring case", () => {
+      expect(appMatches(figma, "fig")).toBe(true);
+      expect(appMatches(figma, "FIGM")).toBe(true);
+      expect(appMatches(code, "stud")).toBe(true);
+      expect(appMatches(code, "visual stu")).toBe(true);
+      expect(appMatches(code, "vis")).toBe(true);
+      expect(appMatches(chrome, "chr")).toBe(true);
+      expect(appMatches(chrome, "goo chr")).toBe(true);
+    });
+
+    it("needs the words in order, and never matches the middle of a word", () => {
+      expect(appMatches(code, "studio visual")).toBe(false);
+      expect(appMatches(code, "udio")).toBe(false);
+      expect(appMatches(password, "word")).toBe(false);
+      expect(appMatches(figma, "gma")).toBe(false);
+    });
+
+    it("needs 3 characters, and a prefix of 3+ letters for a word that isn't whole", () => {
+      expect(appMatches(figma, "fi")).toBe(false);
+      expect(appMatches(figma, "f")).toBe(false);
+      expect(appMatches(figma, "")).toBe(false);
+      expect(appMatches(figma, ".exe")).toBe(false);
+      expect(appMatches(figma, "exe")).toBe(false);
+      // A whole short word of the name is fine ("Adobe XD"), as before.
+      expect(appMatches(app("Adobe XD", "xd.exe"), "adobe xd")).toBe(true);
+      expect(appMatches(app("Adobe XD", "xd.exe"), "xd")).toBe(false);
+    });
+
+    it("keeps a program picked from the recent apps exact", () => {
+      expect(appMatches(figma, "Figma", "figma.exe")).toBe(true);
+      expect(appMatches(figma, "Figma", "other.exe")).toBe(false);
+    });
+
+    it("stores a typed name without .exe, so the chip and the plan agree", () => {
+      const [t] = triggersFromJson([{ taskId: "1", day: DAY, trigger: { kind: "appOpen", app: "  Figma.exe " } }]);
+      expect(t.trigger).toEqual({ kind: "appOpen", app: "Figma" });
+      expect(triggersFromJson([{ taskId: "1", day: DAY, trigger: { kind: "appOpen", app: ".exe" } }])).toEqual([]);
+      expect(triggersFromJson([{ taskId: "1", day: DAY, trigger: { kind: "appOpen", app: "fi.exe" } }])).toEqual([]);
+    });
+
+    it("fires a plan typed as Figma.exe or fig when Figma comes to the front", () => {
+      const list = [trig("1", { kind: "appOpen", app: "Figma" }), trig("2", { kind: "appOpen", app: "fig" })];
+      expect(ids(dueTriggers(list, ctx({ app: figma })))).toEqual(["1", "2"]);
+    });
   });
 
   it("fires after lunch from 13:00", () => {
@@ -249,7 +418,7 @@ describe("if-then triggers", () => {
       ["2", false],
     ]);
 
-    list = setTrigger(list, "2", DAY, { kind: "appOpen", app: "Excel" });
+    list = setTrigger(list, "2", DAY, { kind: "appOpen", app: "Excel" }, 0);
     expect(list.filter((t) => t.taskId === "2")).toEqual([trig("2", { kind: "appOpen", app: "Excel" })]);
     expect(triggerFor(list, "2", DAY)?.trigger).toEqual({ kind: "appOpen", app: "Excel" });
     list = clearTrigger(list, "2", DAY);
@@ -277,9 +446,9 @@ describe("if-then triggers", () => {
     expect(triggerChoices({ events, now: at(11), recentApps, isDistracting })).toEqual([
       { kind: "afterMeeting", eventId: "now", title: "Design" },
       { kind: "afterMeeting", eventId: "later", title: "Planning" },
-      { kind: "appOpen", app: "Figma" },
-      { kind: "appOpen", app: "Visual Studio Code" },
-      { kind: "appOpen", app: "Excel" },
+      { kind: "appOpen", app: "Figma", exe: "figma.exe" },
+      { kind: "appOpen", app: "Visual Studio Code", exe: "code.exe" },
+      { kind: "appOpen", app: "Excel", exe: "excel.exe" },
       { kind: "afterLunch" },
     ]);
     expect(triggerChoices({ events, now: at(14, 30), recentApps: [], isDistracting })).toEqual([
@@ -309,7 +478,7 @@ describe("if-then triggers", () => {
       { taskId: "5", day: DAY, trigger: { kind: "afterLunch" }, extra: true },
       { taskId: "5", day: DAY, trigger: { kind: "appOpen", app: " Excel " } },
     ];
-    expect(triggersFromJson(messy)).toEqual([
+    expect(triggersFromJson(messy, 0)).toEqual([
       trig("4", { kind: "afterMeeting", eventId: "e", title: "" }),
       trig("5", { kind: "appOpen", app: "Excel" }),
     ]);
@@ -331,6 +500,7 @@ describe("where was I", () => {
     expect(ctx).toEqual({
       taskId: "7",
       taskTitle: "Write spec",
+      taskIsNext: false,
       app: "Google Chrome",
       windowTitle: "Spec - Google Docs - Google Chrome",
       url: "https://docs.google.com/document/d/1/edit",
@@ -385,12 +555,14 @@ describe("where was I", () => {
   });
 
   it("summarizes for the resume card", () => {
-    const base: WorkContext = { taskId: "1", taskTitle: "Spec", app: null, windowTitle: null, url: null, note: null, at: 0 };
+    const base: WorkContext = { taskId: "1", taskTitle: "Spec", taskIsNext: false, app: null, windowTitle: null, url: null, note: null, at: 0 };
     expect(resumeSummary({ ...base, app: "Google Chrome", windowTitle: "Docs - Google Chrome", url: "https://docs.google.com/" })).toEqual({
       task: "Spec",
       where: "Google Chrome — Docs",
       note: null,
       canReopen: true,
+      host: "docs.google.com",
+      taskIsNext: false,
     });
     expect(resumeSummary({ ...base, app: "Excel", windowTitle: "Excel" })).toMatchObject({ where: "Excel", canReopen: false });
     expect(resumeSummary({ ...base, windowTitle: "Budget.xlsx" }).where).toBe("Budget.xlsx");
