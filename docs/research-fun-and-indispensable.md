@@ -32,7 +32,7 @@
 - **v0.3 "Tử tế":** #1, #2, #3, #12.
 - **v0.4 "Không thể thiếu":** #4, #5, #6, #7, #8.
 - **v0.5 "Game":** #9, #10, #11, kèm một sự kiện Tết đầu tiên.
-- **Sau đó:** #13, cần quyết định trước về máy chủ và quyền riêng tư.
+- **v0.6 "Bạn bè":** #13. Đã chọn cách không cần máy chủ: thẻ pet được ký số, gửi cho nhau qua app chat (xem SPEC v0.6).
 
 ## Chi tiết từng đề xuất
 
@@ -149,7 +149,7 @@
   - Người ta tăng tốc khi gần đích ([Kivetz 2006](https://business.columbia.edu/faculty/research/goal-gradient-hypothesis-resurrected-purchase-acceleration-illusionary-goal)).
   - Hiệu ứng "khởi đầu mới" ([Dai et al.](https://chibe.upenn.edu/publications/the-fresh-start-effect-breaking-points-in-life-motivate-virtuous-behavior/)).
 
-### 13. Bạn bè (để sau, cần máy chủ)
+### 13. Bạn bè (đã làm ở v0.6, không cần máy chủ)
 - **Làm gì:**
   - Kết bạn bằng mã; pet sang thăm thanh tác vụ nhà bạn.
   - "Chuỗi đôi": cả hai cùng xong kế hoạch 3 việc thì chuỗi tăng. Chỉ chia sẻ con số, không chia sẻ tên việc.
