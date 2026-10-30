@@ -641,9 +641,11 @@ user and a dev-team session (PM, Architect, Developer, QA); the decisions settle
 
 #### Decisions
 
-- **Line functions stay pure and return a pack; the brain picks.** A line function that has variants returns
+- **Line functions stay pure; the brain picks.** A line function that has variants builds a
   `Pack = { key: string; options: readonly (readonly [vi: string, en: string])[] }` (the strings already filled in)
-  instead of a string. The brain turns it into text with `this.phrase(pack)`. No hidden global state.
+  and hands it to a `say: Phrase` (`(pack) => string`) it takes as its last, required parameter, so functions that
+  join several parts (the morning greeting) phrase each part. The brain passes `this.phrase`; tests pass
+  `randomPhrase`. A call site that forgets it does not type-check. No hidden global state.
 - **One memory for both languages.** Each option is a `[vi, en]` pair, so both languages always have the same count
   and switching language keeps the memory right.
 - **Indices and times only, never text.** Lines interpolate task titles, and the pet never stores those. The memory
@@ -688,8 +690,8 @@ user and a dev-team session (PM, Architect, Developer, QA); the decisions settle
 
 - `private phrase(pack: Pack): string` chooses with `this.random` and the brain clock, records the choice in
   `life.said` (routine save) and returns the text in the current language.
-- Every call site of a pack-returning line goes through it (`say`, the done bubble, `speak`, the morning greeting).
-- Callers that combine lines (the morning greeting = time-of-day greeting + body) phrase each pack on its own.
+- Every call of a varied line function passes it (`lines.nudge(mood, next, idle, this.phrase)`), whether the text
+  goes to `say`, the done bubble or `speak`.
 
 #### Context lines for a finished task
 
