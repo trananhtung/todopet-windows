@@ -385,9 +385,9 @@ describe("the resume card's words (item 14, M2)", () => {
     expect(lines.triggerKindText({ kind: "afterLunch" })).toBe("after lunch");
     const e = ev("a", "Team sync", at(10), at(11));
     const next = ev("b", "Design", at(11, 8), at(12));
-    expect(lines.meetingOver(e, next, 4)).toContain("a 4-minute breather");
-    expect(lines.meetingOver(e, next)).toContain("a 5-minute breather");
-    expect(lines.meetingOver(e, null)).not.toContain("breather");
+    expect(lines.meetingOver(e, next, 4, lines.randomPhrase)).toContain("a 4-minute breather");
+    expect(lines.meetingOver(e, next, undefined, lines.randomPhrase)).toContain("a 5-minute breather");
+    expect(lines.meetingOver(e, null, undefined, lines.randomPhrase)).not.toContain("breather");
   });
 });
 

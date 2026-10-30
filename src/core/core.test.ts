@@ -206,8 +206,23 @@ describe("kind lines", () => {
   const at9 = new Date(2026, 9, 28, 9);
   const ev = { id: "e", title: "Sync", start: new Date(2026, 9, 28, 10), end: new Date(2026, 9, 28, 11), joinUrl: null };
   const slot = { task: t, start: new Date(2026, 9, 28, 14), end: new Date(2026, 9, 28, 14, 30) };
+  /**
+   * Lines that vary take `say` last (SPEC v0.8 §1): how many parameters come before it, so the sample arguments are
+   * padded with `undefined` (the defaults) and a random `say` is added.
+   */
+  const SAY_AFTER: Record<string, number> = {
+    greeting: 1, morning: 6, plan: 3, nudge: 3, overdue: 3, distraction: 4, done: 4, allDone: 0, review: 4, backToWork: 0,
+    welcomeBack: 1, soon: 2, dueNow: 1, focusStart: 2, focusEnd: 2, breakStart: 1, breakEnd: 0, planComplete: 2, lateNight: 0,
+    meetingOver: 3, starterStart: 2, starterEnd: 1, starterGone: 1, starterEnough: 0, stuck: 2, splitDone: 2, cleaned: 1,
+    levelUp: 1, streak: 1, dirty: 1, golden: 0, combo: 1, hungry: 2, grumble: 1, parade: 1, block: 2, voiceGrumble: 0,
+    voiceAngry: 1, voiceBlock: 1, voiceHungry: 0, voiceCheer: 0, tip: 0, tripOffer: 1, tripStayed: 0, tripStart: 2,
+    tripBack: 1, newWeek: 1,
+  };
+  const withSay = (name: string, args: unknown[]): unknown[] =>
+    name in SAY_AFTER ? [...args, ...new Array<undefined>(Math.max(0, SAY_AFTER[name] - args.length)).fill(undefined), lines.randomPhrase] : args;
   /** Sample arguments for every exported line (a new line needs an entry here). */
   const ARGS: Record<string, unknown[][]> = {
+    randomPhrase: [[{ key: "tip", options: [["Chào", "Hi"]] }]],
     greeting: [[at9], [new Date(2026, 9, 28, 12)], [new Date(2026, 9, 28, 15)], [new Date(2026, 9, 28, 20)]],
     hello: [["Mochi"]],
     morning: [
@@ -384,7 +399,7 @@ describe("kind lines", () => {
     for (const [name, fn] of fns) {
       expect(ARGS[name], `sample arguments for lines.${name}`).toBeDefined();
       for (const args of ARGS[name]) {
-        for (const text of variants(() => fn(...args))) {
+        for (const text of variants(() => fn(...withSay(name, args)))) {
           if (DISTRACTION_TIME.has(name)) {
             expect(text, `${name}: ${text}`).not.toMatch(insults);
             expect(text, `${name}: ${text}`).not.toMatch(shouting);
@@ -439,9 +454,9 @@ describe("kind lines", () => {
 
   it("speaks kindly: the voice lines are invitations, never orders", () => {
     for (const text of [
-      ...variants(() => lines.voiceGrumble()),
-      ...variants(() => lines.voiceAngry(t)),
-      ...variants(() => lines.voiceBlock("YouTube")),
+      ...variants(() => lines.voiceGrumble(lines.randomPhrase)),
+      ...variants(() => lines.voiceAngry(t, lines.randomPhrase)),
+      ...variants(() => lines.voiceBlock("YouTube", lines.randomPhrase)),
       ...variants(() => lines.voiceSummary(30)),
     ]) {
       expect(text).not.toMatch(scolding);
@@ -453,14 +468,14 @@ describe("kind lines", () => {
   it("mentions a fresh start for overdue tasks, and only offers what can be done", () => {
     for (const mood of ["normal", "annoyed", "angry"] as const) {
       setLang("en");
-      expect(lines.overdue(mood, 2, 0)).toMatch(/fresh start/i);
-      expect(lines.overdue(mood, 1, 1)).toMatch(/1 repeating task stays put/i);
+      expect(lines.overdue(mood, 2, 0, lines.randomPhrase)).toMatch(/fresh start/i);
+      expect(lines.overdue(mood, 1, 1, lines.randomPhrase)).toMatch(/1 repeating task stays put/i);
       // Every overdue task repeats: nothing to move, so no promise of moving.
-      expect(lines.overdue(mood, 0, 2)).not.toMatch(/move|fresh start/i);
-      expect(lines.overdue(mood, 0, 2)).toMatch(/2 repeating tasks/);
+      expect(lines.overdue(mood, 0, 2, lines.randomPhrase)).not.toMatch(/move|fresh start/i);
+      expect(lines.overdue(mood, 0, 2, lines.randomPhrase)).toMatch(/2 repeating tasks/);
       setLang("vi");
-      expect(lines.overdue(mood, 2, 0)).toMatch(/bắt đầu lại/i);
-      expect(lines.overdue(mood, 0, 2)).not.toMatch(/dời|bắt đầu lại/i);
+      expect(lines.overdue(mood, 2, 0, lines.randomPhrase)).toMatch(/bắt đầu lại/i);
+      expect(lines.overdue(mood, 0, 2, lines.randomPhrase)).not.toMatch(/dời|bắt đầu lại/i);
     }
     setLang("en");
     expect(lines.freshStart(2, 0)).toContain("2 overdue tasks");
@@ -511,33 +526,33 @@ describe("kind lines", () => {
     setLang("en");
     const call = task("2", { content: "Call Anna" });
     // Planned: the frog is the first task, said as your own pick.
-    const planned = lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Start with the intro" });
+    const planned = lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Start with the intro" }, lines.randomPhrase);
     expect(planned).toContain("Good morning");
     expect(planned).toContain("picked");
     expect(planned).toContain("“Write the report”");
     expect(planned).toContain("📝");
     expect(planned).toContain("“Start with the intro”");
     // Not planned yet: the planning question comes first, the frog and the note follow.
-    const asking = lines.morning(at9, 1, 3, t, 3, { frog: call, note: null });
+    const asking = lines.morning(at9, 1, 3, t, 3, { frog: call, note: null }, lines.randomPhrase);
     expect(asking.split("\n")[0]).toContain("1/3");
     expect(asking).toContain("“Call Anna”");
     expect(asking).not.toContain("Your note");
     // A frog that is not the next task is still named, next to the usual line.
-    expect(lines.morning(at9, 3, 3, t, 3, { frog: call, note: null })).toMatch(/Eat the frog first: “Write the report”[\s\S]*“Call Anna”/);
+    expect(lines.morning(at9, 3, 3, t, 3, { frog: call, note: null }, lines.randomPhrase)).toMatch(/Eat the frog first: “Write the report”[\s\S]*“Call Anna”/);
     // Without a plan, nothing changes.
-    expect(lines.morning(at9, 3, 3, t, 3)).toBe(lines.morning(at9, 3, 3, t, 3, null));
-    expect(lines.morning(at9, 3, 3, t, 3, { frog: null, note: null })).toBe(lines.morning(at9, 3, 3, t, 3));
+    expect(lines.morning(at9, 3, 3, t, 3, null, lines.randomPhrase)).toBe(lines.morning(at9, 3, 3, t, 3, null, lines.randomPhrase));
+    expect(lines.morning(at9, 3, 3, t, 3, { frog: null, note: null }, lines.randomPhrase)).toBe(lines.morning(at9, 3, 3, t, 3, null, lines.randomPhrase));
     setLang("vi");
-    expect(lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Bắt đầu từ phần mở đầu" })).toContain("“Bắt đầu từ phần mở đầu”");
+    expect(lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Bắt đầu từ phần mở đầu" }, lines.randomPhrase)).toContain("“Bắt đầu từ phần mở đầu”");
     setLang("en");
   });
 
   it("invites you to wrap up the day when it is almost over", () => {
     setLang("en");
-    expect(lines.review(1, 3, 2)).toMatch(/end of day/);
-    expect(lines.review(1, 3, 2)).toMatch(/wrap up/i);
+    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toMatch(/end of day/);
+    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toMatch(/wrap up/i);
     setLang("vi");
-    expect(lines.review(1, 3, 2)).toMatch(/tổng kết/i);
+    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toMatch(/tổng kết/i);
     setLang("en");
   });
 
@@ -1170,7 +1185,7 @@ describe("lines that name the next workday (v0.4 evaluation round 2, issue 3)", 
     expect(lines.wrapIntro("Monday")).toContain("a tidy desk for Monday");
     expect(lines.wrapNoWins("Monday")).toContain("Monday is a fresh page");
     expect(lines.wrapFrogDone("Report", "Monday")).toContain("or decide on Monday");
-    expect(lines.review(1, 3, 2, "Monday")).toContain("move the remaining 2 to Monday?");
+    expect(lines.review(1, 3, 2, "Monday", lines.randomPhrase)).toContain("move the remaining 2 to Monday?");
     expect(lines.wrappedUp("Report", "Monday")).toBe("All wrapped up 🌙 Rest well. Monday starts with “Report” 🐸");
     expect(lines.movedToTomorrow(2, "Monday")).toBe("Moved 2 tasks to Monday. Rest well 🌙");
     setLang("vi");
@@ -1180,12 +1195,12 @@ describe("lines that name the next workday (v0.4 evaluation round 2, issue 3)", 
     expect(lines.wrapForLabel("Thứ Hai")).toBe("Cho Thứ Hai");
     expect(lines.wrapIntro("Thứ Hai")).toContain("dọn bàn cho Thứ Hai");
     expect(lines.wrapNoWins("Thứ Hai")).toContain("Thứ Hai là một trang mới");
-    expect(lines.review(1, 3, 2, "Thứ Hai")).toContain("dời hết sang Thứ Hai?");
+    expect(lines.review(1, 3, 2, "Thứ Hai", lines.randomPhrase)).toContain("dời hết sang Thứ Hai?");
     expect(lines.wrappedUp("Report", "Thứ Hai")).toContain("Thứ Hai mình bắt đầu với “Report” 🐸");
     expect(lines.movedToTomorrow(2, "Thứ Hai")).toContain("sang Thứ Hai");
     // On a weekday nothing changes.
-    expect(lines.review(1, 3, 2)).toContain("dời hết sang mai?");
+    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toContain("dời hết sang mai?");
     setLang("en");
-    expect(lines.review(1, 3, 2)).toContain("move the remaining 2 to tomorrow?");
+    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toContain("move the remaining 2 to tomorrow?");
   });
 });

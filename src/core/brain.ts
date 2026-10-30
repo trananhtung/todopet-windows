@@ -90,6 +90,7 @@ import * as trips from "./trips";
 import * as fr from "./friends";
 // v0.7 "Always fresh".
 import * as updates from "./updates";
+import { chooseLine, remember, withEntry, type Phrase } from "./variety";
 
 const MIN = 60_000;
 const NEVER = -8.64e15;
@@ -1532,7 +1533,7 @@ export class Brain {
     if (r.outcome === "broken" && r.repairOffered && s.repair) parts.push(lines.dayBroken(when, r.lost, life.REPAIR_TASKS, life.activeRepair(s) !== null));
     if (r.repairExpired) parts.push(lines.repairExpired(s.streak));
     if (r.pageDone) parts.push(lines.pageDone(s.stickerPage - 1, r.snackEarned));
-    if (r.levelUp !== null) parts.push(lines.levelUp(r.levelUp));
+    if (r.levelUp !== null) parts.push(lines.levelUp(r.levelUp, this.phrase));
     return parts.length > 0 ? parts.join("\n") : null;
   }
 
@@ -1605,6 +1606,24 @@ export class Brain {
 
   // ---------- Talking ----------
 
+  /**
+   * Turns a pack of lines into what the pet says (SPEC v0.8 §1): one not said in the last two days while one is left,
+   * never the same twice in a row. The pick is kept in `life.said`, by index and time only (lines carry task titles).
+   */
+  private readonly phrase: Phrase = (pack) => {
+    const n = pack.options.length;
+    if (n === 0) return "";
+    let i = 0;
+    if (n > 1) {
+      const now = this.now();
+      const entry = this.state.life.said[pack.key];
+      i = chooseLine(n, entry, now, this.random);
+      this.mutateLife((s) => {
+        s.said = withEntry(s.said, pack.key, remember(entry, n, i, now));
+      }, "routine");
+    }
+    return L(pack.options[i][0], pack.options[i][1]);
+  };
   /**
    * Shows a bubble (unless one waiting for an answer, or an urgent one, is in the way). `why` marks it as an
    * unsolicited reminder and records the reason in the diary; without it the bubble is a reply to something you did.
@@ -2179,7 +2198,7 @@ export class Brain {
     // Not while the pet is out of the way (nobody would see it), nor on a stale list of tasks.
     if (cameBack !== null && cameBack.resume === null && !done && cameBack.minutes > 15 && ctx.inWork && next && !this.outOfTheWay && this.snapshotFresh && this.mayRemind("welcome")) {
       this.say(
-        { text: lines.welcomeBack(next), actions: [this.focusAction(next), this.laterAction()], seconds: 30, stillValid: this.whileOpen(next) },
+        { text: lines.welcomeBack(next, this.phrase), actions: [this.focusAction(next), this.laterAction()], seconds: 30, stillValid: this.whileOpen(next) },
         { why: L(`bạn vừa quay lại sau ${cameBack.minutes} phút`, `you just came back after ${cameBack.minutes} minutes`), kind: "welcome" },
       );
       return;
@@ -2193,14 +2212,14 @@ export class Brain {
       if (mins > 0 && mins <= 10 && this.once(`soon-${t.id}`)) {
         this.say(
           // True until it is due (then "It's time" takes over), and while the task is still open.
-          { text: lines.soon(t, Math.ceil(mins)), actions: [this.focusAction(t), this.completeAction(t)], seconds: 40, urgent: true, validUntil: time.getTime(), stillValid: this.whileOpen(t) },
+          { text: lines.soon(t, Math.ceil(mins), this.phrase), actions: [this.focusAction(t), this.completeAction(t)], seconds: 40, urgent: true, validUntil: time.getTime(), stillValid: this.whileOpen(t) },
           { chime: "important", why: L(`việc hẹn lúc ${timeString(time)}`, `task due at ${timeString(time)}`) },
         );
         return;
       }
       if (mins <= 0 && mins > -5 && this.once(`now-${t.id}`)) {
         this.say(
-          { text: lines.dueNow(t), actions: [this.focusAction(t), this.completeAction(t)], seconds: 60, urgent: true, validUntil: time.getTime() + 5 * MIN, stillValid: this.whileOpen(t) },
+          { text: lines.dueNow(t, this.phrase), actions: [this.focusAction(t), this.completeAction(t)], seconds: 60, urgent: true, validUntil: time.getTime() + 5 * MIN, stillValid: this.whileOpen(t) },
           { chime: "important", why: L(`tới giờ hẹn ${timeString(time)}`, `due now (${timeString(time)})`) },
         );
         return;
@@ -2228,7 +2247,7 @@ export class Brain {
     if (stunts && d.minutes >= 15 && this.remindEvery("antic", 20)) {
       this.startAntic({ type: "block" }, nowMs);
       this.say(
-        { text: lines.block(d.app, next), actions: [this.focusAction(next), this.spareAction()], seconds: 25, urgent: true },
+        { text: lines.block(d.app, next, this.phrase), actions: [this.focusAction(next), this.spareAction()], seconds: 25, urgent: true },
         {
           chime: "grumble",
           antic: true,
@@ -2236,13 +2255,13 @@ export class Brain {
           why: L(`đang cáu và ở ${d.app} ${Math.trunc(d.minutes)} phút → nhảy lên chắn màn hình`, `grumpy and on ${d.app} for ${Math.trunc(d.minutes)} min → jumped in the way`),
         },
       );
-      this.speak(lines.voiceBlock(d.app));
+      this.speak(lines.voiceBlock(d.app, this.phrase));
       return;
     }
     if (stunts && d.minutes >= 5 && next && this.sample.secondsSinceKey > 60 && this.remindEvery("antic", 20)) {
       this.startAntic({ type: "parade", title: taskTitle(next) }, nowMs);
       this.say(
-        { text: lines.parade(next), actions: [this.focusAction(next), this.spareAction()], seconds: 25, urgent: true },
+        { text: lines.parade(next, this.phrase), actions: [this.focusAction(next), this.spareAction()], seconds: 25, urgent: true },
         {
           chime: "grumble",
           antic: true,
@@ -2250,13 +2269,13 @@ export class Brain {
           why: L(`đang cáu và ở ${d.app} ${Math.trunc(d.minutes)} phút, không gõ phím → diễu hành với biển`, `grumpy and on ${d.app} for ${Math.trunc(d.minutes)} min, not typing → sign parade`) + this.reasonSuffix(),
         },
       );
-      this.speak(lines.voiceAngry(next));
+      this.speak(lines.voiceAngry(next, this.phrase));
       return;
     }
     if (ctx.inWork && open.length > 0 && d && d.minutes >= 2 && this.remindEvery("distract", 10)) {
       this.say(
         {
-          text: lines.distraction(s.mood, d.app, open.length, next),
+          text: lines.distraction(s.mood, d.app, open.length, next, this.phrase),
           actions: [
             this.focusAction(next),
             s.antic
@@ -2272,7 +2291,7 @@ export class Brain {
     }
 
     if (ctx.night && now.getHours() >= 23 && this.remindOnce("night", `night-${this.dayKey}`)) {
-      this.say({ text: lines.lateNight(), seconds: 10 }, { why: L("đã quá 23 giờ mà bạn vẫn dùng máy", "past 11pm and you're still at it"), kind: "night" });
+      this.say({ text: lines.lateNight(this.phrase), seconds: 10 }, { why: L("đã quá 23 giờ mà bạn vẫn dùng máy", "past 11pm and you're still at it"), kind: "night" });
       return;
     }
 
@@ -2281,7 +2300,7 @@ export class Brain {
       this.celebrateUntil = nowMs + 4000;
       this.recompute();
       this.say(
-        { text: lines.allDone(), actions: [{ title: L("＋ Việc cho mai", "＋ Plan tomorrow"), run: () => this.effects.openBoard?.(true) }], seconds: 20 },
+        { text: lines.allDone(this.phrase), actions: [{ title: L("＋ Việc cho mai", "＋ Plan tomorrow"), run: () => this.effects.openBoard?.(true) }], seconds: 20 },
         { why: L("xong hết việc hôm nay", "everything for today is done") },
       );
       return;
@@ -2331,7 +2350,7 @@ export class Brain {
       const left = planFor(this.plan, dayKey(now));
       const frog = left?.frogId ? (open.find((t) => t.id === left.frogId) ?? null) : null;
       const kept = left && (frog || left.note) ? { frog, note: left.note } : null;
-      let text = lines.morning(now, planned(day), open.length, next, target, kept);
+      let text = lines.morning(now, planned(day), open.length, next, target, kept, this.phrase);
       if (s.events.length > 0) {
         const start = atHour(s.prefs.workStart, 0, now);
         const end = atHour(s.prefs.workEnd, 0, now);
@@ -2344,11 +2363,11 @@ export class Brain {
         text += `\n${words}`;
         this.clearNotes();
       }
-      if (s.life.dirt > 0) text += `\n${lines.dirty(s.life.dirt)}`;
+      if (s.life.dirt > 0) text += `\n${lines.dirty(s.life.dirt, this.phrase)}`;
       // The kind words already say where the streak stands.
-      if (s.life.streak > 0 && !words) text += `\n${lines.streak(s.life.streak)}`;
+      if (s.life.streak > 0 && !words) text += `\n${lines.streak(s.life.streak, this.phrase)}`;
       const fresh = this.mutateLife((l) => chapters.takeFreshStart(l, this.dayKey), "routine");
-      if (fresh) text += `\n${lines.newWeek(fresh.last)}`;
+      if (fresh) text += `\n${lines.newWeek(fresh.last, this.phrase)}`;
       this.say(
         { text, actions: needsPlan ? this.planActions() : next ? [this.focusAction(next), this.laterAction()] : [], seconds: 60 },
         {
@@ -2379,7 +2398,7 @@ export class Brain {
     // 4. Not planned enough: nag every 30 minutes once the planning deadline passed.
     if (ctx.inWork && planned(day) < target && ctx.hoursAfterPlanDeadline >= 0 && this.remindEvery("plan", 30)) {
       this.say(
-        { text: lines.plan(s.mood, planned(day), target), actions: this.planActions(), seconds: 60 },
+        { text: lines.plan(s.mood, planned(day), target, this.phrase), actions: this.planActions(), seconds: 60 },
         {
           why: L(`đã qua ${s.prefs.planDeadline}h mà mới có ${planned(day)}/${target} việc`, `past ${s.prefs.planDeadline}:00 with only ${planned(day)}/${target} planned`),
           kind: "plan",
@@ -2394,7 +2413,7 @@ export class Brain {
       this.markFired(`stuck-${stuck.task.id}-${this.dayKey}`, nowMs);
       this.say(
         {
-          text: lines.stuck(stuck, s.mood),
+          text: lines.stuck(stuck, s.mood, this.phrase),
           actions: [
             { title: L("✂️ Chia nhỏ", "✂️ Split it"), primary: true, run: () => this.effects.openSplit?.(stuck.task) },
             { title: L("▶ Thử 2 phút", "▶ Try 2 minutes"), run: () => this.startTwoMinutes(stuck.task) },
@@ -2416,10 +2435,10 @@ export class Brain {
     // 6b. A hungry pet begs for a finished task.
     if (ctx.inWork && life.isHungry(s.life) && this.remindEvery("hungry", 60)) {
       this.say(
-        { text: lines.hungry(s.life.satiety, next), actions: next ? [this.focusAction(next), this.laterAction()] : [], seconds: 30, ...(next ? { stillValid: this.whileOpen(next) } : {}) },
+        { text: lines.hungry(s.life.satiety, next, this.phrase), actions: next ? [this.focusAction(next), this.laterAction()] : [], seconds: 30, ...(next ? { stillValid: this.whileOpen(next) } : {}) },
         { why: L(`độ no còn ${Math.trunc(s.life.satiety)}%`, `only ${Math.trunc(s.life.satiety)}% full`), kind: "hungry" },
       );
-      this.speak(lines.voiceHungry());
+      this.speak(lines.voiceHungry(this.phrase));
       return;
     }
 
@@ -2432,7 +2451,7 @@ export class Brain {
         const minutes = Math.trunc(d.minutes);
         this.startAntic({ type: "grumble" }, nowMs);
         this.say(
-          { text: lines.grumble(next), actions: [this.focusAction(next), this.spareAction()], seconds: 15 },
+          { text: lines.grumble(next, this.phrase), actions: [this.focusAction(next), this.spareAction()], seconds: 15 },
           {
             chime: "grumble",
             antic: true,
@@ -2440,7 +2459,7 @@ export class Brain {
             why: L(`tâm trạng đi xuống, ở ${d.app} ${minutes} phút`, `in a low mood, on ${d.app} for ${minutes} min`) + this.reasonSuffix(),
           },
         );
-        this.speak(lines.voiceGrumble());
+        this.speak(lines.voiceGrumble(this.phrase));
         return;
       }
     }
@@ -2459,7 +2478,7 @@ export class Brain {
           : [];
       actions.push({ title: L("Xem", "Show"), primary: movable === 0, run: () => this.effects.openBoard?.(false) });
       this.say(
-        { text: lines.overdue(s.mood, movable, repeating), actions, seconds: 45 },
+        { text: lines.overdue(s.mood, movable, repeating, this.phrase), actions, seconds: 45 },
         { why: L(`${day.overdue.length} việc quá hạn (nhắc tối đa 90 phút/lần)`, `${day.overdue.length} overdue task(s) (at most every 90 min)`), kind: "overdue" },
       );
       return;
@@ -2506,7 +2525,7 @@ export class Brain {
       this.markFired(LATER, null);
       const idleHours = (nowMs - this.lastProgress()) / (60 * MIN);
       this.say(
-        { text: lines.nudge(s.mood, next, idleHours), actions: [this.focusAction(next), this.completeAction(next), this.laterAction()], seconds: 45, stillValid: this.whileOpen(next) },
+        { text: lines.nudge(s.mood, next, idleHours, this.phrase), actions: [this.focusAction(next), this.completeAction(next), this.laterAction()], seconds: 45, stillValid: this.whileOpen(next) },
         {
           why: L(
             `${minutes} phút chưa nhắc; ${idleHours.toFixed(1)} giờ chưa có tiến triển`,
@@ -2520,7 +2539,7 @@ export class Brain {
 
     // 11. A tip now and then, only when the mood is good.
     if (ctx.inWork && (s.mood === "happy" || s.mood === "normal") && nowMs - this.lastBubbleAt > 40 * MIN && this.remindEvery("tip", 150)) {
-      this.say({ text: lines.tip(), seconds: 14 }, { why: L("pet đang vui và đã im lặng 40 phút", "the pet is in a good mood and quiet for 40 min"), kind: "tip" });
+      this.say({ text: lines.tip(this.phrase), seconds: 14 }, { why: L("pet đang vui và đã im lặng 40 phút", "the pet is in a good mood and quiet for 40 min"), kind: "tip" });
     }
   }
 
@@ -2531,7 +2550,7 @@ export class Brain {
     const name = this.wrapDayName();
     this.say(
       {
-        text: lines.review(day.completed.length, planned(day), day.today.length, name),
+        text: lines.review(day.completed.length, planned(day), day.today.length, name, this.phrase),
         actions: [
           { title: L("Tổng kết ngày", "Wrap up"), primary: true, run: () => this.effects.openWrapUp?.() },
           // With nothing left there is nothing to move.
@@ -2668,7 +2687,7 @@ export class Brain {
     actions.push({ title: L("Không có gì", "Nothing"), run: () => undefined });
     this.say(
       // The breather is offered before the next meeting: not after it has started.
-      { text: lines.meetingOver(over, soon, breather), actions, seconds: 60, ...(soon ? { validUntil: soon.start.getTime() } : {}) },
+      { text: lines.meetingOver(over, soon, breather, this.phrase), actions, seconds: 60, ...(soon ? { validUntil: soon.start.getTime() } : {}) },
       { why: L(`họp “${shortText(over.title, 30)}” vừa kết thúc`, `“${shortText(over.title, 30)}” just ended`), card: "aftermeeting" },
     );
     return true;
@@ -2997,7 +3016,7 @@ export class Brain {
     this.setPlanDoc({ ...this.plan, doneUntil: null });
     this.diary.add("system", L("Bạn làm tiếp — pet thức dậy", "You're back at it — the pet woke up"));
     this.recompute();
-    this.say({ text: lines.backToWork(), seconds: 6, urgent: true });
+    this.say({ text: lines.backToWork(this.phrase), seconds: 6, urgent: true });
   }
 
   // ---------- Actions ----------
@@ -3040,11 +3059,11 @@ export class Brain {
     this.recompute();
     this.play(r.golden || levelUp !== null ? "big" : "celebrate");
     if (task) {
-      const parts = [lines.done(task, this.state.day.completed.length, this.state.target, sound)];
-      if (r.golden) parts.push(lines.golden());
-      if (r.combo >= 2) parts.push(lines.combo(r.combo));
-      if (r.cleaned) parts.push(lines.cleaned(this.state.life.dirt));
-      if (levelUp !== null) parts.push(lines.levelUp(levelUp));
+      const parts = [lines.done(task, this.state.day.completed.length, this.state.target, sound, this.phrase)];
+      if (r.golden) parts.push(lines.golden(this.phrase));
+      if (r.combo >= 2) parts.push(lines.combo(r.combo, this.phrase));
+      if (r.cleaned) parts.push(lines.cleaned(this.state.life.dirt, this.phrase));
+      if (levelUp !== null) parts.push(lines.levelUp(levelUp, this.phrase));
       if (unlocked.length > 0) parts.push(lines.unlocked(unlocked));
       if (chest) parts.push(chests.chestText(chest));
       // The task that finished today's repair quest: say so in the same bubble.
@@ -3055,7 +3074,7 @@ export class Brain {
       this.lastBubbleAt = nowMs;
       const big = unlocked.length > 0 || levelUp !== null || repaired !== null || chest?.reward === "accessory";
       this.set({ bubble: { id: ++this.bubbleSeq, text: parts.join("\n"), actions, seconds: big ? 14 : 8, urgent: true, reminder: false } });
-      if (levelUp !== null || r.golden) this.speak(lines.voiceCheer());
+      if (levelUp !== null || r.golden) this.speak(lines.voiceCheer(this.phrase));
     }
     this.later(() => this.recompute(), 4200);
     return { xp: this.state.life.xp - xpBefore - (chest?.xp ?? 0), golden: r.golden, chest };
@@ -3185,7 +3204,7 @@ export class Brain {
       this.lastCelebration = this.now();
       this.recompute();
       const next = this.state.next;
-      this.say({ text: lines.planComplete(target, next), actions: next ? [this.focusAction(next)] : [], seconds: 20, urgent: true });
+      this.say({ text: lines.planComplete(target, next, this.phrase), actions: next ? [this.focusAction(next)] : [], seconds: 20, urgent: true });
     } else {
       this.say({ text: lines.added(content), seconds: 4, urgent: true });
     }
@@ -3350,7 +3369,7 @@ export class Brain {
     this.lastPlanAction = this.now();
     await this.refresh();
     const start = firstId ? openTasks(this.state.day).find((t) => t.id === firstId) ?? null : null;
-    this.say({ text: lines.splitDone(clean.length, clean[0]), actions: start ? [this.focusAction(start)] : [], seconds: 30, urgent: true });
+    this.say({ text: lines.splitDone(clean.length, clean[0], this.phrase), actions: start ? [this.focusAction(start)] : [], seconds: 30, urgent: true });
     return true;
   }
 
@@ -3398,7 +3417,7 @@ export class Brain {
     this.set({
       bubble: {
         id: ++this.bubbleSeq,
-        text: starter ? lines.starterStart(t, m) : lines.focusStart(t, m),
+        text: starter ? lines.starterStart(t, m, this.phrase) : lines.focusStart(t, m, this.phrase),
         actions: [],
         seconds: 5,
         urgent: false,
@@ -3422,7 +3441,7 @@ export class Brain {
     this.finishFocusAt(nowMs + m * MIN);
     this.recompute();
     this.set({
-      bubble: { id: ++this.bubbleSeq, text: lines.breakStart(m), actions: [], seconds: 6, urgent: false, reminder: false, validUntil: nowMs + CONFIRM_MS, stillValid: () => this.state.focus?.start === nowMs },
+      bubble: { id: ++this.bubbleSeq, text: lines.breakStart(m, this.phrase), actions: [], seconds: 6, urgent: false, reminder: false, validUntil: nowMs + CONFIRM_MS, stillValid: () => this.state.focus?.start === nowMs },
     });
     this.diary.add("focus", L(`Nghỉ ${m} phút`, `${m}-minute break`));
   }
@@ -3465,7 +3484,7 @@ export class Brain {
     this.play("important");
     let bubble: Bubble;
     if (f.isBreak) {
-      bubble = { id: ++this.bubbleSeq, text: lines.breakEnd(), actions: [this.focusAction(this.state.next), this.laterAction()], seconds: 60, urgent: true, reminder: false };
+      bubble = { id: ++this.bubbleSeq, text: lines.breakEnd(this.phrase), actions: [this.focusAction(this.state.next), this.laterAction()], seconds: 60, urgent: true, reminder: false };
     } else {
       const actions: BubbleAction[] = [];
       const t = f.task;
@@ -3485,10 +3504,10 @@ export class Brain {
           title: L("Thế là được rồi", "That's enough"),
           run: () => {
             this.diary.add("focus", L("Bạn dừng sau 2 phút thử", "You stopped after the 2-minute starter"));
-            this.say({ text: lines.starterEnough(), seconds: 6 });
+            this.say({ text: lines.starterEnough(this.phrase), seconds: 6 });
           },
         });
-        bubble = { id: ++this.bubbleSeq, text: (gone ? lines.starterGone(t) : lines.starterEnd(t)) + more, actions, seconds: 120, urgent: true, reminder: false };
+        bubble = { id: ++this.bubbleSeq, text: (gone ? lines.starterGone(t, this.phrase) : lines.starterEnd(t, this.phrase)) + more, actions, seconds: 120, urgent: true, reminder: false };
       } else {
         if (t && stillOpen) {
           actions.push({
@@ -3502,7 +3521,7 @@ export class Brain {
         }
         actions.push({ title: L(`+${f.minutes}' nữa`, `+${f.minutes}' more`), run: () => this.startFocus(f.task, f.minutes) });
         actions.push({ title: L(`☕ Nghỉ ${this.state.prefs.breakMinutes}'`, `☕ Break ${this.state.prefs.breakMinutes}'`), run: () => this.startBreak() });
-        bubble = { id: ++this.bubbleSeq, text: lines.focusEnd(f.task, f.minutes) + more, actions, seconds: 120, urgent: true, reminder: false };
+        bubble = { id: ++this.bubbleSeq, text: lines.focusEnd(f.task, f.minutes, this.phrase) + more, actions, seconds: 120, urgent: true, reminder: false };
       }
     }
     this.lastBubbleAt = this.now();
@@ -3641,14 +3660,14 @@ export class Brain {
     if (!trips.canOfferTrip(offer) || !this.once(`trip-${this.dayKey}`)) return false;
     const shown = this.say(
       {
-        text: lines.tripOffer(new Date(trips.backTime(nowMs, workEnd))),
+        text: lines.tripOffer(new Date(trips.backTime(nowMs, workEnd)), this.phrase),
         actions: [
           { title: lines.tripGo(), primary: true, run: () => void this.goOnTrip() },
           {
             title: lines.tripStay(),
             run: () => {
               this.mutateLife((l) => trips.declineTrip(l, this.now()));
-              this.say({ text: lines.tripStayed(), seconds: 5 });
+              this.say({ text: lines.tripStayed(this.phrase), seconds: 5 });
             },
           },
         ],
@@ -3677,7 +3696,7 @@ export class Brain {
     const back = new Date(trip.back);
     this.set({ antic: null });
     this.diary.add("life", L(`Pet đi chơi ${place}, hẹn ${timeString(back)} về`, `The pet set off for ${place}, back at ${timeString(back)}`));
-    this.say({ text: lines.tripStart(place, back), seconds: 8, urgent: true });
+    this.say({ text: lines.tripStart(place, back, this.phrase), seconds: 8, urgent: true });
     return true;
   }
 
@@ -3705,7 +3724,7 @@ export class Brain {
     this.set({ reveal: { id: ++this.bubbleSeq, at: nowMs, kind: "souvenir", ...r } });
     this.recompute();
     // After "Done for today" the pet slips back in quietly (the souvenir and postcard still land), unless you called it.
-    if (asked || !isDoneForToday(this.plan, nowMs)) this.say({ text: lines.tripBack(r), seconds: 14, urgent: true });
+    if (asked || !isDoneForToday(this.plan, nowMs)) this.say({ text: lines.tripBack(r, this.phrase), seconds: 14, urgent: true });
   }
 
   // ---------- v0.6 Friends: cards, the weekly boss, visits ----------
@@ -3906,7 +3925,7 @@ export class Brain {
       { tag: "sticker", day },
     );
     const parts = [fr.bossWinText(together)];
-    if (reward.levelUp !== null) parts.push(lines.levelUp(reward.levelUp));
+    if (reward.levelUp !== null) parts.push(lines.levelUp(reward.levelUp, this.phrase));
     if (reward.unlocked.length > 0) parts.push(lines.unlocked(reward.unlocked));
     if (reward.pageDone) parts.push(lines.pageDone(this.state.life.stickerPage - 1, reward.snack));
     this.bossNotice = { text: parts.join("\n"), week };
@@ -4378,13 +4397,13 @@ export class Brain {
     const why = L("bảng demo", "demo controls");
     if (kind === "parade") {
       this.startAntic({ type: "parade", title: next ? taskTitle(next) : L("Làm việc đi!", "Get to work!") }, now);
-      if (next) this.say({ text: lines.parade(next), actions, seconds: 25, urgent: true }, { chime: "grumble", why, antic: true });
+      if (next) this.say({ text: lines.parade(next, this.phrase), actions, seconds: 25, urgent: true }, { chime: "grumble", why, antic: true });
     } else if (kind === "block") {
       this.startAntic({ type: "block" }, now);
-      this.say({ text: lines.block(this.currentDistraction()?.app ?? "YouTube", next), actions, seconds: 25, urgent: true }, { chime: "grumble", why, antic: true });
+      this.say({ text: lines.block(this.currentDistraction()?.app ?? "YouTube", next, this.phrase), actions, seconds: 25, urgent: true }, { chime: "grumble", why, antic: true });
     } else {
       this.startAntic({ type: "grumble" }, now);
-      if (next) this.say({ text: lines.grumble(next), actions, seconds: 15, urgent: true }, { chime: "grumble", why, antic: true });
+      if (next) this.say({ text: lines.grumble(next, this.phrase), actions, seconds: 15, urgent: true }, { chime: "grumble", why, antic: true });
     }
     this.recompute();
   }
