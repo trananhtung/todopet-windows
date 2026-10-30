@@ -100,6 +100,7 @@ export const SPECIES_IDS = [
   "owl",
   "lamb",
   "piglet",
+  "banhbao",
   "bee",
   "dragon",
   "unicorn",

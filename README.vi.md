@@ -4,7 +4,7 @@
 
 <p align="center">
 Thú cưng trên màn hình Windows 10/11, sống trên thanh tác vụ, đọc việc trong <a href="https://todoist.com">Todoist</a>,
-<b>cổ vũ khi bạn làm việc</b> và <b>lo lắng (rồi giúp bạn) khi mọi thứ chậm lại</b>. Giờ có tới <b>24 loài</b>.<br>
+<b>cổ vũ khi bạn làm việc</b> và <b>lo lắng (rồi giúp bạn) khi mọi thứ chậm lại</b>. Giờ có tới <b>25 loài</b>.<br>
 <a href="README.md">English</a> · Tiếng Việt · Bản Windows của <a href="https://github.com/trananhtung/todopet">TodoPet cho macOS</a>
 </p>
 

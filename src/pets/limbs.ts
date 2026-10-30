@@ -23,6 +23,9 @@ export function feet(c: Ctx): string {
     if (spec.toes) {
       out += path(`M${p(x - w * 0.16, y + h * 0.5)}l0 ${r(-h * 0.38)}M${p(x + w * 0.16, y + h * 0.5)}l0 ${r(-h * 0.38)}`, st(line, 1));
     }
+    if (spec.sole) {
+      out += path(`M${p(x - w * 0.42, y + h * 0.14)}Q${p(x, y + h * 0.7)} ${p(x + w * 0.42, y + h * 0.14)}`, st(color(c, spec.sole), 1.6));
+    }
   }
   return out;
 }
@@ -49,7 +52,8 @@ function limb(c: Ctx, x: number, y: number, angle: number, side: number): string
       attrs,
     );
   }
-  return ell(x, y, 5.5 * sc, 8 * sc, attrs);
+  const nub = ell(x, y, 5.5 * sc, 8 * sc, attrs);
+  return spec.hand ? nub + spec.hand(c, x, y, angle, 8 * sc) : nub;
 }
 
 export function arms(c: Ctx): string {

@@ -4,7 +4,7 @@ A Windows port of [TodoPet](https://github.com/trananhtung/todopet) (macOS, Swif
 top of the taskbar, reads your Todoist tasks, asks you to plan 3 tasks a day, reminds you, cheers your progress and
 worries (and offers help) when things slip. English and Vietnamese.
 
-**What's new on Windows:** 24 pet species instead of one (21 from the start, 3 unlocked by milestones), each
+**What's new on Windows:** 25 pet species instead of one (22 from the start, 3 unlocked by milestones), each
 with its own body, gait and voice, all sharing the moods, growth stages, hunger, dirt and accessories of the
 original.
 
@@ -121,6 +121,7 @@ tasks (also forced by `?demo`).
 | Owlet | hop | facial disc, ear tufts, wings |
 | Lamb | hop | cloud of wool, floppy ears, hooves |
 | Piglet | bounce | round snout, floppy ears, curly tail |
+| Bảnh Bao (Dapper Bao) | bounce | a little person: spiky black hair, charcoal polo, white trousers and sneakers, crossbody bag; thumbs-up when happy |
 | Bee (unlock: 20 tasks) | float | stripes, buzzing wings, antennae |
 | Dragon (unlock: 7-day streak) | float | horns, wings, spiky tail, tiny smoke puff when grumpy |
 | Unicorn (unlock: 50 tasks) | hop | horn, rainbow mane |

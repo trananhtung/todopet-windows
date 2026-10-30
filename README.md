@@ -4,7 +4,7 @@
 
 <p align="center">
 A desktop pet for Windows 10/11 that lives on top of your taskbar, reads your <a href="https://todoist.com">Todoist</a> tasks,
-<b>cheers you on when you work</b> and <b>worries (and helps) when things slip</b>. Now with <b>24 species</b>.<br>
+<b>cheers you on when you work</b> and <b>worries (and helps) when things slip</b>. Now with <b>25 species</b>.<br>
 English · <a href="README.vi.md">Tiếng Việt</a> · Windows port of <a href="https://github.com/trananhtung/todopet">TodoPet for macOS</a>
 </p>
 
@@ -150,7 +150,7 @@ npm run tauri build    # on Windows: NSIS .exe and .msi in src-tauri/target/rele
 | `src/core/friends.ts` | Pet cards (encode and strict parse), the friend list, buddy streaks, the weekly boss, visits |
 | `src-tauri/crates/todopet-core/src/card.rs`, `src-tauri/src/cards.rs` | Card signatures: the Ed25519 key (Credential Manager) and `card_public_key` / `card_sign` / `card_verify` / `card_reset_key` |
 | `src/core/lines.ts` · `l10n.ts` | Everything the pet says, in English and Vietnamese |
-| `src/pets/` | The 24 species, drawn in SVG for every mood, stage and accessory |
+| `src/pets/` | The 25 species, drawn in SVG for every mood, stage and accessory |
 | `src/overlay/` | The pet surface: motion, bubble, board, mischief, effects |
 | `src/settings/` · `src/diary/` | The Settings and Diary windows |
 | `src/backend/` | The `Backend` interface, its Tauri implementation and the in-memory demo |

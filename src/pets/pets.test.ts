@@ -4,6 +4,7 @@ import { ACCESSORIES, CELEBRATIONS, MOODS, SPECIES_IDS, type Mood, type StageInd
 import { appIconSvg } from "./icon";
 import { renderDecor } from "./decor";
 import { SPECIES, defaultPose, petBounds, renderPet, speciesInfo, type PetPose } from "./index";
+import { BAG_D, THUMB_D } from "./species/banhbao";
 
 const parser = new DOMParser();
 
@@ -42,7 +43,7 @@ const busyPose = (over: Partial<PetPose> = {}): PetPose =>
   });
 
 describe("species registry", () => {
-  it("lists all 24 species in SPECIES_IDS order", () => {
+  it("lists all 25 species in SPECIES_IDS order", () => {
     expect(SPECIES.map((s) => s.id)).toEqual([...SPECIES_IDS]);
   });
 
@@ -76,6 +77,50 @@ describe("species registry", () => {
     expect(gaits).toMatchObject({ seal: "waddle", owl: "hop", lamb: "hop", piglet: "bounce", bee: "float" });
     expect(speciesInfo("frog").sound).toEqual({ en: "ribbit", vi: "ộp ộp" });
     expect(speciesInfo("piglet").sound).toEqual({ en: "oink oink", vi: "ụt ịt" });
+  });
+});
+
+describe("Bảnh Bao", () => {
+  /** Thumbs-ups in a frame (the thumb is drawn from one constant path). */
+  const thumbs = (pose: Partial<PetPose>): number => renderPet("banhbao", defaultPose({ t: 1.2, ...pose })).split(THUMB_D).length - 1;
+
+  it("is a dapper little person, open from the start, who bounces and says ok", () => {
+    expect(speciesInfo("banhbao")).toEqual({
+      id: "banhbao",
+      name: { en: "Dapper Bao", vi: "Bảnh Bao" },
+      emoji: "👍",
+      gait: "bounce",
+      sound: { en: "nice!", vi: "ok luôn!" },
+    });
+  });
+
+  it("gives a thumbs-up when happy, two when celebrating, and none otherwise", () => {
+    expect(thumbs({ mood: "happy" })).toBe(1);
+    expect(thumbs({ mood: "celebrating" })).toBe(2);
+    for (const mood of ["normal", "focus", "annoyed", "angry", "sleeping"] as const) expect(thumbs({ mood }), mood).toBe(0);
+    // Arms swing while walking, so no thumbs then.
+    expect(thumbs({ mood: "happy", walking: true, walkPhase: 1.1 })).toBe(0);
+    expect(thumbs({ mood: "happy", held: true })).toBe(0);
+  });
+
+  it("wears the crossbody bag in every mood, held or not", () => {
+    for (const mood of MOODS) expect(renderPet("banhbao", defaultPose({ mood, t: 1.2 })), mood).toContain(BAG_D);
+    expect(renderPet("banhbao", busyPose({ held: true }))).toContain(BAG_D);
+  });
+
+  it("hangs the bag from a ring at the end of the strap, so the strap never looks cut", () => {
+    for (const pose of [{}, { mood: "celebrating" as const }, { walking: true, walkPhase: 1.1 }, { held: true }]) {
+      const d = check(renderPet("banhbao", defaultPose({ t: 1.2, ...pose })));
+      const bag = Array.from(d.querySelectorAll("path")).find((e) => e.getAttribute("d") === BAG_D)!;
+      const hanger = bag.closest("g[transform*='rotate']")!;
+      const [x, y] = hanger.getAttribute("transform")!.match(/translate\(([-\d.]+) ([-\d.]+)\)/)!.slice(1).map(Number);
+      // A ring sits where the bag hangs…
+      expect(Array.from(hanger.children).some((e) => e.tagName === "circle" && e.getAttribute("cx") === "0" && e.getAttribute("cy") === "0")).toBe(true);
+      // …and the strap across the chest ends in it.
+      const strap = Array.from(d.querySelectorAll("path")).find((e) => e.getAttribute("stroke-width") === "2.8")!;
+      const end = strap.getAttribute("d")!.trim().split(/[\sA-Z]+/).filter(Boolean).slice(-2).map(Number);
+      expect(end).toEqual([x, y]);
+    }
   });
 });
 

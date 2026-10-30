@@ -11,7 +11,7 @@ export { ACT_DURATION, ACT_KEY_T, PET_ACTS, type PetActKind } from "./acts";
 export { renderDecor, type DecorOptions } from "./decor";
 export { STAGE_SCALE, STAGE_SPROUTS };
 
-/** All 14 species, in SPECIES_IDS order. */
+/** All 25 species, in SPECIES_IDS order. */
 export const SPECIES: readonly SpeciesInfo[] = SPECIES_IDS.map((id) => DEFS[id].info);
 
 export function speciesInfo(id: SpeciesId): SpeciesInfo {

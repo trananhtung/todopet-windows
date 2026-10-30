@@ -62,12 +62,16 @@ export interface FeetSpec {
   color?: ColorKey;
   /** Two little toe lines. */
   toes?: boolean;
+  /** A sole line along the bottom (sneakers). */
+  sole?: ColorKey;
 }
 
 export interface ArmSpec {
   style?: "nub" | "flipper" | "wing";
   scale?: number;
   color?: ColorKey;
+  /** Drawn over each nub arm, given its center, angle (radians) and half length (Bảnh Bao's thumbs-up). */
+  hand?(c: Ctx, x: number, y: number, angle: number, len: number): string;
 }
 
 /** Where shared things attach to a species. All coordinates are in the pet's local (unmirrored) space. */

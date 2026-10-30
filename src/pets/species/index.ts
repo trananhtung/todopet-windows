@@ -1,6 +1,7 @@
 import type { SpeciesId } from "../../core/types";
 import type { SpeciesDef } from "../kit";
 import { axolotl } from "./axolotl";
+import { banhbao } from "./banhbao";
 import { bee } from "./bee";
 import { bunny } from "./bunny";
 import { capybara } from "./capybara";
@@ -47,6 +48,7 @@ export const DEFS: Readonly<Record<SpeciesId, SpeciesDef>> = {
   owl,
   lamb,
   piglet,
+  banhbao,
   bee,
   dragon,
   unicorn,
