@@ -6,6 +6,7 @@ import { MAX_SAVED_NOTES, parseVersion } from "./updates";
 import { isSouvenirId, tripFromJson, type SouvenirId, type Trip } from "./trips";
 import type { Accessory, AccessorySlot, CelebrationKind, DecorId, ReminderKind, Season, StageIndex } from "./types";
 import { ACCESSORIES, ACCESSORY_SLOT, DECOR_IDS, EVERY_KINDS } from "./types";
+import { normalizeSaid, type SaidEntry } from "./variety";
 
 export const STAGE_THRESHOLDS = [0, 100, 300, 700, 1500] as const;
 
@@ -268,6 +269,8 @@ export interface LifeState {
   lastVersion: string | null;
   /** The release notes of the update being installed, saved right before it so the new version can show its highlights. */
   pendingNotes: { version: string; notes: string } | null;
+  /** Which lines were said lately, by line key (SPEC v0.8 §1): option indices and times only, never text. */
+  said: Record<string, SaidEntry>;
 }
 
 export const newLife = (): LifeState => ({
@@ -323,6 +326,7 @@ export const newLife = (): LifeState => ({
   updateAnnounced: null,
   lastVersion: null,
   pendingNotes: null,
+  said: {},
 });
 
 const isAccessory = (x: unknown): x is Accessory => typeof x === "string" && (ACCESSORIES as readonly string[]).includes(x);
@@ -450,6 +454,7 @@ export function lifeFromJson(raw: unknown): LifeState {
     updateAnnounced: versionOrNull(r.updateAnnounced),
     lastVersion: versionOrNull(r.lastVersion),
     pendingNotes: pendingNotesFromJson(r.pendingNotes),
+    said: normalizeSaid(r.said),
   };
 }
 
