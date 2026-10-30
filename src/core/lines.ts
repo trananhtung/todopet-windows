@@ -646,3 +646,25 @@ export function newWeek(last: WeekStats | null): string {
     ? L(`🌱 Tuần mới, khởi đầu mới! Tuần trước: ${recap}.`, `🌱 New week, fresh start! Last week: ${recap}.`)
     : L("🌱 Tuần mới, khởi đầu mới! Tuần này mới tinh, mình cùng bắt đầu nhẹ nhàng nhé.", "🌱 New week, fresh start! A brand-new week; let's ease in together.");
 }
+
+// v0.7 "Always fresh": the update notice, its buttons, the install and the first start of a new version. Warm and brief:
+// news, never a nag, and a failure is "we", not "you did something wrong".
+
+export const updateAvailable = (version: string) => L(`Mình có bản mới ${version} nè ✨`, `There's a new version of me: ${version} ✨`);
+
+/** "What's new" with the release's first highlights, for the quieter second line of a bubble; null when there are none. */
+export function whatsNew(points: readonly string[]): string | null {
+  return points.length === 0 ? null : `${L("Có gì mới:", "What's new:")}\n${points.map((p) => `• ${p}`).join("\n")}`;
+}
+
+export const updateNow = () => L("Cập nhật ngay", "Update now");
+export const downloadPage = () => L("Trang tải về", "Download page");
+export const updateLater = () => L("Để sau", "Later");
+export const updateFailed = () => L("Mình không tự cập nhật được. Bạn tải bản mới ở trang tải về nhé?", "I couldn't update myself. Grab it from the download page?");
+export const updatePageFailed = () => L("Mình chưa mở được trang tải về. Bạn thử lại sau một lát nhé 🌿", "I couldn't open the download page just now. Please try again in a little while 🌿");
+/** The tray's "Check for updates…" is taking a moment: so it never looks dead. */
+export const lookingForUpdate = () => L("Để mình xem nào… 🔎", "Let me look… 🔎");
+export const upToDate = () => L("Bạn đang dùng bản mới nhất 👍", "You're on the newest version 👍");
+export const updateCheckFailed = () => L("Mình chưa kiểm tra được bản mới lúc này. Bạn thử lại sau một lát nhé 🌿", "I couldn't check for updates just now. Please try again in a little while 🌿");
+/** The first start of a newer version: said once, with the saved highlights as the second line. */
+export const updated = (version: string) => L(`Mình vừa lên bản ${version}! ✨`, `Now I'm on ${version}! ✨`);

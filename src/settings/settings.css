@@ -769,3 +769,95 @@
   opacity: 0.45;
   filter: grayscale(0.7);
 }
+
+/* Updates: the running version, where things stand, the buttons, and the release notes (plain text, line breaks kept). */
+.update-version {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.update-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+.update-status .icon {
+  flex: none;
+  margin-top: 2px;
+}
+.update-status.ok .icon {
+  color: var(--good);
+}
+.update-status.new .icon {
+  color: var(--accent-strong);
+}
+.update-status.error .icon {
+  color: var(--warn);
+}
+.update-status.info .icon {
+  color: var(--info);
+}
+.update-detail {
+  color: var(--muted);
+  font-weight: 400;
+}
+.update-why {
+  margin-top: 10px;
+}
+.update-why .notice {
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.update-actions .btn[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
+/* What appears after a press goes below the buttons, in plain weight: nothing above or under the keyboard's focus moves. */
+.update-after {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.update-after .notice,
+.update-problem .notice {
+  font-weight: 400;
+  line-height: 1.5;
+}
+.update-problem {
+  margin-top: 8px;
+}
+.update-notes {
+  max-height: 240px;
+  overflow: auto;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--paper-2);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.update-notes p {
+  margin: 0;
+}
+.update-notes .note-gap {
+  height: 0.6em;
+}
+/* A bullet that wraps hangs under its own words, not under the dot. */
+.update-notes .note-line.bullet {
+  padding-left: 1.1em;
+  text-indent: -1.1em;
+}
+.update-notes:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}

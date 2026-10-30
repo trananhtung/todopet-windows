@@ -13,7 +13,7 @@ serde_json = "1"
 
 [package]
 name = "todopet"
-version = "0.6.0"
+version = "0.7.0"
 description = "A desktop pet for Windows that reads your Todoist tasks and gets happy when you work."
 authors = ["Tran Anh Tung"]
 edition.workspace = true
@@ -40,6 +40,9 @@ keyring = "4"
 uuid = { version = "1", features = ["v4"] }
 sys-locale = "0.3"
 log = "0.4"
+# One-click updates (v0.7). Only the Rust API is used (`updater_builder`); no window is granted `updater:*`.
+# `rustls-tls` comes in through our `tls` feature below, `zip` (Tauri v1 archives) is not needed for a plain setup.exe.
+tauri-plugin-updater = { version = "2.14.1", default-features = false, features = ["system-proxy"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
@@ -62,7 +65,12 @@ windows = { version = "0.62", features = [
 default = ["tls"]
 # rustls (aws-lc-rs) with the OS certificate store. Split out only so the crate can be type-checked for
 # Windows from a Linux host that has no MSVC C compiler (`--no-default-features`); release builds keep it on.
-tls = ["reqwest/rustls"]
+# The updater plugin does not compile with no TLS backend at all, so that type-check also names reqwest's C-free one:
+# `TODOPET_SKIP_WINRES=1 cargo check --target x86_64-pc-windows-msvc --no-default-features --features reqwest/rustls-no-provider`.
+tls = ["reqwest/rustls", "tauri-plugin-updater/rustls-tls"]
+# Update e2e only (`update-e2e.yml`): at start, install whatever the manifest in `TODOPET_E2E_MANIFEST` offers.
+# Never part of a release build.
+e2e-update = []
 
 [profile.release]
 codegen-units = 1

@@ -2,6 +2,7 @@
 import { countWeek, emptyWeek, rollWeek, weekFromJson, weekKey, type WeekStats } from "./chapters";
 import { addDays, dayKey, isDayKey, parseDate } from "./dates";
 import { L } from "./l10n";
+import { MAX_SAVED_NOTES, parseVersion } from "./updates";
 import { isSouvenirId, tripFromJson, type SouvenirId, type Trip } from "./trips";
 import type { Accessory, AccessorySlot, CelebrationKind, DecorId, ReminderKind, Season, StageIndex } from "./types";
 import { ACCESSORIES, ACCESSORY_SLOT, DECOR_IDS, EVERY_KINDS } from "./types";
@@ -260,6 +261,13 @@ export interface LifeState {
   bossWins: string[];
   /** How many of the stickers on the current page are 🏅 medals rather than perfect-day 🌟. */
   pageMedals: number;
+  // v0.7 "Always fresh": owned by the Brain.
+  /** The last version the pet announced ("0.7.1"): each version is announced once. */
+  updateAnnounced: string | null;
+  /** The version that ran last time; a newer one on the next start is an update to celebrate. null before the first run. */
+  lastVersion: string | null;
+  /** The release notes of the update being installed, saved right before it so the new version can show its highlights. */
+  pendingNotes: { version: string; notes: string } | null;
 }
 
 export const newLife = (): LifeState => ({
@@ -312,6 +320,9 @@ export const newLife = (): LifeState => ({
   history: {},
   bossWins: [],
   pageMedals: 0,
+  updateAnnounced: null,
+  lastVersion: null,
+  pendingNotes: null,
 });
 
 const isAccessory = (x: unknown): x is Accessory => typeof x === "string" && (ACCESSORIES as readonly string[]).includes(x);
@@ -348,6 +359,15 @@ function repairFromJson(x: unknown): RepairQuest | null {
   const from = r.restored && typeof r.restored === "object" ? (r.restored as Record<string, unknown>).from : undefined;
   if (typeof from === "number" && Number.isFinite(from) && from >= 0) quest.restored = { from: Math.trunc(from) };
   return quest;
+}
+
+const versionOrNull = (x: unknown): string | null => (parseVersion(x) ? (x as string) : null);
+
+function pendingNotesFromJson(x: unknown): { version: string; notes: string } | null {
+  if (!x || typeof x !== "object") return null;
+  const r = x as Record<string, unknown>;
+  const version = versionOrNull(r.version);
+  return version && typeof r.notes === "string" ? { version, notes: r.notes.slice(0, MAX_SAVED_NOTES) } : null;
 }
 
 /** Tolerates missing or broken fields, so adding fields later never wipes the pet's progress. */
@@ -427,6 +447,9 @@ export function lifeFromJson(raw: unknown): LifeState {
     bossWins: [...new Set(strings(r.bossWins).filter((w) => w !== ""))].slice(-MAX_BOSS_WINS),
     // At most as many medals as the page has stickers of its own (after the gifts).
     pageMedals: Math.min(Math.max(0, pageFilled - PAGE_GIFTS), clampInt(r.pageMedals, 0, PAGE_SIZE, 0)),
+    updateAnnounced: versionOrNull(r.updateAnnounced),
+    lastVersion: versionOrNull(r.lastVersion),
+    pendingNotes: pendingNotesFromJson(r.pendingNotes),
   };
 }
 

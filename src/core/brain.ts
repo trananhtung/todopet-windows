@@ -2,7 +2,7 @@
 // It never touches the OS directly: everything goes through the Backend, so it runs in Tauri, in the
 // browser demo and in unit tests with a fake clock.
 import { demoSignedCard } from "../backend/demoCards";
-import { BackendError, type AppCommand, type Backend, type ForegroundApp, type SecretsStatus, type SystemSample } from "../backend/types";
+import { BackendError, type AppCommand, type AvailableUpdate, type Backend, type ForegroundApp, type SecretsStatus, type SystemSample, type UpdateProgress, type UpdateStatus } from "../backend/types";
 import * as calm from "./calm";
 import {
   adaptiveTarget,
@@ -88,6 +88,8 @@ import { activeSeason, type ActiveSeason } from "./seasons";
 import * as trips from "./trips";
 // v0.6 "Friends".
 import * as fr from "./friends";
+// v0.7 "Always fresh".
+import * as updates from "./updates";
 
 const MIN = 60_000;
 const NEVER = -8.64e15;
@@ -151,6 +153,10 @@ const MAX_REFUSALS = 2;
 const UNREADABLE_AFTER = 5;
 /** "Later" on a plan that came true. */
 const PLAN_LATER_MINUTES = 30;
+/** v0.7: the pet's life is saved before an install, but not waited for longer than this (the install goes on and the diary says so). */
+const SAVE_WAIT_MS = 5000;
+/** v0.7: a check the pet was asked for that is still going after this long gets a "Let me look…". */
+const LOOK_AFTER_MS = 700;
 
 /** The check-ins that count their refusals: closing or ignoring one twice in a day stops that kind for the day. */
 type CardKind = "resume" | "aftermeeting";
@@ -188,14 +194,20 @@ export interface Bubble {
   validUntil?: number;
   /** Turns false once what the bubble is about has changed (its session stopped, its task is gone): it is dropped unseen. */
   stillValid?: () => boolean;
+  /**
+   * v0.7: the update's download, shown as a bar under the text (the share is null when the size isn't known). The text and bar change
+   * in place. `spoken` is what a screen reader is told: it changes only at the start, halfway and the last step.
+   */
+  progress?: { percent: number | null; spoken: string };
 }
 
 /**
  * Does this bubble get through while the board is open? Urgent ones that announce or ask something (a meeting, a timed
  * task, "is it done?") do, as a banner in the board, and so does the day's "Move some?" check-in. The quiet replies
- * ("Added ✔︎") don't: the board says so itself.
+ * ("Added ✔︎") don't: the board says so itself. A reply the board does not say by itself ("You're on the newest version") is
+ * marked `inBoard`, and shows even without a button.
  */
-export const showsOverBoard = (b: Bubble): boolean => (b.urgent || b.inBoard === true) && (b.reminder || b.actions.length > 0);
+export const showsOverBoard = (b: Bubble): boolean => b.inBoard === true || (b.urgent && (b.reminder || b.actions.length > 0));
 
 export interface FocusSession {
   task: TodoTask | null;
@@ -302,6 +314,13 @@ export interface BrainState {
   visitor: fr.Visit | null;
   /** This install's public key for pet cards (base64url), or null when Credential Manager couldn't give it. It is not a secret: it is on every card. */
   myKey: string | null;
+  // v0.7 "Always fresh".
+  /** The running version ("0.7.0"), or null when the backend couldn't say. */
+  version: string | null;
+  /** A newer published release on offer (the board's chip, the tray item and the notice are about it), or null. */
+  update: AvailableUpdate | null;
+  /** While an update installs: the download with its share, then the last step; else null. */
+  installing: updates.Installing | null;
 }
 
 /** What adding a friend's card came to: the friend, or the kind words for why not (which never repeat what the card says). */
@@ -531,6 +550,14 @@ export class Brain {
   friendDraft = "";
   /** v0.6: the board is open (a visitor makes way for it, and none comes). */
   private boardIsOpen = false;
+  /** v0.7: when the automatic checks last ran (see `updates.checkDue`), the check in flight, and the status last taken (to tell other windows when it changed). */
+  private updateLog: updates.CheckLog = { startedAt: 0, last: null };
+  private checking: Promise<UpdateStatus | null> | null = null;
+  private lastUpdateStatus: UpdateStatus | null = null;
+  /** v0.7: the first start of a newer version, still to be told at a calm moment (the highlights are the notes saved before the install). */
+  private cheer: { version: string; notes: string | null } | null = null;
+  /** v0.7: the install's bubble. Once you close it, the progress stays off the pet (the board's chip still shows it). */
+  private progressBubble: number | null = null;
 
   private constructor(
     readonly backend: Backend,
@@ -592,6 +619,9 @@ export class Brain {
       boss: fr.bossOf({ today: this.dayKey, myDone: 0, friends: [] }),
       visitor: null,
       myKey: null,
+      version: null,
+      update: null,
+      installing: null,
     };
     Object.assign(this.state, this.gameView());
   }
@@ -701,12 +731,17 @@ export class Brain {
     this.lifeSaveTimer = setTimeout(() => this.flushLife(), routine ? 60_000 : 0);
   }
 
-  private flushLife(): void {
+  /** Writes the life now; resolves with whether the write worked (callers that don't care ignore it). */
+  private flushLife(): Promise<boolean> {
     if (this.lifeSaveTimer) clearTimeout(this.lifeSaveTimer);
     this.lifeSaveTimer = null;
-    this.backend.storage.save("life", this.state.life).catch(() => undefined);
+    const saved = this.backend.storage.save("life", this.state.life).then(
+      () => true,
+      () => false,
+    );
     if (this.lifeSaveBroadcast) this.backend.bus.emit({ type: "life-changed" }).catch(() => undefined);
     this.lifeSaveBroadcast = false;
+    return saved;
   }
 
   /** setTimeout that dies with the brain. */
@@ -728,8 +763,14 @@ export class Brain {
       this.backend.bus.on((e) => {
         if (e.type === "prefs-changed" || e.type === "species-changed") void this.reloadPrefs();
         if (e.type === "secrets-changed") void this.reloadSecrets(true);
+        if (e.type === "update-changed") void this.reloadUpdates();
+        if (e.type === "update-install") void this.startUpdate();
       }),
     );
+    // v0.7: which version is running and whether one is on offer (the backend's cached answer: no network), before the tray is labelled.
+    this.updateLog.startedAt = this.now();
+    await this.reloadUpdates();
+    this.noteVersion();
     this.pushTrayLabels();
     await this.reloadSecrets(false);
     if (this.stopped) return;
@@ -837,6 +878,7 @@ export class Brain {
         quiet: L("Im lặng 1 giờ", "Quiet for 1 hour"),
         settings: L("Cài đặt…", "Settings…"),
         diary: L("Nhật ký của pet", "Pet diary"),
+        updates: updates.trayLabel(this.state.update?.version ?? null),
         quit: L("Thoát TodoPet", "Quit TodoPet"),
       })
       .catch(() => undefined);
@@ -863,6 +905,9 @@ export class Brain {
         break;
       case "show":
         this.hide(null);
+        break;
+      case "update":
+        void this.updateCommand();
         break;
     }
   }
@@ -1547,7 +1592,7 @@ export class Brain {
    * rules do (`remindEvery`, `remindOnce`, `mayRemind`) before a reminder's timer is set, so a held reminder keeps
    * its turn and comes as soon as the hold ends. Returns whether the bubble showed.
    */
-  say(b: { text: string; detail?: string; actions?: BubbleAction[]; seconds: number; urgent?: boolean; inBoard?: boolean; validUntil?: number; stillValid?: () => boolean }, opts: SayOptions = {}): boolean {
+  say(b: { text: string; detail?: string; actions?: BubbleAction[]; seconds: number; urgent?: boolean; inBoard?: boolean; validUntil?: number; stillValid?: () => boolean; progress?: Bubble["progress"] }, opts: SayOptions = {}): boolean {
     // v0.5: while the pet is away on a trip, only urgent bubbles and replies show.
     if (this.state.life.trip && opts.why !== undefined && !b.urgent) return false;
     // A bubble that went stale never blocks the next one.
@@ -1561,6 +1606,7 @@ export class Brain {
     if (b.inBoard) bubble.inBoard = true;
     if (b.validUntil !== undefined) bubble.validUntil = b.validUntil;
     if (b.stillValid) bubble.stillValid = b.stillValid;
+    if (b.progress) bubble.progress = b.progress;
     if (opts.kind) bubble.kind = opts.kind;
     if (opts.card) bubble.card = opts.card;
     this.lastBubbleAt = this.now();
@@ -1921,12 +1967,17 @@ export class Brain {
     this.trackDistraction(nowMs);
     this.updateFlow(now);
     this.recompute();
+    // v0.7: the automatic check (the notice below waits for a calm moment, this does not).
+    // (Not while an update installs: the answer would only change what the install is about.)
+    if (!this.checking && !this.state.installing && updates.checkDue(this.state.prefs.autoUpdateCheck, this.updateLog, nowMs)) void this.checkForUpdate(false);
     // A day that ended is still being settled: its kind words, and today's greeting with the streak, wait for it.
     if (this.settling) return;
     this.tellNotes(nowMs);
     this.tellChest(nowMs);
     this.tellBoss(nowMs);
     this.runRules(nowMs);
+    this.tellUpdated(nowMs);
+    this.tellUpdate(nowMs);
     this.tickVisits(nowMs);
   }
 
@@ -3986,6 +4037,299 @@ export class Brain {
     if (b && b.actions.length === 0) this.dismissBubble(b.id, "closed");
     this.startVisit(able[Math.min(able.length - 1, Math.floor(this.random() * able.length))], this.now(), false);
     return true;
+  }
+
+  // ---------- v0.7 Always fresh: the update notice and the one-click update ----------
+
+  /** Takes the backend's cached answer (no network): the running version and the update on offer, if any. */
+  private async reloadUpdates(): Promise<void> {
+    try {
+      this.applyUpdateStatus(await this.backend.updates.status());
+    } catch {
+      // The version stays as it was (unknown at the start): nothing below depends on it.
+    }
+  }
+
+  private applyUpdateStatus(st: UpdateStatus): void {
+    const before = this.state.update?.version ?? null;
+    this.lastUpdateStatus = st;
+    // A check somebody else made (Settings' "Check now", one made before this window looked) counts for the schedule too.
+    if (st.checkedAt !== null && (this.updateLog.last === null || st.checkedAt > this.updateLog.last.at)) this.updateLog.last = { at: st.checkedAt, ok: st.error === null };
+    this.patchState({ version: st.current, update: st.available });
+    // The tray item says "✨ Update to 0.7.1" while one is on offer.
+    if ((st.available?.version ?? null) !== before) this.pushTrayLabels();
+  }
+
+  /**
+   * Asks the backend for a newer release, which the backend rate-limits itself (`force` is for "Check now"): one check at
+   * a time, and a failure is not an error here. It only goes in the diary and brings the next try forward to 30 minutes.
+   * Other windows (Settings) are told when the answer changed.
+   */
+  private checkForUpdate(force: boolean): Promise<UpdateStatus | null> {
+    if (this.checking) return this.checking;
+    const run = (async (): Promise<UpdateStatus | null> => {
+      const before = JSON.stringify(this.lastUpdateStatus);
+      let st: UpdateStatus | null = null;
+      let failure: string | null = null;
+      try {
+        st = await this.backend.updates.check(force);
+        failure = st.error?.message ?? null;
+      } catch (e) {
+        failure = e instanceof Error ? e.message : String(e);
+      }
+      if (this.stopped) return st;
+      this.updateLog.last = { at: this.now(), ok: failure === null };
+      if (failure !== null) this.diary.add("sync", L("Không kiểm tra được bản mới: ", "Couldn't check for updates: ") + failure, { throttle: "update-check", every: 30 });
+      if (st) {
+        this.applyUpdateStatus(st);
+        // (Not while an update installs: Settings takes "update-changed" as the end of its wait.)
+        if (JSON.stringify(st) !== before && !this.state.installing) this.backend.bus.emit({ type: "update-changed" }).catch(() => undefined);
+      }
+      return st;
+    })().finally(() => {
+      this.checking = null;
+    });
+    this.checking = run;
+    return run;
+  }
+
+  /**
+   * The first start of a newer version than the one that ran last time is an update to celebrate (told at a calm moment, see
+   * `tellUpdated`); the very first run only records its version, and so does a step back. Notes saved for a version that is
+   * running now or behind us are dropped.
+   */
+  private noteVersion(): void {
+    const current = this.state.version;
+    if (current === null || updates.parseVersion(current) === null) return;
+    const l = this.state.life;
+    const outcome = updates.afterStart(l.lastVersion, current);
+    if (outcome === "updated") {
+      this.cheer = { version: current, notes: updates.notesFor(l.pendingNotes, current) };
+      this.diary.add("system", L(`Đã cập nhật lên bản ${current} (trước đó bản ${l.lastVersion})`, `Updated to version ${current} (it was ${l.lastVersion})`));
+      return;
+    }
+    if (outcome === "same" && !updates.notesStale(l.pendingNotes, current)) return;
+    this.mutateLife((s) => {
+      if (outcome !== "same") s.lastVersion = current;
+      if (updates.notesStale(s.pendingNotes, current)) s.pendingNotes = null;
+    }, "quiet");
+  }
+
+  /**
+   * May a notice that is no reminder speak now? Only at a calm moment (the one a friend's visit waits for: no typing or zone,
+   * focus session, meeting, call, full-screen app, board or waiting bubble; not muted, hidden, away, done for today), and not
+   * before today's greeting. `spaced` (a notice nobody asked for) also keeps the gap between bubbles and the hold after three
+   * dismissed reminders; a reply to what you did does not wait for those.
+   */
+  private calmForNotice(nowMs: number, spaced: boolean): boolean {
+    if (this.settling || this.greetingComes(nowMs) || !fr.isCalm(this.calmNow(nowMs))) return false;
+    if (!spaced) return true;
+    return calm.withinBudget(new Date(this.lastBubbleAt), new Date(nowMs), this.state.prefs.bubbleGap) && !this.onHold(L("thông báo bản mới", "the new-version notice"));
+  }
+
+  /** A new version is on offer and not yet announced: said once, at a calm moment, outside the nudge budget. */
+  private tellUpdate(nowMs: number): void {
+    const u = this.state.update;
+    if (!u || !this.state.prefs.autoUpdateCheck || !updates.shouldAnnounce(u.version, this.state.life.updateAnnounced)) return;
+    if (!this.calmForNotice(nowMs, true)) return;
+    this.announceUpdate(u, false);
+  }
+
+  /**
+   * "There's a new version of me: 0.7.1", with the first highlights and the way to get it: **Update now** when one click
+   * works, else **Download page**; and **Later**, which asks for nothing more (the chip and the tray item stay). `reply`: it
+   * answers the tray's "Check for updates…" (urgent, so it shows whatever the moment). Counts as told either way.
+   */
+  private announceUpdate(u: AvailableUpdate, reply: boolean): void {
+    const actions: BubbleAction[] = [
+      u.canInstall ? { title: lines.updateNow(), primary: true, run: () => void this.installUpdate() } : { title: lines.downloadPage(), primary: true, run: () => void this.openUpdatePage() },
+      { title: lines.updateLater(), neutral: true, run: () => undefined },
+    ];
+    const detail = lines.whatsNew(updates.highlights(u.notes));
+    const bubble = {
+      text: lines.updateAvailable(u.version),
+      ...(detail ? { detail } : {}),
+      actions,
+      seconds: reply ? 60 : 45,
+      urgent: reply,
+      // True until it goes (the release was pulled) or the install starts (the progress takes its place).
+      stillValid: () => this.state.update?.version === u.version && this.state.installing === null,
+    };
+    const spoke = reply
+      ? this.say(bubble)
+      : this.say(bubble, { why: L(`bản ${u.version} đã ra (chỉ báo một lần cho mỗi bản)`, `version ${u.version} is out (told once per version)`) });
+    if (spoke) {
+      this.mutateLife((s) => {
+        s.updateAnnounced = u.version;
+      }, "quiet");
+    }
+  }
+
+  /** The first start of a newer version, told once at a calm moment: "I'm on 0.7.1 now!" with the saved highlights, and a happy pet. */
+  private tellUpdated(nowMs: number): void {
+    const c = this.cheer;
+    if (!c || !this.calmForNotice(nowMs, false)) return;
+    this.cheer = null;
+    const detail = lines.whatsNew(updates.highlights(c.notes ?? ""));
+    this.say({ text: lines.updated(c.version), ...(detail ? { detail } : {}), seconds: 20 }, { chime: "celebrate" });
+    this.celebrateUntil = nowMs + 4000;
+    this.set({ celebration: { id: ++this.bubbleSeq, kind: "dance", food: "", golden: false, combo: 0, start: nowMs } });
+    this.recompute();
+    this.mutateLife((s) => {
+      s.lastVersion = c.version;
+      if (updates.notesStale(s.pendingNotes, c.version)) s.pendingNotes = null;
+    }, "quiet");
+  }
+
+  /**
+   * The tray's "Check for updates…" / "✨ Update to 0.7.1": install when one is ready to install, open its page when it can't
+   * be installed in one click, else ask now and answer: what it found, "you're on the newest version", or kind words.
+   */
+  private async updateCommand(): Promise<void> {
+    if (this.state.update || this.state.installing) {
+      await this.startUpdate();
+      return;
+    }
+    // A check takes a moment (up to the backend's timeout): so the tray click never looks dead.
+    this.later(() => {
+      if (this.checking) this.say({ text: lines.lookingForUpdate(), seconds: 20, urgent: true, inBoard: true, stillValid: () => this.checking !== null });
+    }, LOOK_AFTER_MS);
+    const st = await this.checkForUpdate(true);
+    if (st?.available) this.announceUpdate(st.available, true);
+    // (`inBoard`: the open board does not say these by itself.)
+    else this.say({ text: st && !st.error ? lines.upToDate() : lines.updateCheckFailed(), seconds: 8, urgent: true, inBoard: true });
+  }
+
+  /**
+   * What a click on the board's chip (and the tray item, and Settings' button) does: install in one click when that works,
+   * else open the download page. While an install runs it only brings its progress back, if you had closed it.
+   */
+  async startUpdate(): Promise<void> {
+    if (this.state.installing) {
+      this.showProgress(true);
+      return;
+    }
+    // (Settings asks over the bus: its check may have found one that this window hasn't heard of yet.)
+    if (!this.state.update) await this.reloadUpdates();
+    const u = this.state.update;
+    if (!u) {
+      // Nothing to do after all: let Settings stop waiting.
+      this.backend.bus.emit({ type: "update-changed" }).catch(() => undefined);
+      return;
+    }
+    if (u.canInstall) {
+      await this.installUpdate();
+    } else {
+      await this.openUpdatePage();
+      // Nothing is installing: if Settings asked, it must not go on saying that the app will restart.
+      this.backend.bus.emit({ type: "update-changed" }).catch(() => undefined);
+    }
+  }
+
+  /** Opens the release's page (the fallback that always works). */
+  private async openUpdatePage(): Promise<void> {
+    try {
+      await this.backend.updates.openPage();
+    } catch {
+      this.say({ text: lines.updatePageFailed(), seconds: 8, urgent: true, inBoard: true });
+    }
+  }
+
+  /**
+   * Installs the update on offer. The pet's life is saved first, with the release notes for the new version to show
+   * (`life.pendingNotes`), because the app exits while the installer runs. (The preferences are not saved here: they are
+   * saved the moment they change, by whoever changes them, and this window's copy could be older than Settings'.) Then the
+   * bubble shows the download and the last step. If it fails, the download page is offered.
+   */
+  private async installUpdate(): Promise<void> {
+    const u = this.state.update;
+    if (!u || this.state.installing) return;
+    // Each attempt hears only its own progress: a channel can deliver a message after the attempt has failed or come back, and
+    // that must not bring "Installing…" back to a pet that is no longer installing (nor move a retry's bar).
+    let live = true;
+    this.progressBubble = null;
+    this.set({ installing: { phase: "downloading", percent: null } });
+    this.showProgress();
+    // Settings, if it asked, now knows it was taken (and that the wait may be long).
+    this.backend.bus.emit({ type: "update-installing" }).catch(() => undefined);
+    this.mutateLife((s) => {
+      s.pendingNotes = { version: u.version, notes: updates.shrinkNotes(u.notes) };
+      s.updateAnnounced = u.version;
+    }, "quiet");
+    await this.saveLifeBeforeInstall();
+    try {
+      await this.backend.updates.install((p) => {
+        if (live) this.onUpdateProgress(p);
+      });
+    } catch (e) {
+      live = false;
+      this.diary.add("system", L("Không tự cập nhật được: ", "Couldn't update by itself: ") + (e instanceof Error ? e.message : String(e)));
+      this.progressBubble = null;
+      this.set({ installing: null });
+      this.say({
+        text: lines.updateFailed(),
+        actions: [{ title: lines.downloadPage(), primary: true, run: () => void this.openUpdatePage() }, { title: lines.updateLater(), neutral: true, run: () => undefined }],
+        seconds: 60,
+        urgent: true,
+      });
+      // Settings may be waiting for this one.
+      this.backend.bus.emit({ type: "update-changed" }).catch(() => undefined);
+      return;
+    }
+    live = false;
+    // The real app is gone by now (the installer restarts it); the demo "restarts" in place: the same thing as a new start.
+    this.progressBubble = null;
+    this.set({ installing: null });
+    await this.reloadUpdates();
+    this.noteVersion();
+  }
+
+  /**
+   * Saves the pet's life before the installer takes the app away, but waits at most `SAVE_WAIT_MS`: a disk that is slow or
+   * refuses must not keep the update from starting. If the save did not finish, the install goes on and the diary says so.
+   */
+  private async saveLifeBeforeInstall(): Promise<void> {
+    if (!this.persistLife) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), SAVE_WAIT_MS);
+    });
+    const outcome = await Promise.race([this.flushLife(), late]);
+    clearTimeout(timer);
+    if (outcome !== true) {
+      this.diary.add("system", L("Chưa lưu xong dữ liệu trước khi cập nhật (vẫn tiếp tục)", "Couldn't finish saving before the update (going on anyway)"));
+    }
+  }
+
+  private onUpdateProgress(p: UpdateProgress): void {
+    // (Belt and braces beside the attempt's own flag: with nothing installing there is nothing to move.)
+    if (this.state.installing === null) return;
+    const next: updates.Installing = p.phase === "installing" ? { phase: "installing" } : { phase: "downloading", percent: updates.percentOf(p) };
+    // A download reports every chunk, but only a change of the percent is worth a render.
+    if (JSON.stringify(next) === JSON.stringify(this.state.installing)) return;
+    this.set({ installing: next });
+    this.showProgress();
+  }
+
+  /**
+   * The install's one bubble, changed in place as the download goes (a new bubble for every percent would flicker). It is
+   * urgent, so no other bubble covers it. Once you close it, it stays closed; `again` (the tray item, pressed while it installs)
+   * brings it back. (The board's chip is not pressable while it installs: it shows the progress itself.)
+   */
+  private showProgress(again = false): void {
+    const i = this.state.installing;
+    if (!i) return;
+    const text = updates.progressText(i);
+    const progress = { percent: i.phase === "installing" ? 100 : i.percent, spoken: updates.spokenProgress(i) };
+    const b = this.state.bubble;
+    if (b && b.id === this.progressBubble) {
+      if (b.text !== text || b.progress?.percent !== progress.percent || b.progress?.spoken !== progress.spoken) this.set({ bubble: { ...b, text, progress } });
+      return;
+    }
+    if (this.progressBubble !== null && !again) return;
+    if (this.say({ text, seconds: 600, urgent: true, progress, stillValid: () => this.state.installing !== null }, { silent: true })) {
+      this.progressBubble = this.state.bubble?.id ?? null;
+    }
   }
 
   // ---------- Pet interaction ----------

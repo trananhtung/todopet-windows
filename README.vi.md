@@ -52,6 +52,14 @@ Tải bộ cài mới nhất ở **[Releases](https://github.com/trananhtung/tod
 
 Muốn xem thử trước? Chạy `TodoPet.exe --demo` để dùng dữ liệu mẫu, không cần tài khoản.
 
+### Cập nhật
+
+Từ bản 0.7, bạn chỉ cần cài TodoPet một lần. Khoảng 6 tiếng một lần, app hỏi GitHub xem có bản mới chưa. Khi có, pet nhắc đúng một lần vào lúc bạn rảnh (không bao giờ giữa cuộc họp hay lúc đang tập trung), rồi để sẵn trong menu khay hệ thống, trên bảng và ở **Cài đặt → Cập nhật**. Bấm **Cập nhật ngay** là app tự tải bộ cài mới, kiểm tra chữ ký, cài đặt và mở lại pet ở bản mới, kèm vài dòng "có gì mới". Không có cảnh báo SmartScreen, không phải đi tìm trang tải về.
+
+- Cập nhật một chạm dành cho bản cài bằng `setup.exe`. Nếu bạn cài bằng `.msi` (cài cho cả máy, cần quyền admin), pet sẽ mở trang tải về cho bạn.
+- Đang dùng 0.6 trở về trước? Các bản đó chưa tự cập nhật được: hãy cài tay bản 0.7 một lần, từ đó về sau chỉ cần một chạm.
+- Muốn tự kiểm tra? Tắt **Tự kiểm tra bản mới** trong **Cài đặt → Cập nhật** và dùng nút **Kiểm tra ngay**.
+
 ## Kết nối Todoist
 
 1. Trong Todoist mở **Cài đặt → Tích hợp → Nhà phát triển** ([link](https://app.todoist.com/app/settings/integrations/developer)) và sao chép **API token**.
@@ -101,7 +109,7 @@ Pet giữ điểm vui 0–100, tính lại mỗi 15 giây (y hệt bản macOS).
 
 ## Quyền riêng tư
 
-- Không thu thập dữ liệu, không có máy chủ riêng. Chỉ kết nối tới `api.todoist.com`, link lịch của bạn, và `api.anthropic.com` khi bạn bấm **Hỏi Claude**.
+- Không thu thập dữ liệu, không có máy chủ riêng. Chỉ kết nối tới `api.todoist.com`, link lịch của bạn, `api.anthropic.com` khi bạn bấm **Hỏi Claude**, và GitHub (`api.github.com`, `github.com`) để tìm bản mới; lần hỏi này không gửi gì về bạn (có thể tắt).
 - Chỉ đọc **tên ứng dụng đang mở**, và với trình duyệt thì thêm **địa chỉ tab** cùng tiêu đề trang (không đọc tiêu đề cửa sổ của ứng dụng khác); tất cả chỉ nằm trong bộ nhớ, không lưu, không gửi đi.
 - Thẻ **"Mình đang làm gì nhỉ?"** nhớ việc, ứng dụng, tiêu đề và địa chỉ trang (chỉ http/https) bạn đang dùng, cộng với "bước tiếp theo" bạn ghim. Tất cả **chỉ nằm trong bộ nhớ**: không lưu ra đĩa, không ghi vào nhật ký, và quên hẳn lúc nửa đêm. Các hẹn **Bắt đầu khi…** (một việc, và một cuộc họp, tên ứng dụng hoặc "sau bữa trưa") được lưu trong ngày và bị xoá vào hôm sau. Con ếch (chỉ lưu mã việc) và dòng ghi chú từ **Tổng kết ngày** cũng vậy, lưu tới hết ngày mà chúng dành cho.
 - Phát hiện gõ phím dùng Raw Input của Windows, chỉ ghi **thời điểm phím cuối cùng được nhấn xuống**; không bao giờ biết phím nào và không dùng keyboard hook.

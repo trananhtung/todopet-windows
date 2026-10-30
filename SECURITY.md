@@ -13,7 +13,7 @@ Please don't open a public issue for them. You'll get a reply within a week.
   itself, and only booleans and calendar host names come back to the UI (for the card key: the public half, a signature, or a yes
   or no).
 - **Network** — the UI can't make network requests (CSP `connect-src` allows only IPC). Rust talks to
-  `api.todoist.com`, `api.anthropic.com` (only when you press Ask Claude) and your calendar links. Calendar fetches
+  `api.todoist.com`, `api.anthropic.com` (only when you press Ask Claude), your calendar links and GitHub (updates, below). Calendar fetches
   are HTTPS-only, refuse private, loopback and link-local addresses (also on redirects), and are capped at 5 MB.
 - **Activity data** — the app in front, its window title (browsers only) and the active tab's address stay in
   memory. So does the "Where was I?" place (task, app, page and address, http/https only, plus the next step you
@@ -81,6 +81,36 @@ Please don't open a public issue for them. You'll get a reply within a week.
   - *Cards work on trust.* A friend can write any task count on their card, so the weekly boss counts each person for 15 at most (their
     share of its HP): one card, from a typo or a cheat, can't win the blob alone and pay you a 🏅 sticker and 50 XP. There are no
     rankings and no penalties, so there is nothing more to cheat for.
+- **Updates (v0.7)** — an update can run code on every install, so the chain is kept short and checked at both ends.
+  - *Finding one.* Rust (never the web view) asks `api.github.com/repos/trananhtung/todopet-windows/releases` over HTTPS with
+    no redirects, a 20 s timeout and a 1 MB cap, about every 6 hours (at most every 30 minutes, "Check now" at most every 20 s;
+    it can be turned off). The request carries the app's user agent and nothing about you. Only strict `vX.Y.Z` tags above the
+    running version count; drafts are invisible, so an update reaches people only when a person publishes the release. Release
+    notes are shown as plain text (control characters removed, at most 4000 characters), never as HTML.
+  - *Installing it.* The release carries `latest.json` and a minisign signature of `TodoPet_<v>_x64-setup.exe` (Tauri updater
+    format). The app embeds the public key (`plugins.updater.pubkey` in `tauri.conf.json`) and verifies the downloaded
+    installer before running it; `requireSignedVersion` makes the signature itself name the version, so a doctored manifest
+    can't pair a new version number with an older, validly signed installer. The manifest URL and the installer's URL prefix
+    are built in Rust from the tag (`github.com/trananhtung/todopet-windows/releases/download/<tag>/`); no command takes a URL
+    from JavaScript, and the updater plugin's own JS API is granted to no window (only `update_status`, `update_check`,
+    `update_install` and `update_open_page`, in the overlay and Settings). Only the per-user `setup.exe` install updates itself
+    (passive installer, then the app restarts); MSI installs, dev builds, releases without a signed manifest and any failure
+    fall back to opening the release page.
+  - *The signing key.* It lives only in the `updater-signing` GitHub environment and offline with the maintainer. The release
+    workflow builds with no secret in reach; a separate job that runs no project code signs the setup.exe with the Tauri CLI
+    pinned to the lockfile's integrity, then checks the signature with `minisign` against the public key the app embeds and
+    that it names the tag's version, before the draft release is made (the tag, the three version fields and the shipped
+    updater config are checked before the key is touched, and the installer's SHA-256 is printed in the run summary). The
+    release binary is checked for the e2e hook. A missing key fails the release. The key is never committed.
+  - *If the key is lost or leaks.* Installed apps trust only the embedded public key, so nothing can be "re-keyed" from
+    the outside. Lost: put a new public key in `tauri.conf.json`, release it signed with the new key, and tell users
+    (README, release notes) to install that one version by hand; one-click works again after it. Leaked: delete any release
+    you didn't publish (a signature alone is not enough, the release must also be published, and drafts are invisible to the
+    app), rotate the environment secrets, and ship the new key the same way. Keep an offline backup of the key, with its
+    passphrase stored apart from it (a password manager).
+  - *Proof on Windows.* `update-e2e.yml` installs an old build on a Windows runner, serves a manifest signed with a throwaway key
+    on localhost, and waits for the app to update itself and come back. That build uses the `e2e-update` cargo feature and a
+    patched config; neither is ever in a release.
 - **Links** — "Join" buttons only open known meeting services (Google Meet, Teams, Zoom, Webex, Whereby);
   `open_url` accepts `https`, `http`, and real Teams / Zoom meeting links only, and refuses `http(s)` links with a user
   name in front of the host (`https://google.com@evil.example/`).

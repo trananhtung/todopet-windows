@@ -19,6 +19,7 @@ mod storage;
 mod system;
 mod todoist;
 mod tray;
+mod updates;
 mod util;
 mod windows;
 
@@ -101,7 +102,11 @@ fn main() {
         )
         // We open links from Rust only (`open_url`); no injected click handler in the webviews.
         .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
+        // Used from Rust only (`updates.rs`): no window is granted `updater:*`, and the endpoint is never read from
+        // the config, it is built from a release tag.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
+        .manage(updates::UpdateState::new())
         .invoke_handler(tauri::generate_handler![
             todoist::todoist_tasks,
             todoist::todoist_completed,
@@ -139,6 +144,10 @@ fn main() {
             cards::card_sign,
             cards::card_verify,
             cards::card_reset_key,
+            updates::update_status,
+            updates::update_check,
+            updates::update_install,
+            updates::update_open_page,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -154,6 +163,8 @@ fn main() {
             }
             system::start(handle.clone());
             diary::prune_in_background(handle.clone());
+            #[cfg(feature = "e2e-update")]
+            updates::spawn_e2e(handle.clone());
 
             // Registered here rather than in the plugin builder: if another app already owns Ctrl+Alt+T the
             // plugin would fail to initialize and take the whole app down with it.

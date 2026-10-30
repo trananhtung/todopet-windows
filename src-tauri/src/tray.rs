@@ -27,6 +27,7 @@ struct Items {
     quiet: MenuItem<Wry>,
     settings: MenuItem<Wry>,
     diary: MenuItem<Wry>,
+    update: MenuItem<Wry>,
     quit: MenuItem<Wry>,
 }
 
@@ -40,6 +41,8 @@ pub struct TrayLabels {
     quiet: String,
     settings: String,
     diary: String,
+    /// "Check for updates…", or "✨ Update to 0.7.1" while one is available.
+    updates: String,
     quit: String,
 }
 
@@ -70,6 +73,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         quiet: item("quiet1h", "Quiet for 1 hour")?,
         settings: item("settings", "Settings…")?,
         diary: item("diary", "Diary")?,
+        update: item("update", "Check for updates…")?,
         quit: item("quit", "Quit TodoPet")?,
     };
     let menu = Menu::with_items(
@@ -83,6 +87,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             &PredefinedMenuItem::separator(app)?,
             &items.settings,
             &items.diary,
+            &items.update,
             &PredefinedMenuItem::separator(app)?,
             &items.quit,
         ],
@@ -106,6 +111,16 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Shows or hides the tray icon; a no-op without one. The icon lives in managed state, so nothing removes it when
+/// the process ends with `process::exit` (the updater's way out): Windows would keep a dead icon in the tray until the
+/// mouse passes over it. The update path hides it just before, and shows it again if the installer did not start.
+pub fn set_visible(app: &AppHandle, visible: bool) {
+    let Some(tray) = app.try_state::<Tray>() else { return };
+    if let Err(e) = tray.icon.set_visible(visible) {
+        log::warn!("Could not {} the tray icon: {e}", if visible { "show" } else { "hide" });
+    }
+}
+
 /// Tooltip such as "TodoPet — 😊 2/3" or "🍅 18:42" (cut to Windows' 127-character limit). A no-op when
 /// the tray icon could not be created at startup.
 #[tauri::command]
@@ -125,6 +140,7 @@ pub async fn set_tray_labels(app: AppHandle, labels: TrayLabels) -> CmdResult<()
         &labels.quiet,
         &labels.settings,
         &labels.diary,
+        &labels.updates,
         &labels.quit,
     ]
     .iter()
@@ -133,8 +149,17 @@ pub async fn set_tray_labels(app: AppHandle, labels: TrayLabels) -> CmdResult<()
     let Some(tray) = app.try_state::<Tray>() else { return Ok(()) };
     let items = &tray.items;
     // Same order as `texts`, all validated first so a bad label never leaves the menu half translated.
-    let menu_items =
-        [&items.board, &items.add, &items.focus, &items.hide, &items.quiet, &items.settings, &items.diary, &items.quit];
+    let menu_items = [
+        &items.board,
+        &items.add,
+        &items.focus,
+        &items.hide,
+        &items.quiet,
+        &items.settings,
+        &items.diary,
+        &items.update,
+        &items.quit,
+    ];
     for (item, text) in menu_items.into_iter().zip(texts) {
         item.set_text(text).map_err(util::tauri_err)?;
     }

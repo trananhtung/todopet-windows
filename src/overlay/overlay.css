@@ -336,14 +336,60 @@ body.overlay {
   white-space: pre-line;
   padding-right: 18px;
 }
+/* The update's download: a bar in the place of the countdown. */
+.bubble-progress {
+  position: relative;
+  height: 6px;
+  margin-top: 10px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+.bubble-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--accent);
+  transition: width 0.25s var(--ease-out);
+}
+/* The size isn't known: a short bar slides to and fro instead of filling. */
+.bubble-progress i.indeterminate {
+  width: 35%;
+  transition: none;
+  animation: progress-slide 1.2s ease-in-out infinite alternate;
+}
+@keyframes progress-slide {
+  from {
+    translate: 0 0;
+  }
+  to {
+    translate: 185% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble-progress i {
+    transition: none;
+  }
+  .bubble-progress i.indeterminate {
+    width: 100%;
+    animation: none;
+    opacity: 0.55;
+  }
+}
 /* Where you were, on the resume card: quieter than the task above it. */
 .bubble-detail {
+  white-space: pre-line;
   margin-top: 2px;
   padding-right: 18px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+/* The "What's new" list: a bullet that wraps hangs under its own words, not under the dot. */
+.bubble-detail .bullet {
+  padding-left: 1em;
+  text-indent: -1em;
 }
 /* The same bubble inside the open board: a strip under the header, not floating over the pet. */
 .bubble.banner {
@@ -605,7 +651,8 @@ body.overlay {
     "avatar name tools"
     "avatar mood mood"
     "stats stats stats"
-    "quest quest quest";
+    "quest quest quest"
+    "fresh fresh fresh";
   column-gap: 10px;
   align-items: center;
   padding: 9px 8px 8px 12px;
@@ -849,6 +896,65 @@ body.overlay {
   font-variant-numeric: tabular-nums;
   color: var(--accent-text);
 }
+/*
+ * v0.7: "✨ 0.7.1 is ready", a small chip under the stats while a newer version is on offer. Its row opens with a short slide
+ * (0fr to 1fr) so that the board's body does not jump by the row's height when it appears; with reduced motion it just appears.
+ */
+.update-chip-row {
+  grid-area: fresh;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s var(--ease-out);
+}
+.update-chip-row.open {
+  grid-template-rows: 1fr;
+}
+/* (Room round the chip for its focus ring, which the clipping would otherwise cut.) */
+.update-chip-clip {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 5px 5px;
+  margin: 0 -5px -5px;
+  opacity: 0;
+  transition: opacity 0.28s ease-out;
+}
+.update-chip-row.open .update-chip-clip {
+  opacity: 1;
+}
+.update-chip {
+  display: block;
+  max-width: 100%;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.update-chip:hover:not([aria-disabled="true"]) {
+  border-color: var(--accent);
+}
+.update-chip[aria-disabled="true"] {
+  cursor: default;
+}
+.update-chip:focus-visible {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-chip-row,
+  .update-chip-clip {
+    transition: none;
+  }
+}
+
 /* The chests waiting to be opened (finish a task): a tiny pill at the end of the row; a click opens the wardrobe. */
 .stat.stat-chest {
   flex: none;

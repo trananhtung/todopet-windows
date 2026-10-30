@@ -14,6 +14,7 @@ pub mod ratelimit;
 pub mod store;
 pub mod system;
 pub mod todoist;
+pub mod update;
 pub mod validate;
 
 pub use error::{CmdError, CmdResult, ErrorKind};

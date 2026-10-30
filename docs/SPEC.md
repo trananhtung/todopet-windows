@@ -543,3 +543,86 @@ Where the sections above left room, this is what v0.6 does. Tests are in `src/co
   stand-in key, through the same path as a pasted card; *Visit* starts a visit now without using up the day's two. Each fresh demo
   load has an identity of its own (a random seed kept in the page's storage, so a reload keeps it), so a card copied in one load is a
   friend's card in another and a real exchange can be tried between two tabs.
+
+## v0.7 "Always fresh" (Luôn mới): update notice and one-click updates
+
+Goal: the user learns about a new version without hunting for it, and installs it with one click, without ever
+being nagged. Designed in a dev-team session (PM, Architect, Developer, QA); the decisions below settle the tensions
+it raised.
+
+### Decisions
+
+- **Discovery through the GitHub API, not a fixed manifest URL.** Every release is a pre-release and GitHub's
+  `/releases/latest` skips those. Rust asks `GET https://api.github.com/repos/trananhtung/todopet-windows/releases?per_page=20`
+  and picks the highest strict `vX.Y.Z` tag above the running version (drafts are invisible to it, pre-releases
+  count). So a release joins the update channel when a person *publishes* the draft, never on a tag push.
+- **One-click needs a signed manifest.** The release workflow attaches `latest.json` and `TodoPet_<v>_x64-setup.exe.sig`
+  (Tauri updater format, minisign, signed with `--app-version` so the signature names its version). The app embeds
+  the public key and sets `requireSignedVersion`, so a tampered manifest cannot pair a new version number with an
+  older, validly signed installer (no downgrades).
+- **Only the NSIS (setup.exe) install updates itself.** The manifest has one entry, `windows-x86_64-nsis`. MSI
+  installs are per-machine and need an admin prompt, so they get "Open download page" instead. So do dev builds,
+  releases without a manifest, and any one-click failure: the download page is always the fallback, so a broken
+  updater never strands anyone.
+- **Network in Rust only.** Narrow commands (`update_status`, `update_check`, `update_install`, `update_open_page`)
+  take no URL from JavaScript; the plugin's own JS API is not granted to any window. URLs are built in Rust from the
+  validated tag; the installer URL must sit under `https://github.com/trananhtung/todopet-windows/releases/download/<tag>/`.
+- **The signing key never meets project code.** The build job (which runs `npm ci` and cargo) has no secret. A
+  separate `sign` job, bound to the `updater-signing` environment, downloads the built setup.exe and signs it with a
+  pinned Tauri CLI, then verifies the signature against the public key in `tauri.conf.json` with `minisign` before
+  anything is published. A missing secret fails the release loudly.
+- **The notice is a kind, once-per-version mention.** It is free (outside the daily nudge budget) but waits for a calm
+  moment like any non-urgent bubble (no meeting, no focus session, no screen sharing, no typing flow, no full screen,
+  bubble gap respected), and each version is announced at most once. After that it stays quietly findable: tray item
+  "✨ Update to 0.7.1", a small chip on the board, and Settings → Updates.
+
+### 1. Rust (`src-tauri/src/updates.rs`, `crates/todopet-core/src/update.rs`)
+
+- Pure core (`todopet-core::update`): strict tag parsing (`v` + three dot-separated numbers, each ≤ 9999, nothing
+  else), picking the newest release above the current version from the API's JSON (drafts skipped), building the
+  release page and manifest URLs from the tag, checking an installer URL is under the release's download prefix, and
+  cleaning release notes to plain text (no control characters, at most 4000 characters and 60 lines).
+- Shell (`updates.rs`): the API call uses the shared `api` client (HTTPS only, no redirects) with the GitHub headers,
+  a 1 MB body cap and a 20 s timeout. With a manifest and an NSIS install, it builds the plugin's updater with that
+  one endpoint and runs `check()`; the result can install only if the announced version equals the tag's and the
+  download URL passes the prefix check. The `Update` is cached in managed state for `update_install`.
+- Rate limits: a non-forced check reuses the last result if it is younger than 30 minutes; a forced one ("Check now")
+  at most every 20 seconds. Failures keep the last good result and report `{ kind, message }`.
+- `update_install(onProgress: Channel)`: one at a time; streams `{ phase: "downloading", downloaded, total }`, then
+  `{ phase: "installing" }`, then the plugin runs the installer in passive mode with `/UPDATE` and exits; the
+  installer relaunches the app.
+- Tray: a new item between Diary and Quit, labelled by the page ("Check for updates…" or "✨ Update to 0.7.1"). It
+  emits the `update` app command to the overlay, which decides (install if one is ready, else check and answer).
+- `e2e-update` cargo feature (never in release builds): reads `TODOPET_E2E_MANIFEST` at start, skips discovery and the
+  URL prefix check, installs whatever that manifest offers, logging each step. Used only by the Windows update e2e
+  workflow.
+
+### 2. Overlay (`src/core/updates.ts`, `brain.ts`, `Bubble.tsx`, board)
+
+- `prefs.autoUpdateCheck` (default on): first check 2 minutes after start, then every 6 hours.
+- Announcement: once per version (`life.updateAnnounced`), at a calm moment, free. Buttons: **Update now** (when it
+  can install) or **Download page** (when not), and **Later**. A "What's new" line shows the first highlights.
+- Installing: the brain saves everything first, then the bubble shows progress ("Downloading… 45%", "Installing, see
+  you in a moment!"). On failure: "I couldn't update myself. Grab it from the download page?" with the button.
+- After the update: on the first start of a newer version the pet celebrates once ("I'm on 0.7.1 now! ✨") with the
+  notes saved before installing (`life.pendingNotes`), then records `life.lastVersion`. The very first run only
+  records the version.
+- Board: a small "✨ 0.7.1 is ready" chip while an update is available; clicking it starts the same flow.
+- Tray command `update`: install if one is ready; otherwise check now and say "You're on the newest version 👍"
+  (or the error, kindly).
+
+### 3. Settings → Updates
+
+Current version; status (up to date / new version / checking / couldn't check); **Check now**; **Update & restart** or
+**Open download page**; the release notes; the auto-check toggle; a privacy line ("Asks GitHub about every 6 hours;
+sends nothing about you"); for MSI installs, why one-click is off and what to do.
+
+### 4. Verification
+
+- Unit tests: tag parsing and picking, URL checks, notes cleaning (Rust); scheduling, once-per-version, calm-moment
+  gating, flows and copy (vitest, fake clock).
+- `update-e2e.yml` (windows-latest, on demand and when updater files change): builds an "old" app with the
+  `e2e-update` feature and a throwaway key, builds a "new" 9.9.9, signs it, serves the manifest on localhost,
+  installs the old app, starts it and waits until the installed version reads 9.9.9 and the new app is running.
+- Release: the sign job refuses to publish a signature that does not verify against the embedded public key or does
+  not name the tag's version.

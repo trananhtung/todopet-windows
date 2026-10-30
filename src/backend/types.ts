@@ -172,7 +172,7 @@ export interface CursorSample {
 }
 
 /** Commands coming from the tray menu, the global hotkey (Ctrl+Alt+T → "add") or a second launch ("board"). */
-export type AppCommand = "board" | "add" | "focus" | "hide1h" | "quiet1h" | "show";
+export type AppCommand = "board" | "add" | "focus" | "hide1h" | "quiet1h" | "show" | "update";
 
 export type ExtraWindow = "settings" | "diary" | "gallery";
 
@@ -185,6 +185,8 @@ export interface TrayLabels {
   quiet: string;
   settings: string;
   diary: string;
+  /** "Check for updates…", or "✨ Update to 0.7.1" while one is available. */
+  updates: string;
   quit: string;
 }
 
@@ -247,6 +249,64 @@ export interface CardsApi {
   resetKey(): Promise<void>;
 }
 
+// ---------- Updates (v0.7): discovery, check and install live in Rust; no URL ever comes from JS ----------
+
+/** Why an available update can't be installed in one click; the download page is offered instead. */
+export type UpdateManualReason =
+  /** Installed from an MSI package (per-machine, needs an admin prompt). */
+  | "msi"
+  /** The release has no signed manifest (`latest.json`). */
+  | "unsigned"
+  /** A development build, not an installed app. */
+  | "dev"
+  /** The signed manifest could not be read or did not match the release. */
+  | "check_failed";
+
+export interface AvailableUpdate {
+  /** "0.7.1" (no "v"). */
+  version: string;
+  /** The release notes as plain text (may be empty), at most 4000 characters. */
+  notes: string;
+  /** ISO 8601, or null when GitHub didn't say. */
+  publishedAt: string | null;
+  /** true: `install()` can update in one click. false: offer `openPage()` (see `manualReason`). */
+  canInstall: boolean;
+  manualReason: UpdateManualReason | null;
+}
+
+export interface UpdateStatus {
+  /** The running version, "0.7.0". */
+  current: string;
+  /** Epoch ms of the last check that completed (successfully or not), null before the first. */
+  checkedAt: number | null;
+  /** A newer published release, or null when up to date (or never checked). */
+  available: AvailableUpdate | null;
+  /** The last check's failure, null when it succeeded. A failure keeps the previous `available`. */
+  error: BackendErrorPayload | null;
+}
+
+export type UpdateProgress =
+  | { phase: "downloading"; downloaded: number; total: number | null }
+  | { phase: "installing" };
+
+export interface UpdatesApi {
+  /** The cached state, no network. */
+  status(): Promise<UpdateStatus>;
+  /**
+   * Asks GitHub for a newer release. Not forced: reuses a result younger than 30 minutes. Forced ("Check now"): at
+   * most every 20 seconds, otherwise the cached result. Network failures resolve with `error` set, they don't reject.
+   */
+  check(force: boolean): Promise<UpdateStatus>;
+  /**
+   * Downloads, verifies and installs the available update, reporting progress. On Windows the app exits while the
+   * installer runs and comes back on the new version, so on success this never resolves in practice. Rejects when
+   * nothing can be installed or any step fails; the caller then offers `openPage()`.
+   */
+  install(onProgress: (p: UpdateProgress) => void): Promise<void>;
+  /** Opens the available release's page on GitHub (or the releases list when none is known). */
+  openPage(): Promise<void>;
+}
+
 // ---------- Cross-window events ----------
 
 export type BusEvent =
@@ -254,7 +314,12 @@ export type BusEvent =
   | { type: "life-changed" }
   | { type: "secrets-changed" }
   | { type: "diary-changed" }
-  | { type: "species-changed" };
+  | { type: "species-changed" }
+  // v0.7: the update state changed (re-read `updates.status()`); Settings asks the overlay (which owns the pet's state) to install; and the
+  // overlay answers that it has taken the request (the install is under way, and the progress is in the pet's bubble).
+  | { type: "update-changed" }
+  | { type: "update-install" }
+  | { type: "update-installing" };
 
 export interface BusApi {
   emit(e: BusEvent): Promise<void>;
@@ -271,5 +336,6 @@ export interface Backend {
   storage: StorageApi;
   diary: DiaryApi;
   cards: CardsApi;
+  updates: UpdatesApi;
   bus: BusApi;
 }

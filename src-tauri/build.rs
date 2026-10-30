@@ -39,11 +39,16 @@ const COMMANDS: &[&str] = &[
     "card_sign",
     "card_verify",
     "card_reset_key",
+    "update_status",
+    "update_check",
+    "update_install",
+    "update_open_page",
 ];
 
 fn main() {
     // Escape hatch for type-checking the Windows target from a Linux/macOS host
-    // (`TODOPET_SKIP_WINRES=1 cargo check --target x86_64-pc-windows-msvc --no-default-features`):
+    // (`TODOPET_SKIP_WINRES=1 cargo check --target x86_64-pc-windows-msvc --no-default-features --features
+    // reqwest/rustls-no-provider`, the last flag because the updater plugin needs some TLS backend to compile):
     // such hosts have no resource compiler (`rc.exe` / `llvm-rc`), so tauri-build is told it is building for
     // the host and skips embedding the icon and manifest. Never set this for a real build.
     println!("cargo:rerun-if-env-changed=TODOPET_SKIP_WINRES");

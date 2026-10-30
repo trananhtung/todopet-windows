@@ -1,6 +1,6 @@
 // The real backend: Tauri commands implemented in Rust (src-tauri/src). Command names are snake_case;
 // arguments are camelCase here and arrive as snake_case parameters in Rust (Tauri's convention).
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppCommand,
@@ -16,6 +16,8 @@ import type {
   SystemSample,
   TrayLabels,
   Unsubscribe,
+  UpdateProgress,
+  UpdateStatus,
 } from "./types";
 import { BackendError } from "./types";
 
@@ -35,6 +37,9 @@ const BUS_TYPES: ReadonlySet<string> = new Set<BusEvent["type"]>([
   "secrets-changed",
   "diary-changed",
   "species-changed",
+  "update-changed",
+  "update-install",
+  "update-installing",
 ]);
 
 /** Rust commands reject with a serialized `CmdError`; Tauri itself rejects with a plain string (unknown
@@ -81,6 +86,14 @@ function subscribe<T>(event: string, cb: (payload: T) => void): Unsubscribe {
     unlisten?.();
     unlisten = null;
   };
+}
+
+/** A progress message from `update_install`: the download with its byte counts (the total may be unknown), or the last step. */
+function isUpdateProgress(p: unknown): p is UpdateProgress {
+  if (typeof p !== "object" || p === null) return false;
+  const m = p as Record<string, unknown>;
+  if (m.phase === "installing") return true;
+  return m.phase === "downloading" && typeof m.downloaded === "number" && (m.total === null || typeof m.total === "number");
 }
 
 function isBusEvent(p: unknown): p is BusEvent {
@@ -169,6 +182,20 @@ export function createTauriBackend(): Backend {
       sign: (payload) => call<string>("card_sign", { payload }),
       verify: (pk, payload, sig) => call<boolean>("card_verify", { pk, payload, sig }),
       resetKey: () => call<void>("card_reset_key"),
+    },
+
+    // Discovery, check and install live in Rust; no URL passes through here. The install command is in the overlay window's capability alone.
+    updates: {
+      status: () => call<UpdateStatus>("update_status"),
+      check: (force) => call<UpdateStatus>("update_check", { force }),
+      install: (onProgress) => {
+        const channel = new Channel<unknown>();
+        channel.onmessage = (p) => {
+          if (isUpdateProgress(p)) onProgress(p);
+        };
+        return call<void>("update_install", { onProgress: channel });
+      },
+      openPage: () => call<void>("update_open_page"),
     },
 
     // A JS-side event broadcast to every window (the sender receives it too).

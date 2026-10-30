@@ -66,6 +66,8 @@ export interface Prefs {
   showHome: boolean;
   /** The decorations picked for the home corner (at most 3); none picked shows the newest ones. */
   homeItems: DecorId[];
+  /** v0.7: ask GitHub for a newer version 2 minutes after the start and every 6 hours (nothing about you is sent). Off: only "Check now" asks. */
+  autoUpdateCheck: boolean;
 }
 
 export const DEFAULT_FILTER = "today | overdue";
@@ -111,6 +113,7 @@ export function defaultPrefs(now = Date.now()): Prefs {
     restDays: [],
     showHome: true,
     homeItems: [],
+    autoUpdateCheck: true,
   };
 }
 
@@ -209,6 +212,7 @@ export function prefsFromJson(raw: unknown, now = Date.now(), today = now): Pref
     restDays: tidyRestDays(r.restDays, today),
     showHome: bool("showHome"),
     homeItems: tidyHomeItems(r.homeItems),
+    autoUpdateCheck: bool("autoUpdateCheck"),
   };
 }
 

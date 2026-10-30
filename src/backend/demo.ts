@@ -10,6 +10,8 @@ import type {
   RawStats,
   RawTask,
   SystemSample,
+  UpdateProgress,
+  UpdateStatus,
   Unsubscribe,
 } from "./types";
 import { getLang } from "../core/l10n";
@@ -129,10 +131,27 @@ export function demoIcs(now: Date): string {
 
 const pause = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 
+/** The version the demo runs, the one a check finds, and what that release says (short and plain, like the real notes). */
+const DEMO_VERSION = "0.7.0";
+const DEMO_NEXT = "0.7.1";
+const DEMO_NOTES = [
+  "## What's new",
+  "",
+  "- Faster board when your task list is long",
+  "- Fixed the focus timer drifting after the PC wakes from sleep",
+  "- Kinder wording when Todoist can't be reached",
+].join("\n");
+/** The pretend network wait of a check, so "Checking…" can be seen. */
+const DEMO_CHECK_MS = 500;
+/** The pretend download: this many steps of `DEMO_STEP_MS` (about 2 seconds), of this many bytes in all. */
+const DEMO_STEPS = 10;
+const DEMO_STEP_MS = 200;
+const DEMO_BYTES = 4_400_000;
+
 /** Minutes for today's tasks on the demo's "heavy day": more than a work day, even before the meetings. */
 const HEAVY_MINUTES: Readonly<Record<string, number>> = { "1": 240, "2": 180, "4": 240 };
 
-export function createDemoBackend(opts: { now?: () => number; persist?: boolean; cardSeed?: string } = {}): DemoBackend {
+export function createDemoBackend(opts: { now?: () => number; persist?: boolean; cardSeed?: string; fastUpdates?: boolean } = {}): DemoBackend {
   // The demo panel can move the clock (opts.now, from tests, stays as it is): the next morning, a Friday.
   let clockShift = 0;
   const now = opts.now ?? (() => Date.now() + clockShift);
@@ -198,6 +217,23 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean;
   }
 
   const find = (id: string) => tasksNow().findIndex((t) => t.id === id);
+
+  // v0.7: the demo runs 0.7.0 and finds 0.7.1 when it checks; "installing" streams a pretend download, then "restarts" as 0.7.1.
+  let appVersion = DEMO_VERSION;
+  let checkedAt: number | null = null;
+  let found = false;
+  let installing = false;
+  // (Tests ask for `fastUpdates`: the pretend network wait and download shrink to a few milliseconds.)
+  const checkMs = opts.fastUpdates ? 2 : DEMO_CHECK_MS;
+  const stepMs = opts.fastUpdates ? 2 : DEMO_STEP_MS;
+  const updateStatus = (): UpdateStatus => ({
+    current: appVersion,
+    checkedAt,
+    available: found
+      ? { version: DEMO_NEXT, notes: DEMO_NOTES, publishedAt: new Date(now() - 2 * 86_400_000).toISOString(), canInstall: true, manualReason: null }
+      : null,
+    error: null,
+  });
 
   const backend: DemoBackend = {
     kind: "demo",
@@ -409,6 +445,37 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean;
         }
         return [...keys].sort().reverse();
       },
+    },
+    updates: {
+      async status() {
+        return updateStatus();
+      },
+      async check() {
+        await pause(checkMs);
+        checkedAt = now();
+        found = appVersion !== DEMO_NEXT;
+        return updateStatus();
+      },
+      async install(onProgress: (p: UpdateProgress) => void) {
+        if (!found) throw new BackendError({ kind: "invalid", message: "No update to install" });
+        if (installing) throw new BackendError({ kind: "invalid", message: "An update is already being installed" });
+        installing = true;
+        try {
+          for (let i = 1; i <= DEMO_STEPS; i++) {
+            await pause(stepMs);
+            onProgress({ phase: "downloading", downloaded: Math.round((DEMO_BYTES * i) / DEMO_STEPS), total: DEMO_BYTES });
+          }
+          onProgress({ phase: "installing" });
+          await pause(stepMs);
+          // The "restart": the real app exits here and comes back as the new version.
+          appVersion = DEMO_NEXT;
+          found = false;
+          checkedAt = now();
+        } finally {
+          installing = false;
+        }
+      },
+      async openPage() {},
     },
     // DEMO ONLY (not cryptography): a stand-in for the card key, so the sample friends' cards can be added through the same path as real ones.
     // Each demo load has an identity of its own (remembered across reloads), so a card copied in one load is a friend's card in another.

@@ -13,8 +13,8 @@ export function AboutSection() {
   const privacy = [
     L("Không có analytics, không có máy chủ riêng.", "No analytics and no servers of its own."),
     L(
-      "Chỉ kết nối tới api.todoist.com, các link lịch của bạn, và api.anthropic.com khi bạn bấm Hỏi Claude.",
-      "It only talks to api.todoist.com, your calendar links, and api.anthropic.com when you press Ask Claude.",
+      "Chỉ kết nối tới api.todoist.com, các link lịch của bạn, api.anthropic.com khi bạn bấm Hỏi Claude, và GitHub để xem có bản mới (không gửi gì về bạn; tắt được trong mục Cập nhật).",
+      "It only talks to api.todoist.com, your calendar links, api.anthropic.com when you press Ask Claude, and GitHub to look for a new version (nothing about you is sent; you can turn that off under Updates).",
     ),
     L("Tiêu đề cửa sổ và địa chỉ thẻ trình duyệt chỉ nằm trong bộ nhớ.", "Window titles and tab addresses stay in memory."),
     L("Bộ theo dõi bàn phím chỉ ghi thời điểm phím cuối cùng được bấm, không bao giờ ghi phím nào.", "The keyboard hook records only when you last pressed a key, never which key."),

@@ -2101,3 +2101,27 @@ describe("the demo panel's friend buttons (v0.6 evaluation, issue 10)", () => {
     expect(Brain).toBeTruthy();
   });
 });
+
+describe("the update notice in the board (v0.7)", () => {
+  it("says in the reminders tooltip that the new-version notice is free, once per version", async () => {
+    await mount();
+    const tip = document.querySelector<HTMLElement>(".nudges")!.getAttribute("title")!;
+    expect(tip).toMatch(/the new-version notice \(once per version\)/);
+    expect(tip).toMatch(/don't count\.$/);
+  });
+
+  it("puts the chip in the header only while a version is on offer, and the board opens as before without one", async () => {
+    await mount();
+    expect(document.querySelector(".board-head .update-chip")).toBeNull();
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await mount(request(), {
+      setup: (b) => {
+        const real = b.updates.status.bind(b.updates);
+        b.updates.status = async () => ({ ...(await real()), available: { version: "0.7.1", notes: "", publishedAt: null, canInstall: true, manualReason: null } });
+      },
+    });
+    const chip = document.querySelector<HTMLButtonElement>(".board-head .update-chip")!;
+    expect(chip.textContent).toBe("✨ 0.7.1 is ready");
+  });
+});

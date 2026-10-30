@@ -243,6 +243,14 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             >
               👋 {L("Ghé chơi", "Visit")}
             </button>
+            <button
+              className="btn"
+              disabled={!fake || s.installing !== null}
+              title={L("Như mục “Cập nhật” trên khay hệ thống: kiểm tra bản mới, rồi cập nhật (bản demo giả lập)", "Like the tray's update item: check for a new version, then install it (the demo pretends)")}
+              onClick={() => fake?.command("update")}
+            >
+              ✨ {s.update ? L("Cập nhật", "Update") : L("Kiểm tra", "Check update")}
+            </button>
             <button className="btn" onClick={() => brain.tick()}>
               ⏱ {L("Chạy luật", "Run rules")}
             </button>

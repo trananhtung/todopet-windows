@@ -19,7 +19,8 @@ export function getBackend(): Promise<Backend> {
     // the user's Todoist, secrets, saved settings or card key (the sample friends' cards are signed by the demo's stand-in).
     // (Its card key is a stand-in with an identity of its own for this launch.)
     const fake = createDemoBackend({ persist: false, cardSeed: freshDemoSeed() });
-    return { ...real, todoist: fake.todoist, secrets: fake.secrets, claude: fake.claude, calendar: fake.calendar, storage: fake.storage, diary: fake.diary, cards: fake.cards };
+    // (Updates are the demo's too: a demo launch must never ask GitHub or run a real installer.)
+    return { ...real, todoist: fake.todoist, secrets: fake.secrets, claude: fake.claude, calendar: fake.calendar, storage: fake.storage, diary: fake.diary, cards: fake.cards, updates: fake.updates };
   })();
   return cached;
 }

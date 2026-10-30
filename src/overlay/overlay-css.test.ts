@@ -114,4 +114,35 @@ describe("overlay.css", () => {
     const marks = rule(".visitor-label .vl-who .friend-lookalike,\n.visitor-label .vl-who .friend-tag", () => petLifeCss);
     expect(marks.flex).toBe("none");
   });
+
+  // v0.7: the update chip sits in a row of its own under the stats (and the repair line); the row slides open instead of jumping,
+  // and a long version never widens the board.
+  it("gives the update chip its own row in the board's header, opened with a slide (and plainly for reduced motion)", () => {
+    expect(css).toMatch(/\.board-head \{[^}]*"quest quest quest"\s*"fresh fresh fresh";/);
+    const row = rule(".update-chip-row");
+    expect(row["grid-area"]).toBe("fresh");
+    expect(row["grid-template-rows"]).toBe("0fr");
+    expect(row.transition).toMatch(/grid-template-rows/);
+    expect(rule(".update-chip-row.open")["grid-template-rows"]).toBe("1fr");
+    expect(rule(".update-chip-clip").overflow).toBe("hidden");
+    expect(rule(".update-chip-clip")["min-height"]).toBe("0");
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.update-chip-row,\s*\.update-chip-clip \{\s*transition: none;/);
+  });
+
+  it("cuts a long chip with an ellipsis rather than widening the board", () => {
+    const chip = rule(".update-chip");
+    expect(chip["max-width"]).toBe("100%");
+    expect(chip.overflow).toBe("hidden");
+    expect(chip["text-overflow"]).toBe("ellipsis");
+    expect(chip["white-space"]).toBe("nowrap");
+  });
+
+  it("shows the notice's highlights one to a line with a hanging indent, and the download as a bar that holds still for people who ask for less motion", () => {
+    expect(rule(".bubble-detail")["white-space"]).toBe("pre-line");
+    const bullet = rule(".bubble-detail .bullet");
+    expect(bullet["padding-left"]).toBe("1em");
+    expect(bullet["text-indent"]).toBe("-1em");
+    expect(rule(".bubble-progress").overflow).toBe("hidden");
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.bubble-progress i \{\s*transition: none;[\s\S]*?\.bubble-progress i\.indeterminate \{[^}]*animation: none;/);
+  });
 });

@@ -35,6 +35,7 @@ import {
   type WardrobeGroupId,
 } from "./boardGame";
 import { BubbleView } from "./Bubble";
+import { UpdateChip } from "./UpdateChip";
 import { DayStripCard } from "./DayStrip";
 import { FriendsSheet } from "./Friends";
 import type { BoardPlacement } from "./placement";
@@ -187,7 +188,7 @@ export function Board(props: {
         }
       }}
     >
-      <Header s={s} backend={backend} onClose={onClose} onWardrobe={() => setView({ kind: "wardrobe" })} onFriends={() => setView({ kind: "friends" })} />
+      <Header s={s} brain={brain} backend={backend} onClose={onClose} onWardrobe={() => setView({ kind: "wardrobe" })} onFriends={() => setView({ kind: "friends" })} />
       {banner && <BubbleView key={banner.id} bubble={banner} brain={brain} banner />}
       <div className="board-body">
         {needsToken ? (
@@ -223,7 +224,7 @@ export function Board(props: {
   );
 }
 
-function Header({ s, backend, onClose, onWardrobe, onFriends }: { s: BrainState; backend: Backend; onClose: () => void; onWardrobe: () => void; onFriends: () => void }) {
+function Header({ s, brain, backend, onClose, onWardrobe, onFriends }: { s: BrainState; brain: Brain; backend: Backend; onClose: () => void; onWardrobe: () => void; onFriends: () => void }) {
   const info = speciesInfo(s.prefs.species);
   const speciesName = info.name[getLang()];
   const sameName = s.prefs.petName.trim().toLocaleLowerCase() === speciesName.toLocaleLowerCase();
@@ -290,6 +291,7 @@ function Header({ s, backend, onClose, onWardrobe, onFriends }: { s: BrainState;
       </div>
       {s.hasToken && !s.authError && <Stats s={s} onWardrobe={onWardrobe} />}
       {s.hasToken && !s.authError && <RepairLine s={s} />}
+      <UpdateChip s={s} brain={brain} />
       {s.loading && <span className="sr-only">{L("Đang đồng bộ", "Syncing")}</span>}
     </header>
   );
@@ -2058,8 +2060,8 @@ function NudgeCount({ s }: { s: BrainState }) {
   const hold = s.nudgeHoldUntil !== null && s.nudgeHoldUntil > Date.now() ? timeString(new Date(s.nudgeHoldUntil)) : null;
   const title =
     L(
-      `Hôm nay còn ${left}/${s.prefs.nudgeBudget} lần nhắc. Việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp, cảnh báo quá tải, lời rủ đi chơi và việc bạn tự hẹn giờ không tính.`,
-      `${left} of ${s.prefs.nudgeBudget} reminders left today. Timed tasks, meetings, the morning hello, the end-of-day review, the "where was I?" card, the question after a meeting, the overbooked check, the trip offer and plans you set yourself don't count.`,
+      `Hôm nay còn ${left}/${s.prefs.nudgeBudget} lần nhắc. Việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp, cảnh báo quá tải, lời rủ đi chơi, thông báo có bản mới (mỗi bản một lần) và việc bạn tự hẹn giờ không tính.`,
+      `${left} of ${s.prefs.nudgeBudget} reminders left today. Timed tasks, meetings, the morning hello, the end-of-day review, the "where was I?" card, the question after a meeting, the overbooked check, the trip offer, the new-version notice (once per version) and plans you set yourself don't count.`,
     ) + (hold ? L(` Đang tạm im tới ${hold}.`, ` Holding reminders until ${hold}.`) : "");
   // A plain span can't carry an aria-label: the count is a status, and the detail is read as hidden text.
   return (

@@ -6,7 +6,7 @@ import type { LifeState } from "../core/life";
 import { addDays, daysBetween } from "../core/dates";
 import { MAX_REST_DAYS, MAX_REST_RANGE, type Prefs } from "../core/prefs";
 
-export const SECTION_IDS = ["pet", "todoist", "workday", "focus", "distractions", "calendar", "postponed", "behavior", "about"] as const;
+export const SECTION_IDS = ["pet", "todoist", "workday", "focus", "distractions", "calendar", "postponed", "behavior", "updates", "about"] as const;
 export type SectionId = (typeof SECTION_IDS)[number];
 
 /** "#calendar" → "calendar"; anything unknown → "pet". */

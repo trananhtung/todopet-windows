@@ -364,6 +364,18 @@ describe("kind lines", () => {
     ],
     postcard: [["Hội An", "Lanterns on the river at night."]],
     newWeek: [[{ key: "2026-10-26", done: 11, stickers: 2, trips: 1 }], [{ key: "2026-10-26", done: 0, stickers: 0, trips: 0 }], [null]],
+    // v0.7 Always fresh: the update notice, the install and the first start of a new version.
+    updateAvailable: [["0.7.1"]],
+    whatsNew: [[["Faster board", "Fixed the timer"]]],
+    updateNow: [[]],
+    downloadPage: [[]],
+    updateLater: [[]],
+    updateFailed: [[]],
+    updatePageFailed: [[]],
+    upToDate: [[]],
+    updateCheckFailed: [[]],
+    lookingForUpdate: [[]],
+    updated: [["0.7.1"]],
   };
 
   it("never scolds: every line and every spoken line, in both languages; only playful while you're on a distraction", () => {

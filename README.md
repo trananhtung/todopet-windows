@@ -56,6 +56,14 @@ Download the latest installer from **[Releases](https://github.com/trananhtung/t
 
 Want to look around first? Run `TodoPet.exe --demo` to use sample tasks, no account needed.
 
+### Updates
+
+From 0.7 on you only install TodoPet once. About every 6 hours it asks GitHub whether a newer version is out. When one is, the pet mentions it once, at a calm moment (never in a meeting or mid-focus), and keeps it findable in the tray menu, on the board and in **Settings → Updates**. **Update now** downloads the new installer, checks its signature, installs it and brings the pet back on the new version, with a note on what's new. No SmartScreen prompt, no hunting for the download page.
+
+- The one-click update is for the `setup.exe` install. If you installed the `.msi` (per-machine, needs admin), the pet offers the download page instead.
+- Coming from 0.6 or older? Those versions can't update themselves: install 0.7 once by hand, and every update after that is one click.
+- Prefer to check yourself? Turn off **Check for updates automatically** in **Settings → Updates** and use **Check now**.
+
 ## Connect Todoist
 
 1. In Todoist open **Settings → Integrations → Developer** ([direct link](https://app.todoist.com/app/settings/integrations/developer)) and copy your **API token**.
@@ -117,7 +125,7 @@ Score ≥ 75 is happy, ≥ 50 chill, and anything lower worried. It only turns g
 
 ## Privacy
 
-- No analytics and no servers of its own. Network traffic goes to `api.todoist.com`, your ICS links, and to `api.anthropic.com` only when you press **Ask Claude**.
+- No analytics and no servers of its own. Network traffic goes to `api.todoist.com`, your ICS links, to `api.anthropic.com` only when you press **Ask Claude**, and to GitHub (`api.github.com`, `github.com`) to look for updates, which sends nothing about you (it can be turned off).
 - Distraction detection reads the **name of the app in front** and, for browsers, the **address of the active tab** and its page title (window titles of other apps are never read). They stay in memory and are never stored or sent anywhere.
 - The **"Where was I?"** card remembers the task, app, page title and address (http/https only) you were on, plus the next step you pin. It lives **in memory only**: never saved to disk, never written to the diary, and forgotten at midnight. Your **Start when…** plans (a task, and a meeting's id and title, an app name or "after lunch") are saved for the day and deleted the day after; the diary only says what kind of plan it was. So are the frog (a task id) and the one-line note from **Wrap up**, until the day they are for is over.
 - Typing detection uses Windows Raw Input and records **only the time of the last key-down**: it never reads which key, and it is not a keyboard hook.

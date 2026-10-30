@@ -8,6 +8,10 @@ import { Icon } from "../ui/icons";
  * positions it. It never takes focus by itself (that would steal keystrokes from the app you are in),
  * but its buttons are in the tab order with a visible focus ring.
  *
+ * An update's download (`bubble.progress`) is a bar instead of the countdown, and its text and bar change in place as the
+ * download goes. The bubble is not a live region then, or a screen reader would read out every percent; a small hidden one
+ * (`progress.spoken`) speaks at the start, halfway and the last step.
+ *
  * `banner` is the same bubble inside the open board (an urgent one: a meeting, a timed task): a strip under the
  * header, with the same words and buttons, which the frame loop leaves alone.
  */
@@ -41,7 +45,7 @@ export const BubbleView = forwardRef<HTMLDivElement, { bubble: Bubble; brain: Br
       className={`bubble${banner ? " banner" : ""}${bubble.urgent ? " urgent" : ""}${leaving ? " leaving" : ""}${paused ? " paused" : ""}`}
       data-hit=""
       role="status"
-      aria-live={bubble.urgent ? "assertive" : "polite"}
+      aria-live={bubble.progress ? "off" : bubble.urgent ? "assertive" : "polite"}
       style={banner ? undefined : { left: -9999, top: -9999 }}
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
@@ -66,7 +70,16 @@ export const BubbleView = forwardRef<HTMLDivElement, { bubble: Bubble; brain: Br
       }
     >
       <div className="bubble-text">{bubble.text}</div>
-      {bubble.detail && <div className="bubble-detail">{bubble.detail}</div>}
+      {bubble.detail && (
+        // One block to a line: a bullet that wraps hangs under its own words (the "What's new" list).
+        <div className="bubble-detail">
+          {bubble.detail.split("\n").map((line, i) => (
+            <div key={i} className={line.startsWith("• ") ? "bullet" : undefined}>
+              {line}
+            </div>
+          ))}
+        </div>
+      )}
       <button className="bubble-close" aria-label={L("Đóng", "Close")} title={L("Đóng", "Close")} onClick={() => brain.dismissBubble(bubble.id, "closed")}>
         <Icon name="close" size={14} />
       </button>
@@ -79,9 +92,27 @@ export const BubbleView = forwardRef<HTMLDivElement, { bubble: Bubble; brain: Br
           ))}
         </div>
       )}
-      <div className="bubble-timer" aria-hidden>
-        <i style={{ animationDuration: `${bubble.seconds}s` }} />
-      </div>
+      {bubble.progress && (
+        <span className="sr-only" aria-live="polite" aria-atomic="true">
+          {bubble.progress.spoken}
+        </span>
+      )}
+      {bubble.progress ? (
+        <div
+          className="bubble-progress"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={bubble.progress.percent ?? undefined}
+          aria-valuetext={bubble.text}
+        >
+          <i className={bubble.progress.percent === null ? "indeterminate" : undefined} style={bubble.progress.percent === null ? undefined : { width: `${bubble.progress.percent}%` }} />
+        </div>
+      ) : (
+        <div className="bubble-timer" aria-hidden>
+          <i style={{ animationDuration: `${bubble.seconds}s` }} />
+        </div>
+      )}
     </div>
   );
 });

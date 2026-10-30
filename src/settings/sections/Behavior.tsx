@@ -102,8 +102,8 @@ export function BehaviorSection() {
             <>
               <b>{L("Không tính: ", "Never counted: ")}</b>
               {L(
-                "việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp, cảnh báo quá tải và việc bạn tự hẹn giờ.",
-                "timed tasks, meetings, the morning hello, the end-of-day review, the “where was I?” card, the question after a meeting, the overbooked check and plans you set yourself.",
+                "việc có giờ, cuộc họp, lời chào buổi sáng, tổng kết cuối ngày, thẻ “bạn đang làm gì”, câu hỏi sau họp, cảnh báo quá tải, thông báo có bản mới (mỗi bản một lần) và việc bạn tự hẹn giờ.",
+                "timed tasks, meetings, the morning hello, the end-of-day review, the “where was I?” card, the question after a meeting, the overbooked check, the new-version notice (once per version) and plans you set yourself.",
               )}{" "}
               {L(
                 "Chỉ lời nhắc bạn không yêu cầu mới tính. Bạn đóng loại nào thì loại đó thưa dần; bỏ qua 3 lần liền thì thú cưng im một giờ.",

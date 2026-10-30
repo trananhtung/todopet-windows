@@ -19,6 +19,7 @@ import { PetSection } from "./sections/Pet";
 import { PostponedSection } from "./sections/Postponed";
 import { FocusSection, WorkdaySection } from "./sections/Schedule";
 import { TodoistSection } from "./sections/Todoist";
+import { UpdatesSection } from "./sections/Updates";
 
 interface Loaded {
   prefs: Prefs;
@@ -99,6 +100,7 @@ const NAV: Record<SectionId, { icon: IconName; label: () => string }> = {
   calendar: { icon: "calendar", label: () => L("Lịch", "Calendar") },
   postponed: { icon: "hourglass", label: () => L("Việc bị hoãn", "Postponed tasks") },
   behavior: { icon: "sliders", label: () => L("Tính cách", "Behavior") },
+  updates: { icon: "sparkle", label: () => L("Cập nhật", "Updates") },
   about: { icon: "info", label: () => L("Giới thiệu", "About") },
 };
 
@@ -111,6 +113,7 @@ const PAGES: Record<SectionId, () => ReactNode> = {
   calendar: () => <CalendarSection />,
   postponed: () => <PostponedSection />,
   behavior: () => <BehaviorSection />,
+  updates: () => <UpdatesSection />,
   about: () => <AboutSection />,
 };
 

@@ -21,6 +21,10 @@ pub enum AppCommand {
     Hide1h,
     #[serde(rename = "quiet1h")]
     Quiet1h,
+    /// The tray's "Check for updates…" / "✨ Update to 0.7.1": the overlay installs if an update is ready,
+    /// otherwise checks now and answers.
+    #[serde(rename = "update")]
+    Update,
 }
 
 impl AppCommand {
@@ -32,6 +36,7 @@ impl AppCommand {
             "focus" => Some(Self::Focus),
             "hide1h" => Some(Self::Hide1h),
             "quiet1h" => Some(Self::Quiet1h),
+            "update" => Some(Self::Update),
             _ => None,
         }
     }

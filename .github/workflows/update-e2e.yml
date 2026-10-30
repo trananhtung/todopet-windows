@@ -1,0 +1,165 @@
+name: Update e2e
+
+# Proves the one-click update on a real Windows machine: an installed "old" TodoPet finds a signed manifest, downloads
+# and verifies the new setup.exe, runs it and comes back as the new version. It uses a throwaway signing key made in
+# this job and a manifest served on localhost, never the release key or GitHub's releases.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - src-tauri/src/updates.rs
+      - src-tauri/src/main.rs
+      - src-tauri/crates/todopet-core/src/update.rs
+      - src-tauri/Cargo.toml
+      - src-tauri/Cargo.lock
+      - src-tauri/tauri.conf.json
+      - .github/workflows/update-e2e.yml
+
+concurrency:
+  group: update-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  e2e:
+    name: Update an installed app (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      # Same as the release build (no install scripts).
+      - run: npm ci --ignore-scripts
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+          shared-key: update-e2e
+
+      - name: Throwaway key and a test-only config
+        shell: bash
+        run: |
+          npx tauri signer generate --ci -p "" -w "$RUNNER_TEMP/e2e.key"
+          # The test build trusts the throwaway key and a plain-HTTP manifest on localhost. Never committed.
+          PUBKEY="$(cat "$RUNNER_TEMP/e2e.key.pub")" node -e '
+            const fs = require("fs");
+            const path = "src-tauri/tauri.conf.json";
+            const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+            conf.plugins.updater.pubkey = process.env.PUBKEY.trim();
+            conf.plugins.updater.dangerousInsecureTransportProtocol = true;
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2));
+          '
+
+      - name: Build the old app (with the e2e hook)
+        shell: bash
+        run: |
+          npx tauri build --debug --bundles nsis --features e2e-update
+          mkdir -p "$RUNNER_TEMP/old"
+          cp src-tauri/target/debug/bundle/nsis/*-setup.exe "$RUNNER_TEMP/old/setup.exe"
+          rm -f src-tauri/target/debug/bundle/nsis/*-setup.exe
+
+      - name: Build the new app (9.9.9) and sign it
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = "src-tauri/tauri.conf.json";
+            const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+            conf.version = "9.9.9";
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2));
+          '
+          npx tauri build --debug --bundles nsis --features e2e-update
+          mkdir -p "$RUNNER_TEMP/www"
+          cp src-tauri/target/debug/bundle/nsis/*_9.9.9_*-setup.exe "$RUNNER_TEMP/www/new-setup.exe"
+          npx tauri signer sign -f "$RUNNER_TEMP/e2e.key" -p "" --app-version 9.9.9 "$RUNNER_TEMP/www/new-setup.exe"
+          SIG="$(cat "$RUNNER_TEMP/www/new-setup.exe.sig")" node -e '
+            const fs = require("fs");
+            const manifest = {
+              version: "9.9.9",
+              notes: "e2e",
+              pub_date: new Date().toISOString(),
+              platforms: { "windows-x86_64-nsis": { signature: process.env.SIG, url: "http://127.0.0.1:8765/new-setup.exe" } },
+            };
+            fs.writeFileSync(process.argv[1], JSON.stringify(manifest, null, 2));
+          ' "$RUNNER_TEMP/www/latest.json"
+          cat "$RUNNER_TEMP/www/latest.json"
+          # A tampered copy (one extra byte) announced with the genuine signature: the app must refuse it.
+          cp "$RUNNER_TEMP/www/new-setup.exe" "$RUNNER_TEMP/www/tampered-setup.exe"
+          printf 'x' >> "$RUNNER_TEMP/www/tampered-setup.exe"
+          sed 's/new-setup\.exe/tampered-setup.exe/' "$RUNNER_TEMP/www/latest.json" > "$RUNNER_TEMP/www/tampered.json"
+
+      - name: Install the old app, start it and wait for the update
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $www = Join-Path $env:RUNNER_TEMP "www"
+          $server = Start-Process python -ArgumentList "-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", $www -PassThru -WindowStyle Hidden
+
+          Start-Process (Join-Path $env:RUNNER_TEMP "old\setup.exe") -ArgumentList "/S" -Wait
+          $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\TodoPet"
+          $installed = Get-ItemProperty $key
+          Write-Host "Installed $($installed.DisplayVersion) in $($installed.InstallLocation)"
+          if ($installed.DisplayVersion -eq "9.9.9") { throw "The old build already reports 9.9.9" }
+          # NSIS writes InstallLocation with quotes around it.
+          $dir = $installed.InstallLocation.Trim('"')
+          $exe = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notmatch "uninstall" } | Select-Object -First 1
+          $log = Join-Path $env:LOCALAPPDATA "com.trananhtung.todopet\logs\TodoPet.log"
+          $running = { Get-Process | Where-Object { $_.Path -eq $exe.FullName } }
+
+          # 1. A tampered installer is refused: nothing is installed and the pet keeps running.
+          Write-Host "Starting $($exe.FullName) with a tampered update"
+          $env:TODOPET_E2E_MANIFEST = "http://127.0.0.1:8765/tampered.json"
+          Start-Process $exe.FullName
+          $deadline = (Get-Date).AddMinutes(2)
+          $refused = $false
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 3
+            if ((Test-Path $log) -and (Select-String -Path $log -Pattern "\]\[ERROR\] e2e-update:" -Quiet)) { $refused = $true; break }
+          }
+          Start-Sleep -Seconds 3
+          $version = (Get-ItemProperty $key).DisplayVersion
+          Write-Host "tampered: refused=$refused installed=$version running=$([bool](& $running))"
+          if (-not $refused) { throw "The tampered installer was not refused" }
+          if ($version -ne $installed.DisplayVersion) { throw "Something was installed from a tampered update" }
+          if (-not (& $running)) { throw "The app did not keep running after refusing the update" }
+          & $running | Stop-Process -Force
+          Start-Sleep -Seconds 2
+
+          # 2. The genuine update installs and the app comes back on the new version.
+          Write-Host "Starting $($exe.FullName) with a genuine update"
+          $env:TODOPET_E2E_MANIFEST = "http://127.0.0.1:8765/latest.json"
+          Start-Process $exe.FullName
+
+          $deadline = (Get-Date).AddMinutes(6)
+          $updated = $false
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 5
+            $version = (Get-ItemProperty $key -ErrorAction SilentlyContinue).DisplayVersion
+            $alive = & $running
+            Write-Host "$(Get-Date -Format HH:mm:ss) installed=$version running=$([bool]$alive)"
+            if ($version -eq "9.9.9" -and $alive) { $updated = $true; break }
+          }
+          Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+          if (-not $updated) { throw "The app did not update itself to 9.9.9 and come back" }
+          Write-Host "Updated to 9.9.9 and running again."
+
+      - name: Show the app log
+        if: always()
+        shell: pwsh
+        run: |
+          $logs = Join-Path $env:LOCALAPPDATA "com.trananhtung.todopet\logs"
+          if (Test-Path $logs) { Get-ChildItem $logs -Filter *.log | ForEach-Object { Write-Host "== $($_.Name)"; Get-Content $_.FullName -Tail 200 } }
+          else { Write-Host "No log folder at $logs" }
