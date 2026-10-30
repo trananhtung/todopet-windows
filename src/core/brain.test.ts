@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDemoBackend, type DemoBackend } from "../backend/demo";
 import { BackendError, type RawTask, type SystemSample } from "../backend/types";
 import { Brain, type Bubble } from "./brain";
-import { setLang } from "./l10n";
+import { L, setLang } from "./l10n";
 import { demoLife, type LifeState } from "./life";
 import { defaultPrefs, type Prefs } from "./prefs";
 
@@ -2862,6 +2862,99 @@ describe("Brain v0.4 review: stored plans", () => {
       await vi.waitFor(async () => expect((await diaryOnDisk(ok)).some((t) => t.includes("Couldn't save your start plans"))).toBe(true));
     } finally {
       again.stop();
+    }
+  });
+});
+
+describe("Brain v0.8: lines that don't repeat (SPEC v0.8 §1)", () => {
+  type Rig = Awaited<ReturnType<typeof rig>>;
+  /** Adds a task for today and finishes it through the pet, a minute after the last one; returns its bubble. */
+  const finish = async (r: Rig, title: string, brain: Brain = r.brain): Promise<Bubble> => {
+    r.clock.t += MIN;
+    await brain.add(title, "today", 1);
+    const task = await vi.waitFor(() => {
+      const found = brain.getSnapshot().day.today.find((t) => t.content === title);
+      expect(found, title).toBeDefined();
+      return found!;
+    });
+    await brain.complete(task);
+    return brain.getSnapshot().bubble!;
+  };
+  /** The option said last for a key: the one with the newest time. */
+  const newest = (b: Brain, key: string): number => {
+    const at = b.getSnapshot().life.said[key]?.at ?? [];
+    return at.indexOf(Math.max(...at));
+  };
+  /**
+   * Finishes tasks until one is cheered with a `done` line (the one that reaches today's target has a line of its
+   * own, `done.target`); returns which option it was and the bubble.
+   */
+  const finishDone = async (r: Rig, title: string, brain: Brain = r.brain): Promise<{ index: number; bubble: Bubble }> => {
+    for (let k = 1; k <= 3; k++) {
+      const bubble = await finish(r, `${title} ${k}`, brain);
+      expect(bubble.actions.map((a) => a.title), `${title} ${k}`).toContain(L("Hoàn tác", "Undo"));
+      const at = brain.getSnapshot().life.said.done?.at ?? [];
+      if (Math.max(0, ...at) === r.clock.t) return { index: newest(brain, "done"), bubble };
+    }
+    throw new Error(`no done line for ${title}`);
+  };
+
+  it("finishing tasks says every done line once before any comes back, and keeps Undo on every bubble", async () => {
+    const r = await rig({ prefs: { dailyTarget: 10 } });
+    try {
+      const said: number[] = [];
+      for (let i = 1; i <= 5; i++) said.push((await finishDone(r, `Task ${i}`)).index);
+      expect(r.brain.getSnapshot().life.said.done.n).toBe(4);
+      expect(new Set(said.slice(0, 4)).size).toBe(4);
+      expect(said[4]).not.toBe(said[3]);
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("the saved state never holds a task title", async () => {
+    const r = await rig({ prefs: { dailyTarget: 10 } });
+    try {
+      await finishDone(r, "SENTINEL-7f3a");
+      const saved = await vi.waitFor(async () => {
+        const life = (await r.backend.storage.load("life")) as LifeState | null;
+        expect(life?.said?.done).toBeDefined();
+        return life;
+      });
+      expect(JSON.stringify(saved)).not.toContain("SENTINEL-7f3a");
+    } finally {
+      r.brain.stop();
+    }
+  });
+
+  it("the line memory survives a restart", async () => {
+    const r = await rig({ prefs: { dailyTarget: 10 } });
+    let again: Brain | null = null;
+    try {
+      for (let i = 1; i <= 3; i++) await finishDone(r, `Before ${i}`);
+      const unused = r.brain.getSnapshot().life.said.done.at.indexOf(0);
+      expect(unused).toBeGreaterThanOrEqual(0);
+      await vi.waitFor(async () => expect(((await r.backend.storage.load("life")) as LifeState).said.done.at.indexOf(0)).toBe(unused));
+      r.brain.stop();
+      again = await r.boot();
+      expect((await finishDone(r, "After", again)).index).toBe(unused);
+    } finally {
+      r.brain.stop();
+      again?.stop();
+    }
+  });
+
+  it("one memory for both languages", async () => {
+    const r = await rig({ prefs: { dailyTarget: 10 } });
+    try {
+      const first = (await finishDone(r, "In English")).index;
+      setLang("vi");
+      const second = await finishDone(r, "Bằng tiếng Việt");
+      expect(second.index).not.toBe(first);
+      expect(second.bubble.text.split("\n")[0]).toMatch(/Xong|Tuyệt vời|Mình vui|Giỏi quá/);
+    } finally {
+      setLang("en");
+      r.brain.stop();
     }
   });
 });

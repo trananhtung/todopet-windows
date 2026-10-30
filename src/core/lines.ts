@@ -1,4 +1,8 @@
 // Everything the pet says, in both languages (Lines.swift). Tone follows the mood.
+//
+// Lines that vary are packs of [vi, en] options handed to `say` (SPEC v0.8 §1): the brain passes its memory, so the
+// pet doesn't say the same line again while a fresh one is left. Append only: a new option goes at the end of its
+// pack, since an option's index is its identity in that memory.
 import type { CalEvent, SlotSuggestion } from "./calendar";
 import { hoursText, shortText, timeString } from "./dates";
 import { L, pick } from "./l10n";
@@ -14,15 +18,19 @@ import { eventKey, LUNCH_HOUR, type StartTrigger } from "./triggers";
 import { emojiOf, itemName, placeName, type TripReturn } from "./trips";
 import { weekRecap, type WeekStats } from "./chapters";
 import type { Accessory, Mood, StageIndex } from "./types";
+import type { Phrase } from "./variety";
 
 const q = (t: TodoTask) => `“${shortText(taskTitle(t))}”`;
 
-export function greeting(now: Date): string {
+/** Any option at random: for callers (and tests) without the pet's memory. */
+export const randomPhrase: Phrase = (p) => pick(p.options);
+
+export function greeting(now: Date, say: Phrase): string {
   const h = now.getHours();
-  if (h < 11) return L("Chào buổi sáng! ☀️", "Good morning! ☀️");
-  if (h < 13) return L("Chào buổi trưa! 🌤", "Good day! 🌤");
-  if (h < 18) return L("Chào buổi chiều! 🌇", "Good afternoon! 🌇");
-  return L("Chào buổi tối! 🌙", "Good evening! 🌙");
+  if (h < 11) return say({ key: "greeting.morning", options: [["Chào buổi sáng! ☀️", "Good morning! ☀️"]] });
+  if (h < 13) return say({ key: "greeting.midday", options: [["Chào buổi trưa! 🌤", "Good day! 🌤"]] });
+  if (h < 18) return say({ key: "greeting.afternoon", options: [["Chào buổi chiều! 🌇", "Good afternoon! 🌇"]] });
+  return say({ key: "greeting.evening", options: [["Chào buổi tối! 🌙", "Good evening! 🌙"]] });
 }
 
 export function hello(name: string): string {
@@ -38,21 +46,21 @@ export interface MorningPlan {
   note: string | null;
 }
 
-export function morning(now: Date, plannedCount: number, openCount: number, next: TodoTask | null, target: number, plan: MorningPlan | null = null): string {
-  const g = greeting(now);
+export function morning(now: Date, plannedCount: number, openCount: number, next: TodoTask | null, target: number, plan: MorningPlan | null = null, say: Phrase): string {
+  const g = greeting(now, say);
   const frog = plan?.frog ?? null;
   const picked = frog !== null && frog.id === next?.id;
   let text: string;
   if (plannedCount < target) {
-    text = `${g} ${L(
+    text = `${g} ${say({ key: "morning.plan", options: [[
       `Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc thôi 📝`,
       `What are our ${target} things today? Only ${plannedCount}/${target} planned so far 📝`,
-    )}`;
+    ]] })}`;
   } else if (next) {
     text = `${g} ${
       picked
-        ? L(`Hôm nay có ${openCount} việc. Con ếch bạn đã chọn từ trước: ${q(next)} 🐸`, `${openCount} tasks today. The frog you picked before you left: ${q(next)} 🐸`)
-        : L(`Hôm nay có ${openCount} việc. Ăn con ếch trước: ${q(next)} 🐸`, `${openCount} tasks today. Eat the frog first: ${q(next)} 🐸`)
+        ? say({ key: "morning.frogPicked", options: [[`Hôm nay có ${openCount} việc. Con ếch bạn đã chọn từ trước: ${q(next)} 🐸`, `${openCount} tasks today. The frog you picked before you left: ${q(next)} 🐸`]] })
+        : say({ key: "morning.frog", options: [[`Hôm nay có ${openCount} việc. Ăn con ếch trước: ${q(next)} 🐸`, `${openCount} tasks today. Eat the frog first: ${q(next)} 🐸`]] })
     }`;
   } else {
     text = g;
@@ -67,50 +75,50 @@ export function morning(now: Date, plannedCount: number, openCount: number, next
 
 // Outside distractions a low mood is worry, so the worried (and grumpy) lines offer help, never a telling-off.
 
-export function plan(mood: Mood, plannedCount: number, target: number): string {
+export function plan(mood: Mood, plannedCount: number, target: number, say: Phrase): string {
   const k = target - plannedCount;
   if (mood === "angry") {
-    return pick([
+    return say({ key: "plan.angry", options: [
       [`Mình cùng kéo hôm nay lại nhé: chọn thêm ${k} việc, mình giúp bạn bắt đầu 💪`, `Let's get today back on track: pick ${k} more and I'll help you start 💪`],
       [`Mình cùng lên nốt kế hoạch hôm nay nhé: còn ${k} việc nữa thôi 📝`, `Let's plan the rest of today together: just ${k} more to go 📝`],
-    ]);
+    ] });
   }
   if (mood === "annoyed") {
-    return pick([
+    return say({ key: "plan.annoyed", options: [
       [`Mình hơi lo… hôm nay mới có ${plannedCount}/${target} việc. Chọn thêm ${k} việc cùng mình nhé? 📝`, `I'm a little worried… only ${plannedCount}/${target} planned. Pick ${k} more with me? 📝`],
       [`Kế hoạch chưa đủ cũng không sao. Chọn ${k} việc nhỏ cho dễ bắt đầu nhé 🌱`, `Not fully planned yet, and that's okay. Pick ${n(k, "small task")} to get going 🌱`],
-    ]);
+    ] });
   }
-  return pick([
+  return say({ key: "plan.normal", options: [
     [`Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc 📝`, `What are our ${target} things today? ${plannedCount}/${target} planned 📝`],
     [`Chọn ${k} việc quan trọng nhất cho hôm nay nhé ✍️`, `Pick the ${k} most important tasks for today ✍️`],
-  ]);
+  ] });
 }
 
-export function nudge(mood: Mood, next: TodoTask, hoursIdle: number): string {
+export function nudge(mood: Mood, next: TodoTask, hoursIdle: number, say: Phrase): string {
   if (mood === "happy") {
-    return pick([
+    return say({ key: "nudge.happy", options: [
       [`Đang ngon trớn! Tiếp theo là ${q(next)} nha ✨`, `On a roll! Next up: ${q(next)} ✨`],
       [`Mình thích nhịp này! Làm luôn ${q(next)} nhé 💪`, `Love this pace! Let's do ${q(next)} 💪`],
-    ]);
+    ] });
   }
   if (mood === "annoyed") {
-    return pick([
+    return say({ key: "nudge.annoyed", options: [
       [`${q(next)} có vẻ khó nhằn? Mình làm 10 phút thôi nhé 🌱`, `${q(next)} feeling heavy? Let's just do 10 minutes 🌱`],
       [`Mình hơi lo cho ${q(next)}. Bật một phiên tập trung, mình ngồi canh cho nhé? ⏱`, `I'm a little worried about ${q(next)}. Start a focus session and I'll keep watch? ⏱`],
-    ]);
+    ] });
   }
   if (mood === "angry") {
     const h = Math.max(1, Math.round(hoursIdle));
-    return pick([
+    return say({ key: "nudge.angry", options: [
       [`${h} tiếng chưa có tiến triển. Mình làm bước nhỏ đầu tiên của ${q(next)} nhé 💪`, `${h}h without a win. Let's take the first small step of ${q(next)} 💪`],
       [`Quay lại với ${q(next)} nha? Mình canh giờ cho bạn tập trung 🛡️`, `Back to ${q(next)}? I'll guard the time while you focus 🛡️`],
-    ]);
+    ] });
   }
-  return pick([
+  return say({ key: "nudge.normal", options: [
     [`Việc tiếp theo: ${q(next)}. Làm một phiên tập trung không?`, `Next: ${q(next)}. Want a focus session?`],
     [`Nhắc nhẹ: ${q(next)} đang chờ bạn 🙂`, `Gentle nudge: ${q(next)} is waiting 🙂`],
-  ]);
+  ] });
 }
 
 const staysPut = (repeating: number) =>
@@ -122,24 +130,24 @@ const staysPut = (repeating: number) =>
  * `movable` overdue tasks can move: to today, or a fresh start that moves them all to tomorrow. `repeating` ones
  * keep their own schedule; when every overdue task repeats, there's nothing to move and only Show is offered.
  */
-export function overdue(mood: Mood, movable: number, repeating = 0): string {
+export function overdue(mood: Mood, movable: number, repeating = 0, say: Phrase): string {
   if (movable === 0) {
-    return L(
+    return say({ key: "overdue.repeating", options: [[
       `${repeating} việc lặp lại đang quá hạn 🔁 Chúng tự quay lại theo lịch, nên xong lần này khi bạn rảnh là được.`,
       `${n(repeating, "repeating task")} ${repeating === 1 ? "is" : "are"} overdue 🔁 They come back on their own schedule, so just tick this one off when you can.`,
-    );
+    ]] });
   }
   const them = movable === 1 ? "it" : "them";
   if (mood === "annoyed" || mood === "angry") {
     return (
-      L(
+      say({ key: "overdue.worried", options: [[
         `${movable} việc quá hạn đang chờ… 😟 Để mình giúp: dời vào hôm nay, hoặc dời hết sang mai để bắt đầu lại.`,
         `${n(movable, "overdue task")} waiting… 😟 Let me help: move ${them} to today, or clear ${them} to tomorrow for a fresh start.`,
-      ) + staysPut(repeating)
+      ]] }) + staysPut(repeating)
     );
   }
   return (
-    L(`Có ${movable} việc quá hạn 😬 Dời vào hôm nay, hay dời hết sang mai để bắt đầu lại?`, `${n(movable, "overdue task")} 😬 Move ${them} to today, or make a fresh start tomorrow?`) +
+    say({ key: "overdue", options: [[`Có ${movable} việc quá hạn 😬 Dời vào hôm nay, hay dời hết sang mai để bắt đầu lại?`, `${n(movable, "overdue task")} 😬 Move ${them} to today, or make a fresh start tomorrow?`]] }) +
     staysPut(repeating)
   );
 }
@@ -171,44 +179,44 @@ export const freshStartUndone = (back: number, failed: number) =>
 
 // While you're on a distracting app or site, the pet may be playful (a pout, a stomp, a sign), never insulting.
 
-export function distraction(mood: Mood, app: string, left: number, next: TodoTask | null): string {
+export function distraction(mood: Mood, app: string, left: number, next: TodoTask | null, say: Phrase): string {
   if (mood === "angry" && next) {
-    return L(`Lại ${app} rồi nè 👀 ${q(next)} đang nhớ bạn đó, quay lại với mình nhé? 😤`, `Psst, ${app} again? 👀 ${q(next)} misses you. Come back to it with me? 😤`);
+    return say({ key: "distraction.angry", options: [[`Lại ${app} rồi nè 👀 ${q(next)} đang nhớ bạn đó, quay lại với mình nhé? 😤`, `Psst, ${app} again? 👀 ${q(next)} misses you. Come back to it with me? 😤`]] });
   }
-  return pick([
+  return say({ key: "distraction", options: [
     [`Ê! Đang ${app} đó hả? 👀 Còn ${left} việc kìa.`, `Hey! On ${app}? 👀 ${n(left, "task")} left.`],
     [`Mình thấy bạn mở ${app} nha 👀 Quay lại làm việc chứ?`, `I see ${app} 👀 Back to work?`],
-  ]);
+  ] });
 }
 
 /** `sound` is the species' voice ("meow", "gâu gâu"), so each pet cheers in its own way. */
-export function done(t: TodoTask, completed: number, target: number, sound: string): string {
-  if (completed === target) return L(`Đủ ${target} việc rồi!!! Bạn là nhất 🏆`, `That's ${target}!!! You're the best 🏆`);
-  return pick([
+export function done(t: TodoTask, completed: number, target: number, sound: string, say: Phrase): string {
+  if (completed === target) return say({ key: "done.target", options: [[`Đủ ${target} việc rồi!!! Bạn là nhất 🏆`, `That's ${target}!!! You're the best 🏆`]] });
+  return say({ key: "done", options: [
     [`Xong ${q(t)}! 🎉 (${completed}/${target})`, `Done: ${q(t)}! 🎉 (${completed}/${target})`],
     [`Tuyệt vời! ✔︎ ${q(t)}`, `Awesome! ✔︎ ${q(t)}`],
     [`${sound}! Mình vui quá 🥳 (${completed}/${target})`, `${sound}! So happy 🥳 (${completed}/${target})`],
     [`Giỏi quá! Tiếp tục giữ nhịp nhé 💪`, `Nice! Keep the rhythm 💪`],
-  ]);
+  ] });
 }
 
-export const allDone = () =>
-  L("Xong hết việc hôm nay rồi! 🎉 Nghỉ ngơi, hoặc chọn sẵn 3 việc cho mai nhé.", "Everything's done for today! 🎉 Rest, or pick tomorrow's 3 tasks.");
+export const allDone = (say: Phrase) =>
+  say({ key: "allDone", options: [["Xong hết việc hôm nay rồi! 🎉 Nghỉ ngơi, hoặc chọn sẵn 3 việc cho mai nhé.", "Everything's done for today! 🎉 Rest, or pick tomorrow's 3 tasks."]] });
 
 /**
  * `day` in `review`, `wrappedUp` and `movedToTomorrow` is the next workday's name ("Monday", "Thứ Hai") when it isn't tomorrow, else null: the day
  * the wrap-up really moves things to (the same name as the Wrap up sheet's buttons).
  */
-export const review = (completed: number, plannedCount: number, left: number, day: string | null = null) =>
+export const review = (completed: number, plannedCount: number, left: number, day: string | null = null, say: Phrase) =>
   left === 0
     ? // Nothing left to move: only the wrap-up is offered.
       completed > 0
-        ? L(`Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc 🎉 Mình tổng kết ngày nhé?`, `Almost end of day: ${completed}/${plannedCount} done 🎉 Wrap up the day?`)
-        : L("Sắp hết giờ làm. Danh sách hôm nay đã trống. Mình tổng kết ngày nhé?", "Almost end of day, and the list is clear. Wrap up the day?")
-    : L(
+        ? say({ key: "review.clear", options: [[`Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc 🎉 Mình tổng kết ngày nhé?`, `Almost end of day: ${completed}/${plannedCount} done 🎉 Wrap up the day?`]] })
+        : say({ key: "review.empty", options: [["Sắp hết giờ làm. Danh sách hôm nay đã trống. Mình tổng kết ngày nhé?", "Almost end of day, and the list is clear. Wrap up the day?"]] })
+    : say({ key: "review", options: [[
         `Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc. Còn ${left} việc — tổng kết ngày, hay dời hết sang ${day ?? "mai"}?`,
         `Almost end of day: ${completed}/${plannedCount} done. Wrap up the day, or move the remaining ${left} to ${day ?? "tomorrow"}?`,
-      );
+      ]] });
 
 /** "Done for today": a good evening, naming the frog that starts the next workday when you picked one. */
 export const wrappedUp = (frog: TodoTask | string | null, day: string | null = null) => {
@@ -229,32 +237,32 @@ export const wrapFrogDone = (title: string, day: string | null = null) =>
   L(`“${title}” đã xong rồi, giỏi quá! Chọn việc khác hoặc để ${day ?? "mai"} tính.`, `“${title}” is already done, nice! Pick another, or decide ${day ? `on ${day}` : "tomorrow"}.`);
 export const wrapNoteLabel = (day: string | null = null) => L(`${day ?? "Mai"} mình bắt đầu từ đâu?`, `Where do I start ${day ? `on ${day}` : "tomorrow"}?`);
 
-export const backToWork = () => L("Mình dậy rồi 🌤 Cần gì cứ gọi mình nhé.", "I'm up again 🌤 Call me whenever you need me.");
+export const backToWork = (say: Phrase) => say({ key: "backToWork", options: [["Mình dậy rồi 🌤 Cần gì cứ gọi mình nhé.", "I'm up again 🌤 Call me whenever you need me."]] });
 
-export const welcomeBack = (t: TodoTask) => L(`Bạn về rồi! 👋 Tiếp tục với ${q(t)} nhé?`, `Welcome back! 👋 Continue with ${q(t)}?`);
-export const soon = (t: TodoTask, minutes: number) => L(`⏰ ${minutes} phút nữa: ${q(t)}`, `⏰ In ${minutes} min: ${q(t)}`);
-export const dueNow = (t: TodoTask) => L(`⏰ Đến giờ rồi: ${q(t)}!`, `⏰ It's time: ${q(t)}!`);
+export const welcomeBack = (t: TodoTask, say: Phrase) => say({ key: "welcomeBack", options: [[`Bạn về rồi! 👋 Tiếp tục với ${q(t)} nhé?`, `Welcome back! 👋 Continue with ${q(t)}?`]] });
+export const soon = (t: TodoTask, minutes: number, say: Phrase) => say({ key: "soon", options: [[`⏰ ${minutes} phút nữa: ${q(t)}`, `⏰ In ${minutes} min: ${q(t)}`]] });
+export const dueNow = (t: TodoTask, say: Phrase) => say({ key: "dueNow", options: [[`⏰ Đến giờ rồi: ${q(t)}!`, `⏰ It's time: ${q(t)}!`]] });
 
-export function focusStart(t: TodoTask | null, minutes: number): string {
-  if (t) return L(`Bắt đầu ${minutes} phút cho ${q(t)}. Mình sẽ ngồi im canh bạn 🤫`, `${n(minutes, "minute")} on ${q(t)}. I'll sit quietly and guard 🤫`);
-  return L(`Bắt đầu ${minutes} phút tập trung. Mình ngồi im canh nhé 🤫`, `${n(minutes, "minute")} of focus. I'll stay quiet 🤫`);
+export function focusStart(t: TodoTask | null, minutes: number, say: Phrase): string {
+  if (t) return say({ key: "focusStart.task", options: [[`Bắt đầu ${minutes} phút cho ${q(t)}. Mình sẽ ngồi im canh bạn 🤫`, `${n(minutes, "minute")} on ${q(t)}. I'll sit quietly and guard 🤫`]] });
+  return say({ key: "focusStart", options: [[`Bắt đầu ${minutes} phút tập trung. Mình ngồi im canh nhé 🤫`, `${n(minutes, "minute")} of focus. I'll stay quiet 🤫`]] });
 }
 
-export function focusEnd(t: TodoTask | null, minutes: number): string {
-  if (t) return L(`Hết ${minutes} phút rồi! ${q(t)} xong chưa?`, `${minutes === 1 ? "Time's up" : `${minutes} minutes up`}! Is ${q(t)} done?`);
-  return L(`Hết ${minutes} phút rồi! Nghỉ chút nhé?`, `${minutes === 1 ? "Time's up" : `${minutes} minutes up`}! Take a break?`);
+export function focusEnd(t: TodoTask | null, minutes: number, say: Phrase): string {
+  if (t) return say({ key: "focusEnd.task", options: [[`Hết ${minutes} phút rồi! ${q(t)} xong chưa?`, `${minutes === 1 ? "Time's up" : `${minutes} minutes up`}! Is ${q(t)} done?`]] });
+  return say({ key: "focusEnd", options: [[`Hết ${minutes} phút rồi! Nghỉ chút nhé?`, `${minutes === 1 ? "Time's up" : `${minutes} minutes up`}! Take a break?`]] });
 }
 
-export const breakStart = (m: number) => L(`Nghỉ ${m} phút nhé ☕ Uống nước, vươn vai đi!`, `${m}-minute break ☕ Water and stretch!`);
-export const breakEnd = () => L("Hết giờ nghỉ! Quay lại thôi 💪", "Break's over! Let's go 💪");
+export const breakStart = (m: number, say: Phrase) => say({ key: "breakStart", options: [[`Nghỉ ${m} phút nhé ☕ Uống nước, vươn vai đi!`, `${m}-minute break ☕ Water and stretch!`]] });
+export const breakEnd = (say: Phrase) => say({ key: "breakEnd", options: [["Hết giờ nghỉ! Quay lại thôi 💪", "Break's over! Let's go 💪"]] });
 export const added = (title: string) => L(`Đã thêm “${shortText(title)}” ✔︎`, `Added “${shortText(title)}” ✔︎`);
 
-export function planComplete(target: number, next: TodoTask | null): string {
-  if (next) return L(`Đủ ${target} việc cho hôm nay rồi! Bắt đầu với ${q(next)} nhé 🐸`, `${target} tasks planned! Start with ${q(next)} 🐸`);
-  return L(`Đủ ${target} việc cho hôm nay rồi! 🐸`, `${target} tasks planned for today! 🐸`);
+export function planComplete(target: number, next: TodoTask | null, say: Phrase): string {
+  if (next) return say({ key: "planComplete.next", options: [[`Đủ ${target} việc cho hôm nay rồi! Bắt đầu với ${q(next)} nhé 🐸`, `${target} tasks planned! Start with ${q(next)} 🐸`]] });
+  return say({ key: "planComplete", options: [[`Đủ ${target} việc cho hôm nay rồi! 🐸`, `${target} tasks planned for today! 🐸`]] });
 }
 
-export const lateNight = () => L("Khuya rồi đó… đi ngủ để mai làm tốt hơn nha 😴", "It's late… sleep now, crush it tomorrow 😴");
+export const lateNight = (say: Phrase) => say({ key: "lateNight", options: [["Khuya rồi đó… đi ngủ để mai làm tốt hơn nha 😴", "It's late… sleep now, crush it tomorrow 😴"]] });
 export const error = (e: string) => L(`Mình không kết nối được Todoist 😵 ${e}`, `I can't reach Todoist 😵 ${e}`);
 export const connected = () => L("Kết nối Todoist thành công! 🎉", "Connected to Todoist! 🎉");
 export const demoHello = () =>
@@ -275,8 +283,8 @@ export const meetingSoon = (e: CalEvent, minutes: number, related: TodoTask[] = 
  * After a meeting of 15+ minutes: a kind question. `next` is the following meeting when there is time for a breather
  * before it (`breather` minutes, at most 5), and then a short one is suggested.
  */
-export const meetingOver = (e: CalEvent, next: CalEvent | null = null, breather = 5) =>
-  L(`“${shortText(e.title)}” xong rồi. Có gì cần ghi lại không?`, `“${shortText(e.title)}” is over. Anything to capture?`) +
+export const meetingOver = (e: CalEvent, next: CalEvent | null = null, breather = 5, say: Phrase) =>
+  say({ key: "meetingOver", options: [[`“${shortText(e.title)}” xong rồi. Có gì cần ghi lại không?`, `“${shortText(e.title)}” is over. Anything to capture?`]] }) +
   (next
     ? `\n${L(
         `“${shortText(next.title)}” bắt đầu lúc ${timeString(next.start)} — nghỉ ${breather} phút trước nhé?`,
@@ -444,30 +452,30 @@ export const switchToStarter = (minutesIn: number) =>
     ? L("Bạn vừa bắt đầu một phiên tập trung. Chuyển sang thử 2 phút nhé?", "You just started a focus session. Switch to 2 minutes?")
     : L(`Bạn đã tập trung được ${minutesIn} phút rồi. Chuyển sang thử 2 phút nhé?`, `You're ${n(minutesIn, "minute")} into a focus session. Switch to 2 minutes?`);
 
-export const starterStart = (t: TodoTask | null, minutes = 2) =>
+export const starterStart = (t: TodoTask | null, minutes = 2, say: Phrase) =>
   t
-    ? L(`Chỉ ${minutes} phút thôi cho ${q(t)}. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")} on ${q(t)}. Open it and see, that's all 🌱`)
-    : L(`Chỉ ${minutes} phút thôi. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")}. Open it and see, that's all 🌱`);
+    ? say({ key: "starterStart.task", options: [[`Chỉ ${minutes} phút thôi cho ${q(t)}. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")} on ${q(t)}. Open it and see, that's all 🌱`]] })
+    : say({ key: "starterStart", options: [[`Chỉ ${minutes} phút thôi. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")}. Open it and see, that's all 🌱`]] });
 
-export const starterEnd = (t: TodoTask | null) =>
+export const starterEnd = (t: TodoTask | null, say: Phrase) =>
   t
-    ? L(`Xong 2 phút rồi, bạn đã bắt đầu ${q(t)}! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?`, `Two minutes done, you've started ${q(t)}! 🌱 Keep going with a full session, or stop here for now?`)
-    : L("Xong 2 phút rồi, bạn đã bắt đầu! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?", "Two minutes done, you've started! 🌱 Keep going with a full session, or stop here for now?");
+    ? say({ key: "starterEnd.task", options: [[`Xong 2 phút rồi, bạn đã bắt đầu ${q(t)}! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?`, `Two minutes done, you've started ${q(t)}! 🌱 Keep going with a full session, or stop here for now?`]] })
+    : say({ key: "starterEnd", options: [["Xong 2 phút rồi, bạn đã bắt đầu! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?", "Two minutes done, you've started! 🌱 Keep going with a full session, or stop here for now?"]] });
 
-export const starterGone = (t: TodoTask | null) =>
+export const starterGone = (t: TodoTask | null, say: Phrase) =>
   t
-    ? L(`Xong 2 phút rồi, và ${q(t)} cũng đã xong! 🌱`, `Two minutes done, and ${q(t)} is already off your list! 🌱`)
-    : starterEnd(null);
+    ? say({ key: "starterGone", options: [[`Xong 2 phút rồi, và ${q(t)} cũng đã xong! 🌱`, `Two minutes done, and ${q(t)} is already off your list! 🌱`]] })
+    : starterEnd(null, say);
 
-export const starterEnough = () => L("Hay lắm, bắt đầu là phần khó nhất 🌱 Lần sau sẽ dễ hơn.", "Nice, starting is the hardest part 🌱 It gets easier next time.");
+export const starterEnough = (say: Phrase) => say({ key: "starterEnough", options: [["Hay lắm, bắt đầu là phần khó nhất 🌱 Lần sau sẽ dễ hơn.", "Nice, starting is the hardest part 🌱 It gets easier next time."]] });
 
 // Postponed tasks
 
-export function stuck(s: StuckTask, mood: Mood): string {
+export function stuck(s: StuckTask, mood: Mood, say: Phrase): string {
   if (mood === "angry") {
-    return L(`${q(s.task)} chờ ${s.days} ngày rồi. Để mình giúp chia thành từng bước nhỏ nhé? ✂️`, `${q(s.task)} has waited ${s.days} days. Want help splitting it into tiny steps? ✂️`);
+    return say({ key: "stuck.angry", options: [[`${q(s.task)} chờ ${s.days} ngày rồi. Để mình giúp chia thành từng bước nhỏ nhé? ✂️`, `${q(s.task)} has waited ${s.days} days. Want help splitting it into tiny steps? ✂️`]] });
   }
-  return pick([
+  return say({ key: "stuck", options: [
     [
       `${q(s.task)} bị dời ${s.days} ngày rồi 🤔 Chắc nó to quá? Chia thành bước nhỏ cho dễ bắt đầu nhé.`,
       `${q(s.task)} has been pushed for ${s.days} days 🤔 Too big? Let's split it into small steps.`,
@@ -476,14 +484,14 @@ export function stuck(s: StuckTask, mood: Mood): string {
       `Mình thấy ${q(s.task)} cứ bị dời mãi (${s.days} ngày). Bước nhỏ nhất để bắt đầu là gì?`,
       `${q(s.task)} keeps getting postponed (${s.days} days). What's the tiniest first step?`,
     ],
-  ]);
+  ] });
 }
 
-export const splitDone = (count: number, first: string) =>
-  L(
+export const splitDone = (count: number, first: string, say: Phrase) =>
+  say({ key: "splitDone", options: [[
     `Đã chia thành ${count} bước ✂️ Bắt đầu với “${shortText(first)}” nhé — chỉ 15–30 phút thôi!`,
     `Split into ${count} steps ✂️ Start with “${shortText(first)}” — just 15–30 minutes!`,
-  );
+  ]] });
 
 export const deleted = (t: TodoTask) => L(`Đã xoá ${q(t)} 🗑 Danh sách gọn hơn rồi!`, `Deleted ${q(t)} 🗑 One less thing on your list!`);
 
@@ -499,16 +507,16 @@ export const unplanned = (t: TodoTask) =>
 
 // Pet life
 
-export const golden = () => L("✨ HIẾM! Bánh vàng cho bạn! ✨", "✨ RARE! A golden treat! ✨");
-export const combo = (n: number) => L(`🔥 Combo ×${n}! Đang cháy quá!`, `🔥 Combo ×${n}! You're on fire!`);
-export const cleaned = (dirtLeft: number) => (dirtLeft === 0 ? L("🛁 Mình sạch bong rồi!", "🛁 Squeaky clean again!") : L("🛁 Sạch hơn chút rồi…", "🛁 A bit cleaner…"));
-export const levelUp = (s: StageIndex) => L(`⬆️ Mình lớn lên thành ${stageName(s)}!`, `⬆️ I grew up: ${stageName(s)}!`);
+export const golden = (say: Phrase) => say({ key: "golden", options: [["✨ HIẾM! Bánh vàng cho bạn! ✨", "✨ RARE! A golden treat! ✨"]] });
+export const combo = (n: number, say: Phrase) => say({ key: "combo", options: [[`🔥 Combo ×${n}! Đang cháy quá!`, `🔥 Combo ×${n}! You're on fire!`]] });
+export const cleaned = (dirtLeft: number, say: Phrase) => (dirtLeft === 0 ? say({ key: "cleaned.clean", options: [["🛁 Mình sạch bong rồi!", "🛁 Squeaky clean again!"]] }) : say({ key: "cleaned", options: [["🛁 Sạch hơn chút rồi…", "🛁 A bit cleaner…"]] }));
+export const levelUp = (s: StageIndex, say: Phrase) => say({ key: "levelUp", options: [[`⬆️ Mình lớn lên thành ${stageName(s)}!`, `⬆️ I grew up: ${stageName(s)}!`]] });
 export const unlocked = (items: Accessory[]) => L("🎁 Mở khoá: ", "🎁 Unlocked: ") + items.map((a) => `${accessoryEmoji(a)} ${accessoryName(a)}`).join(", ");
 export const speciesUnlocked = (emoji: string, name: string) =>
   L(`🥚 Bạn mới mở khoá một bạn mới: ${emoji} ${name}! Đổi trong Cài đặt nhé.`, `🥚 New friend unlocked: ${emoji} ${name}! Switch in Settings.`);
-export const streak = (n: number) => L(`🔥 Chuỗi ${n} ngày — giữ nhé!`, `🔥 ${n}-day streak — keep it going!`);
-export const dirty = (dirt: number) =>
-  L(`🛁 Mình hơi lấm lem (lỡ ${dirt} ngày). Xong 1 việc là mình được tắm nè!`, `🛁 I'm a bit grubby (${n(dirt, "missed day")}). Finish one task and I get a bath!`);
+export const streak = (n: number, say: Phrase) => say({ key: "streak", options: [[`🔥 Chuỗi ${n} ngày — giữ nhé!`, `🔥 ${n}-day streak — keep it going!`]] });
+export const dirty = (dirt: number, say: Phrase) =>
+  say({ key: "dirty", options: [[`🛁 Mình hơi lấm lem (lỡ ${dirt} ngày). Xong 1 việc là mình được tắm nè!`, `🛁 I'm a bit grubby (${n(dirt, "missed day")}). Finish one task and I get a bath!`]] });
 
 // Forgiving streaks: one kind word the morning after, never a scolding. `when` is "yesterday" / "3 days ago".
 
@@ -551,22 +559,22 @@ export const dayOff = (on: boolean, streak: number) =>
       L(" Lỡ xong việc nào thì vẫn được tính nhé.", " Anything you do finish still counts.")
     : L("💼 Quay lại làm việc rồi! Mình nhắc như thường nhé.", "💼 Back to work! I'll keep you on track as usual.");
 
-export function hungry(satiety: number, next: TodoTask | null): string {
+export function hungry(satiety: number, next: TodoTask | null, say: Phrase): string {
   const n = next ? L(` Xong ${q(next)} cho mình ăn với 🥺`, ` Finish ${q(next)} and feed me 🥺`) : "";
-  return (satiety < 10 ? L("Đói lả rồi… 😵‍💫", "Starving… 😵‍💫") : L("Bụng mình réo rồi nè 🍙", "My tummy is rumbling 🍙")) + n;
+  return (satiety < 10 ? say({ key: "hungry.starving", options: [["Đói lả rồi… 😵‍💫", "Starving… 😵‍💫"]] }) : say({ key: "hungry", options: [["Bụng mình réo rồi nè 🍙", "My tummy is rumbling 🍙"]] })) + n;
 }
 
-export const grumble = (next: TodoTask) =>
-  pick([
+export const grumble = (next: TodoTask, say: Phrase) =>
+  say({ key: "grumble", options: [
     [`Haizzz… 😮‍💨 ${q(next)} vẫn đang chờ bạn đó.`, `Sigh… 😮‍💨 ${q(next)} is still waiting for you.`],
     [`*giậm chân* Mình giữ ${q(next)} cho bạn lâu lắm rồi nè 😤`, `*taps foot* I've been saving ${q(next)} for you 😤`],
-  ]);
+  ] });
 
-export const parade = (next: TodoTask) => L(`Mình sẽ diễu hành tới khi bạn làm ${q(next)} thì thôi! 📢`, `I'm marching until you do ${q(next)}! 📢`);
+export const parade = (next: TodoTask, say: Phrase) => say({ key: "parade", options: [[`Mình sẽ diễu hành tới khi bạn làm ${q(next)} thì thôi! 📢`, `I'm marching until you do ${q(next)}! 📢`]] });
 
-export function block(app: string, next: TodoTask | null): string {
+export function block(app: string, next: TodoTask | null, say: Phrase): string {
   const n = next ? L(` Mình cùng làm ${q(next)} nhé?`, ` Shall we do ${q(next)} together?`) : "";
-  return L(`(╯°□°)╯︵ ┻━┻ ${app} lâu quá rồi đó!`, `(╯°□°)╯︵ ┻━┻ That's a lot of ${app}!`) + n;
+  return say({ key: "block", options: [[`(╯°□°)╯︵ ┻━┻ ${app} lâu quá rồi đó!`, `(╯°□°)╯︵ ┻━┻ That's a lot of ${app}!`]] }) + n;
 }
 
 /** The end-of-day note on time spent on distracting apps and sites: a neutral tally, then an offer. */
@@ -584,67 +592,67 @@ export function distractionSummary(d: Record<string, number>): string {
 }
 
 // Spoken lines (short, no emoji): invitations, never orders.
-export const voiceGrumble = () => pick([["Mình bắt đầu một việc nhỏ nhé?", "Shall we start something small?"], ["Mình ở đây khi bạn sẵn sàng.", "I'm here when you're ready."]]);
-export const voiceAngry = (t: TodoTask) => L(`Mình làm ${shortText(taskTitle(t), 30)} nhé? Mình ở đây với bạn.`, `How about ${shortText(taskTitle(t), 30)}? I'll keep you company.`);
-export const voiceBlock = (app: string) => L(`Để ${app} lát nữa nhé?`, `Shall we leave ${app} for later?`);
-export const voiceHungry = () => L("Mình đói quá.", "I'm so hungry.");
-export const voiceCheer = () => pick([["Tuyệt vời!", "Awesome!"], ["Hoan hô!", "Hooray!"]]);
+export const voiceGrumble = (say: Phrase) => say({ key: "voice.grumble", options: [["Mình bắt đầu một việc nhỏ nhé?", "Shall we start something small?"], ["Mình ở đây khi bạn sẵn sàng.", "I'm here when you're ready."]] });
+export const voiceAngry = (t: TodoTask, say: Phrase) => say({ key: "voice.angry", options: [[`Mình làm ${shortText(taskTitle(t), 30)} nhé? Mình ở đây với bạn.`, `How about ${shortText(taskTitle(t), 30)}? I'll keep you company.`]] });
+export const voiceBlock = (app: string, say: Phrase) => say({ key: "voice.block", options: [[`Để ${app} lát nữa nhé?`, `Shall we leave ${app} for later?`]] });
+export const voiceHungry = (say: Phrase) => say({ key: "voice.hungry", options: [["Mình đói quá.", "I'm so hungry."]] });
+export const voiceCheer = (say: Phrase) => say({ key: "voice.cheer", options: [["Tuyệt vời!", "Awesome!"], ["Hoan hô!", "Hooray!"]] });
 export const voiceSummary = (minutes: number) => L(`Hôm nay có ${minutes} phút xao nhãng. Mai mình làm lại nhé.`, `${minutes} minutes of detours today. Tomorrow is a fresh start.`);
 
 /** Short, evidence-based productivity tips the pet drops occasionally. */
-export const tip = () =>
-  pick([
+export const tip = (say: Phrase) =>
+  say({ key: "tip", options: [
     ["Mẹo: làm việc khó nhất trước (Eat the frog 🐸) — năng lượng đầu ngày là tốt nhất.", "Tip: do the hardest task first (eat the frog 🐸) — early energy is your best."],
     ["Mẹo: việc to quá? Chia thành bước 15–30 phút rồi thêm vào Todoist.", "Tip: task too big? Split it into 15–30 minute steps in Todoist."],
     ["Mẹo: gắn giờ cụ thể (“14h làm X”) giúp bạn dễ bắt tay vào việc hơn hẳn.", "Tip: give tasks a concrete time (“2pm: do X”) — it makes starting much easier."],
     ["Mẹo: cuối ngày dành 5 phút chọn sẵn 3 việc cho mai — sáng mai vào việc ngay.", "Tip: spend 5 minutes at day's end picking tomorrow's 3 tasks."],
     ["Mẹo: mỗi lần bị gián đoạn cần khá lâu để tập trung lại — tắt thông báo khi tập trung nhé.", "Tip: every interruption costs a long refocus — mute notifications while focusing."],
     ["Mẹo: uống nước & đứng dậy vươn vai sau mỗi phiên tập trung 💧", "Tip: drink water and stretch after each focus session 💧"],
-  ]);
+  ] });
 
 // v0.5 Game: trips and the Monday fresh start (chest and craft lines live with their rules in chests.ts and craft.ts).
 
-export const tripOffer = (back: Date) =>
-  L(
+export const tripOffer = (back: Date, say: Phrase) =>
+  say({ key: "tripOffer", options: [[
     `Xong hết kế hoạch hôm nay rồi! 🎉 Cho mình đi chơi một chuyến nhé? ${timeString(back)} mình về 🎒`,
     `Today's plan is all done! 🎉 Can I go on a little trip? Back at ${timeString(back)} 🎒`,
-  );
+  ]] });
 export const tripGo = () => L("Đi đi!", "Go!");
 export const tripStay = () => L("Ở lại nha", "Stay");
-export const tripStayed = () => L("Vậy mình ở lại chơi với bạn 🥰", "Then I'll stay right here with you 🥰");
+export const tripStayed = (say: Phrase) => say({ key: "tripStayed", options: [["Vậy mình ở lại chơi với bạn 🥰", "Then I'll stay right here with you 🥰"]] });
 
-export const tripStart = (place: string, back: Date) =>
-  L(
+export const tripStart = (place: string, back: Date, say: Phrase) =>
+  say({ key: "tripStart", options: [[
     `Mình đi ${place} đây! 🎒 ${timeString(back)} mình về. Cần mình thì bấm vào tấm biển nhé.`,
     `Off to ${place}! 🎒 Back at ${timeString(back)}. Click my sign if you need me.`,
-  );
+  ]] });
 
-export function tripBack(r: TripReturn): string {
+export function tripBack(r: TripReturn, say: Phrase): string {
   const place = placeName(r.place);
   if (r.souvenir) {
     const gift = `${emojiOf(r.souvenir)} ${itemName(r.souvenir)}`;
-    return L(
+    return say({ key: "tripBack.souvenir", options: [[
       `Mình về rồi nè! 🥰 Quà từ ${place} cho bạn: ${gift}. Có bưu thiếp trong nhật ký đó 💌`,
       `I'm back from ${place}! 🥰 Here's your souvenir: ${gift}. There's a postcard waiting in the diary 💌`,
-    );
+    ]] });
   }
   if (r.xp > 0) {
-    return L(
+    return say({ key: "tripBack.stories", options: [[
       `Mình đi ${place} về rồi! 🥰 Quà ở đó mình có rồi, nên mang về toàn chuyện vui: +${r.xp} XP 💌`,
       `I'm back from ${place}! 🥰 I already had its souvenir, so I brought back stories instead: +${r.xp} XP 💌`,
-    );
+    ]] });
   }
-  return L("Mình về sớm nè! Chưa đi được xa, nhưng mà nhớ bạn quá 🥰", "Back already! I didn't get far, but I missed you 🥰");
+  return say({ key: "tripBack.early", options: [["Mình về sớm nè! Chưa đi được xa, nhưng mà nhớ bạn quá 🥰", "Back already! I didn't get far, but I missed you 🥰"]] });
 }
 
 export const postcard = (place: string, text: string) => L(`💌 Bưu thiếp từ ${place}: ${text}`, `💌 A postcard from ${place}: ${text}`);
 
 /** The first greeting of a week: a fresh start, with last week's wins when there were any. Never a telling-off. */
-export function newWeek(last: WeekStats | null): string {
+export function newWeek(last: WeekStats | null, say: Phrase): string {
   const recap = weekRecap(last);
   return recap
-    ? L(`🌱 Tuần mới, khởi đầu mới! Tuần trước: ${recap}.`, `🌱 New week, fresh start! Last week: ${recap}.`)
-    : L("🌱 Tuần mới, khởi đầu mới! Tuần này mới tinh, mình cùng bắt đầu nhẹ nhàng nhé.", "🌱 New week, fresh start! A brand-new week; let's ease in together.");
+    ? say({ key: "newWeek.recap", options: [[`🌱 Tuần mới, khởi đầu mới! Tuần trước: ${recap}.`, `🌱 New week, fresh start! Last week: ${recap}.`]] })
+    : say({ key: "newWeek", options: [["🌱 Tuần mới, khởi đầu mới! Tuần này mới tinh, mình cùng bắt đầu nhẹ nhàng nhé.", "🌱 New week, fresh start! A brand-new week; let's ease in together."]] });
 }
 
 // v0.7 "Always fresh": the update notice, its buttons, the install and the first start of a new version. Warm and brief:
