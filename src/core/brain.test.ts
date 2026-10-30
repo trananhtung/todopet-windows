@@ -78,6 +78,19 @@ describe("Brain with the demo backend", () => {
     expect(brain.getSnapshot().antic).toBeNull();
   });
 
+  it("takes the stunt's bubble with it, and keeps any other urgent bubble", () => {
+    brain.demoAntic("parade");
+    expect(brain.getSnapshot().bubble).not.toBeNull();
+    // Urgent, so it would otherwise stay over the full-screen app for 25 s.
+    brain.onSample(sample({ fullscreen: true }));
+    expect(brain.getSnapshot()).toMatchObject({ antic: null, bubble: null });
+    brain.onSample(sample());
+    brain.say({ text: "Team sync in 2 minutes", seconds: 40, urgent: true });
+    const meeting = brain.getSnapshot().bubble;
+    brain.onSample(sample({ fullscreen: true }));
+    expect(brain.getSnapshot().bubble).toBe(meeting);
+  });
+
   it("lets the demo pretend the screen is off or battery saver is on, at once", () => {
     backend.demo.setPower({ batterySaver: true });
     expect(brain.getSnapshot()).toMatchObject({ screenOff: false, batterySaver: true });
