@@ -152,6 +152,26 @@ pub fn cursor_to_css(cursor: (f64, f64), inner_origin: (i32, i32), scale_factor:
     ((cursor.0 - f64::from(inner_origin.0)) / scale, (cursor.1 - f64::from(inner_origin.1)) / scale)
 }
 
+/// Reads a `GUID_SESSION_DISPLAY_STATUS` notification's data (a little-endian `u32`: 0 off, 1 on, 2 dimmed):
+/// whether the display is off. A dimmed display is still on screen. `None` for anything else.
+pub fn display_off(data: &[u8]) -> Option<bool> {
+    let bytes: [u8; 4] = data.get(..4)?.try_into().ok()?;
+    match u32::from_le_bytes(bytes) {
+        0 => Some(true),
+        1 | 2 => Some(false),
+        _ => None,
+    }
+}
+
+/// Reads `WTSINFOEX_LEVEL1`'s `SessionFlags` and `SessionState`: nobody can see the session, because it is locked
+/// (`WTS_SESSIONSTATE_LOCK` = 0) or it is a Remote Desktop session whose client went away (`WTSDisconnected` = 4).
+/// An unknown lock state counts as unlocked.
+pub fn session_unseen(flags: i32, state: i32) -> bool {
+    const WTS_SESSIONSTATE_LOCK: i32 = 0;
+    const WTS_DISCONNECTED: i32 = 4;
+    flags == WTS_SESSIONSTATE_LOCK || state == WTS_DISCONNECTED
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +283,29 @@ mod tests {
         assert_eq!(fit_window_size((600.0, 760.0), Some((200.0, 200.0))).0, (320.0, 320.0));
         // Unknown monitor: as designed.
         assert_eq!(fit_window_size((760.0, 720.0), None), ((760.0, 720.0), (480.0, 480.0)));
+    }
+
+    #[test]
+    fn display_states() {
+        assert_eq!(display_off(&0u32.to_le_bytes()), Some(true));
+        assert_eq!(display_off(&1u32.to_le_bytes()), Some(false));
+        // Dimmed: still on screen.
+        assert_eq!(display_off(&2u32.to_le_bytes()), Some(false));
+        assert_eq!(display_off(&7u32.to_le_bytes()), None, "unknown values change nothing");
+        assert_eq!(display_off(&[0, 0]), None, "too short");
+        assert_eq!(display_off(&[]), None);
+    }
+
+    #[test]
+    fn unseen_sessions() {
+        const ACTIVE: i32 = 0;
+        const DISCONNECTED: i32 = 4;
+        assert!(session_unseen(0, ACTIVE), "locked");
+        assert!(!session_unseen(1, ACTIVE), "unlocked");
+        assert!(!session_unseen(-1, ACTIVE), "WTS_SESSIONSTATE_UNKNOWN keeps the pet drawn");
+        // A Remote Desktop session whose client went away runs on with no screen at all.
+        assert!(session_unseen(1, DISCONNECTED));
+        assert!(session_unseen(-1, DISCONNECTED));
     }
 
     #[test]

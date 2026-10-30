@@ -276,6 +276,10 @@ export interface BrainState {
   calmMotion: boolean;
   /** A full-screen app is in front and the user wants the pet out of the way. */
   fullscreen: boolean;
+  /** The screen is locked or the display is off: nobody can see the pet, so nothing is drawn. */
+  screenOff: boolean;
+  /** Windows' battery saver is on: the pet stands still unless something happens. */
+  batterySaver: boolean;
   life: life.LifeState;
   prefs: Prefs;
   /** Reminders left in today's budget (`prefs.nudgeBudget` minus those shown today). */
@@ -600,6 +604,8 @@ export class Brain {
       flow: false,
       calmMotion: false,
       fullscreen: false,
+      screenOff: false,
+      batterySaver: false,
       life: lifeState,
       prefs,
       nudgesLeft: budgetLeft({ prefs, life: lifeState }),
@@ -917,7 +923,16 @@ export class Brain {
     const prev = this.sample;
     this.sample = s;
     this.noteAway(now, s.idleSeconds);
-    if (prev.fullscreen !== s.fullscreen) this.set({ fullscreen: s.fullscreen });
+    const screenOff = !!s.locked || !!s.displayOff;
+    const batterySaver = !!s.batterySaver;
+    if (prev.fullscreen !== s.fullscreen || screenOff !== this.state.screenOff || batterySaver !== this.state.batterySaver) {
+      // Gone out of sight (a full-screen app the pet hides for, or nobody at the screen): a stunt is called off, as
+      // hiding the pet does, since the frame loop that would finish it sleeps until the pet is seen again.
+      const hideFull = this.state.prefs.hideInFullscreen;
+      const wasSeen = !(prev.fullscreen && hideFull) && !this.state.screenOff;
+      const seen = !(s.fullscreen && hideFull) && !screenOff;
+      this.set({ fullscreen: s.fullscreen, screenOff, batterySaver, ...(wasSeen && !seen ? { antic: null } : {}) });
+    }
     // First, while the work app from before is still the last one known.
     this.noteMeetings(now, s);
     // An address that can't be read for a second says nothing about where you are; one that stays unreadable is believed.

@@ -1,12 +1,13 @@
 //! The system sampler: once a second, what app is in front (and which page if it is a browser), how long
-//! the user has been idle or not typing, and whether a full-screen app is showing. Sent to the overlay as
-//! `system-sample` (`SystemSample` in `src/backend/types.ts`).
+//! the user has been idle or not typing, whether a full-screen app is showing, and whether the screen is locked
+//! or off or battery saver is on. Sent to the overlay as `system-sample` (`SystemSample` in `src/backend/types.ts`).
 //!
 //! The Win32 parts are `#[cfg(windows)]`; on other targets they are no-op stubs so the crate type-checks.
 
 mod browser_url;
 mod foreground;
 mod input;
+mod power;
 
 use crate::events::{self, SYSTEM_SAMPLE};
 use crate::util::now_ms;
@@ -36,6 +37,9 @@ pub struct SystemSample {
     seconds_since_key: f64,
     fullscreen: bool,
     app_switched_at: u64,
+    locked: bool,
+    display_off: bool,
+    battery_saver: bool,
 }
 
 /// State carried between samples.
@@ -94,13 +98,17 @@ impl Sampler {
             seconds_since_key: input::seconds_since_key(),
             fullscreen,
             app_switched_at: self.switched_at,
+            locked: power::locked(),
+            display_off: power::display_off(),
+            battery_saver: power::battery_saver(),
         }
     }
 }
 
-/// Starts the key-press watcher and the 1 Hz sampler thread.
+/// Starts the key-press watcher, the display-state listener and the 1 Hz sampler thread.
 pub fn start(app: AppHandle) {
     input::start_key_watcher();
+    power::start();
     let spawned = thread::Builder::new().name("system-sampler".into()).spawn(move || {
         // The browser address reader starts its own UI Automation worker thread from here.
         let mut sampler = Sampler::new();
