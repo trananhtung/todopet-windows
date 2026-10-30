@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { lifeFromJson, newLife } from "./life";
 import { FRESH_MS, MAX_KEYS, chooseLine, normalizeSaid, remember, withEntry, type SaidEntry } from "./variety";
 
 const HOUR = 3_600_000;
@@ -151,5 +152,15 @@ describe("normalizeSaid", () => {
     expect(Object.keys(said)).toHaveLength(MAX_KEYS);
     expect(said.k49).toBeUndefined();
     expect(said.k50).toEqual({ n: 1, at: [51] });
+  });
+});
+
+describe("the memory in the pet's state", () => {
+  it("lifeFromJson keeps the line memory and repairs it", () => {
+    expect(lifeFromJson({ said: { done: { n: 4, at: [5, "x", null, 9] } } }).said).toEqual({ done: { n: 4, at: [5, 0, 0, 9] } });
+    expect(lifeFromJson({}).said).toEqual({});
+    expect(newLife().said).toEqual({});
+    const life = { ...newLife(), said: { "nudge.happy": { n: 2, at: [100, 0] } } };
+    expect(lifeFromJson(JSON.parse(JSON.stringify(life))).said).toEqual(life.said);
   });
 });
