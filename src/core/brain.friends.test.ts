@@ -1221,7 +1221,10 @@ describe("the notice that the blob is beaten (review HIGH 1)", () => {
     await vi.waitFor(() => expect(r.s().life.bossWins).toEqual(["2026-W44"]));
     await said(r, 4);
     r.clock.t = at(10, 28, 9, 1);
-    const told = await said(r, 100);
+    // Wednesday's first beat starts the day's sync, and the greeting waits for it: however long that takes, not a number of beats.
+    const told = await said(r, 1);
+    await vi.waitFor(() => expect(r.s().loading).toBe(false));
+    told.push(...(await said(r, 100)));
     const blob = told.findIndex((t) => BLOB.test(t));
     expect(blob).toBeGreaterThan(0);
     expect(told[0]).not.toMatch(BLOB);
