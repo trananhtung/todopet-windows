@@ -163,6 +163,12 @@ export interface SystemSample {
   fullscreen: boolean;
   /** Epoch ms of the last change of foreground app. */
   appSwitchedAt: number;
+  /** The session is locked, or it is a disconnected Remote Desktop session (absent = no). */
+  locked?: boolean;
+  /** The display is off (absent = on). Dimmed still counts as on. */
+  displayOff?: boolean;
+  /** Windows' battery saver is on (absent = off). */
+  batterySaver?: boolean;
 }
 
 /** Cursor position in CSS px relative to the overlay's client area (may be outside it). */

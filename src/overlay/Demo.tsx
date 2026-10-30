@@ -127,6 +127,26 @@ export function DemoPanel({ brain, backend }: { brain: Brain; backend: Backend }
             <button className="btn" title={L("Giả vờ bạn vừa rời máy 8 phút và quay lại: thẻ “bạn đang làm gì”", "Pretend you were away for 8 minutes and are back: the resume card")} onClick={() => brain.demoComeBack()}>
               ↩ {L("Quay lại", "Come back")}
             </button>
+            {fake && (
+              <button
+                className="btn"
+                aria-pressed={s.batterySaver}
+                title={L("Giả vờ bật Tiết kiệm pin: pet đứng yên, chỉ cử động khi bạn tương tác hoặc có chuyện", "Pretend battery saver is on: the pet stands still and only moves when you interact or something happens")}
+                onClick={() => fake.setPower({ batterySaver: !s.batterySaver })}
+              >
+                🔋 {L("Tiết kiệm pin", "Battery saver")}
+              </button>
+            )}
+            {fake && (
+              <button
+                className="btn"
+                aria-pressed={s.screenOff}
+                title={L("Giả vờ tắt màn hình: pet ngừng vẽ cho tới khi bật lại", "Pretend the display is off: the pet stops being drawn until it comes back on")}
+                onClick={() => fake.setPower({ displayOff: !s.screenOff, locked: false })}
+              >
+                🖥️ {L("Tắt màn hình", "Display off")}
+              </button>
+            )}
             <button className="btn" title={L("Cuộc họp sắp bắt đầu, kèm việc liên quan", "A meeting starting soon, with its related tasks")} onClick={() => brain.demoMeetingSoon()}>
               📅 {L("Sắp họp", "Meeting soon")}
             </button>

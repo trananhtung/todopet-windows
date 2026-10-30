@@ -48,6 +48,45 @@ describe("Brain with the demo backend", () => {
     expect(s.stuck.map((x) => x.task.id)).toEqual(["3"]);
   });
 
+  it("notes a locked screen, a display that is off and the battery saver, and only when they change", () => {
+    expect(brain.getSnapshot()).toMatchObject({ screenOff: false, batterySaver: false });
+    brain.onSample(sample({ locked: true }));
+    expect(brain.getSnapshot().screenOff).toBe(true);
+    brain.onSample(sample({ displayOff: true }));
+    expect(brain.getSnapshot().screenOff).toBe(true);
+    brain.onSample(sample({ batterySaver: true }));
+    expect(brain.getSnapshot()).toMatchObject({ screenOff: false, batterySaver: true });
+    // The frame loop wakes on every change: the same news a second later is no change.
+    const before = brain.getSnapshot();
+    brain.onSample(sample({ batterySaver: true }));
+    expect(brain.getSnapshot()).toBe(before);
+  });
+
+  it("calls a stunt off when the pet goes out of sight, as hiding it does: it never resumes, stale, later", () => {
+    // The frame loop sleeps while nobody can see the pet, so a parade would never reach its end.
+    brain.demoAntic("parade");
+    expect(brain.getSnapshot().antic).not.toBeNull();
+    brain.onSample(sample({ fullscreen: true }));
+    expect(brain.getSnapshot().antic).toBeNull();
+    brain.onSample(sample());
+    brain.demoAntic("grumble");
+    brain.onSample(sample({ locked: true }));
+    expect(brain.getSnapshot().antic).toBeNull();
+    brain.onSample(sample());
+    brain.demoAntic("parade");
+    brain.onSample(sample({ displayOff: true }));
+    expect(brain.getSnapshot().antic).toBeNull();
+  });
+
+  it("lets the demo pretend the screen is off or battery saver is on, at once", () => {
+    backend.demo.setPower({ batterySaver: true });
+    expect(brain.getSnapshot()).toMatchObject({ screenOff: false, batterySaver: true });
+    backend.demo.setPower({ displayOff: true });
+    expect(brain.getSnapshot()).toMatchObject({ screenOff: true, batterySaver: true });
+    backend.demo.setPower({ displayOff: false, batterySaver: false });
+    expect(brain.getSnapshot()).toMatchObject({ screenOff: false, batterySaver: false });
+  });
+
   it("greets in the morning with today's plan", () => {
     // The demo hello just spoke: the next unsolicited bubble waits for the 15-minute gap.
     brain.runRules(t);

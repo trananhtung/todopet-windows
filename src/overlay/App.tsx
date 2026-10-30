@@ -13,7 +13,8 @@ import { BubbleView } from "./Bubble";
 import { DemoDesktop, DemoPanel } from "./Demo";
 import { Effects } from "./Effects";
 import { HomeCorner, homeCornerWidth, homeItems, TripSign } from "./Home";
-import { PetLife, type InteractOutput } from "./interact";
+import { FrameLoop, frameInterval } from "./cadence";
+import { INTERACT, PetLife, type InteractOutput } from "./interact";
 import { PetMotion } from "./motion";
 import { Visitor } from "./Visitor";
 import { placeBoard, type BoardPlacement, type Rect } from "./placement";
@@ -24,9 +25,10 @@ const FEET = 150 / 160;
 const BASE_SIZE = 150;
 /** The pet's head starts about 12% down its SVG box. */
 const HEAD = 0.12;
-/** Frame budgets: ~30 fps normally, ~10 fps while asleep, calm or hidden. */
-const FAST = 1 / 32;
-const SLOW = 1 / 10;
+/** Seconds a mood change takes to cross-fade. */
+const BLEND_SEC = 0.8;
+/** A cursor this close to the pet's middle (× its size) wakes the frame loop, so its eyes follow even on battery saver. */
+const WAKE_NEAR = 1.5;
 /** How often click-through is re-checked under a still cursor (a bubble appearing, the board closing). */
 const HIT_TEST_MS = 100;
 /** A key pressed this recently (s) counts as typing: no fidgets, yawns or clumsy moments (as the brain's calm). */
@@ -87,9 +89,15 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
   /** Acts, petting, drowsiness and head tilt (pure; fed by the frame loop and the pointer handlers). */
   const lifeRef = useRef<PetLife | null>(null);
   lifeRef.current ??= new PetLife();
-  /** The latest system sample (idle and key timers), with when it arrived (s, performance clock). */
-  const sampleRef = useRef({ idle: 0, key: 999, at: 0 });
+  /**
+   * The latest system sample (idle and key timers), with when it arrived (s, performance clock), and the longest idle
+   * seen since the frame loop last looked: an absence that went by while the loop slept still earns its hello.
+   */
+  const sampleRef = useRef({ idle: 0, key: 999, at: 0, peak: 0 });
   const homeWidth = useRef(0);
+  const loopRef = useRef<FrameLoop | null>(null);
+  /** Something may show differently now: the frame loop draws again for a moment, even if it was asleep. */
+  const wake = useCallback(() => loopRef.current?.wake(performance.now()), []);
   /** The mood on screen (the frame loop keeps it; a ponder holds the old one for half a beat). */
   const shownMoodRef = useRef<Mood>(brain.getSnapshot().mood);
   /** Each celebration's ponder, decided once (celebrations already under way at start get none). */
@@ -179,7 +187,18 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
 
   useEffect(() => {
     boardOpen.current = board !== null;
-  }, [board]);
+    wake();
+  }, [board, wake]);
+
+  // Anything the brain changes may show (a bubble, a mood, the pet coming back into view): draw again.
+  useEffect(() => {
+    const unsub = brain.subscribe(wake);
+    window.addEventListener("resize", wake);
+    return () => {
+      unsub();
+      window.removeEventListener("resize", wake);
+    };
+  }, [brain, wake]);
 
   // A stunt needs the stage (and its bubble with "Spare me"): the board makes way.
   const stunt = s.antic?.kind.type === "block" || s.antic?.kind.type === "parade";
@@ -213,13 +232,16 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       cursor.current = c;
       lifeRef.current?.pointer(c.x, c.y, performance.now() / 1000);
       hitTest();
+      const a = anchor.current;
+      const st = brain.getSnapshot();
+      if (!isHidden(st) && st.trip === null && Math.hypot(c.x - a.x, c.y - (a.feetY - a.size / 2)) < a.size * WAKE_NEAR) wake();
     });
     const id = setInterval(hitTest, HIT_TEST_MS);
     return () => {
       unsub();
       clearInterval(id);
     };
-  }, [backend, applyClickThrough]);
+  }, [backend, brain, applyClickThrough, wake]);
 
   // Closing the board: Escape (unless a popover took it), a click outside, or the overlay losing focus.
   useEffect(() => {
@@ -266,9 +288,12 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
   useEffect(
     () =>
       backend.system.onSample((x) => {
-        sampleRef.current = { idle: x.idleSeconds, key: x.secondsSinceKey, at: performance.now() / 1000 };
+        const prev = sampleRef.current;
+        sampleRef.current = { idle: x.idleSeconds, key: x.secondsSinceKey, at: performance.now() / 1000, peak: Math.max(prev.peak, x.idleSeconds) };
+        // Back after a long time away: the pet says hello, even if its loop was asleep (battery saver).
+        if (prev.idle >= INTERACT.awayAfter && x.idleSeconds < INTERACT.awayAfter) wake();
       }),
-    [backend],
+    [backend, wake],
   );
 
   // A bubble that went stale while the board hid it (or while nobody looked) never shows up late.
@@ -283,13 +308,14 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     return () => clearInterval(id);
   }, [brain, s.focus]);
 
-  // The frame loop: motion, pose and rendering at ~30 fps (~10 fps while asleep, calm or hidden).
+  // The frame loop: motion, pose and rendering at ~30 fps (~10 fps while asleep or calm). It sleeps while nobody can
+  // see the pet (screen locked or off, hidden, away on a trip) and, on battery saver, whenever the pet stands still;
+  // `wake()` brings it back (see cadence.ts).
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
     const startX = stage.clientWidth * (0.55 + Math.random() * 0.3);
     motionRef.current = new PetMotion(startX, stage.clientHeight);
-    let raf = 0;
     let last = performance.now();
     let t = 0;
     let prevMood: Mood = brain.getSnapshot().mood;
@@ -297,31 +323,43 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     shownMoodRef.current = shownMood;
     let blendStart = -10;
     let lastSvg = "";
+    let ground = stage.clientHeight;
     const life = lifeRef.current!;
     let fx: InteractOutput | null = null;
     let meeting = false;
     let meetingAt = -10;
     let wokeForHello = false;
 
-    const frame = (now: number) => {
-      raf = requestAnimationFrame(frame);
+    /** Draws a frame when one is due; false puts the loop to sleep until the next wake-up. */
+    const frame = (now: number, woken: boolean): boolean => {
       const st = brain.getSnapshot();
       const motion = motionRef.current!;
       const away = st.trip !== null;
       const hiddenNow = isHidden(st) || away;
       const antic = st.antic?.kind.type ?? null;
-      // An act or petting plays at full rate even while you type (they are short, and you asked for them).
-      const lively = fx !== null && (fx.acting || fx.petting > 0);
-      const slow = !motion.s.held && antic === null && !lively && (hiddenNow || st.mood === "sleeping" || st.calmMotion);
+      const interval = frameInterval({
+        unseen: st.screenOff,
+        hidden: hiddenNow,
+        saver: st.batterySaver,
+        // An act or petting plays at full rate even while you type (they are short, and you asked for them).
+        lively: motion.s.held || antic !== null || (fx !== null && (fx.acting || fx.petting > 0)),
+        // Still on its way somewhere: walking, falling, celebrating, changing mood or with a hello to give.
+        moving: motion.s.walking || motion.s.y < ground - 0.5 || st.mood === "celebrating" || t - blendStart < BLEND_SEC || !!fx?.greeting,
+        calm: st.mood === "sleeping" || st.calmMotion,
+        woken,
+      });
+      if (interval === null) return false;
       const dt = (now - last) / 1000;
-      if (dt < (slow ? SLOW : FAST)) return;
+      if (dt < interval) return true;
       last = now;
-      t += dt;
+      // After a sleep the pet picks up where it stood, instead of jumping to a new breath and sway.
+      t += Math.min(dt, 0.25);
       const nowS = now / 1000;
 
       // Read layout first, then write: no forced reflow in the middle of the frame.
       const W = stage.clientWidth;
       const H = stage.clientHeight;
+      ground = H;
       const bubble = bubbleRef.current;
       const bw = bubble?.offsetWidth ?? 0;
       const bh = bubble?.offsetHeight ?? 0;
@@ -343,7 +381,8 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
           size,
           mood: st.mood,
           gait: info.gait,
-          calm: st.calmMotion,
+          // On battery saver the pet stays put instead of wandering off.
+          calm: st.calmMotion || st.batterySaver,
           // The pet waits beside its open board instead of wandering under it.
           hovered: hovered.current || boardOpen.current,
           cursor: cursor.current,
@@ -376,14 +415,16 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
         held: m.held,
         grounded: m.y >= H - 0.5,
         walking: m.walking,
-        idleSec: smp.at > 0 ? smp.idle + since : 0,
+        idleSec: smp.at > 0 ? Math.max(smp.idle + since, smp.peak) : 0,
         typing: smp.at > 0 && smp.key + since < TYPING_SEC,
         focus: focusing,
         meeting,
         mood: st.mood,
-        busy: antic !== null || (st.mood === "angry" && st.prefs.chaseWhenAngry && cursor.current !== null && !focusing),
+        // (and on battery saver: no fidgets, yawns or clumsy moments of its own, only answers to you)
+        busy: antic !== null || st.batterySaver || (st.mood === "angry" && st.prefs.chaseWhenAngry && cursor.current !== null && !focusing),
         away: hiddenNow,
       });
+      smp.peak = 0;
       // Back after a long time away while the pet is asleep: wake it now rather than at the brain's next tick.
       if (fx.greeting && st.mood === "sleeping" && !wokeForHello) {
         wokeForHello = true;
@@ -421,7 +462,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
           hovered: hovered.current && !m.held && !fx.act,
           held: m.held,
           prevMood,
-          blend: Math.min(1, (t - blendStart) / 0.8),
+          blend: Math.min(1, (t - blendStart) / BLEND_SEC),
           calm: st.calmMotion,
           stage: stageOf(st.life.xp),
           hungry: st.life.satiety < 30,
@@ -473,14 +514,21 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
         flip.style.left = `${m.x}px`;
         flip.style.top = `${Math.min(m.y + 24, H - 48)}px`;
       }
+      return true;
     };
-    raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+    const loop = new FrameLoop(frame);
+    loopRef.current = loop;
+    loop.wake(performance.now());
+    return () => {
+      loop.stop();
+      loopRef.current = null;
+    };
   }, [brain, ponderFor]);
 
   /** Ends a press on the pet. A press that did not move is a click (pointer up only, never a cancel). */
   const endPress = useCallback(
     (asClick: boolean) => {
+      wake();
       const d = dragging.current;
       dragging.current = null;
       petRef.current?.classList.remove("dragging");
@@ -501,7 +549,7 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
       if (boardOpen.current) closeBoard();
       else openBoard(false);
     },
-    [brain, closeBoard, openBoard, computePlacement],
+    [brain, closeBoard, openBoard, computePlacement, wake],
   );
 
   // A drag must not outlive the window losing focus (Alt+Tab mid-drag).
@@ -515,10 +563,12 @@ export function App({ brain, backend, demo, fakeDesktop }: { brain: Brain; backe
     if (e.button !== 0) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragging.current = { startX: e.clientX, startY: e.clientY, moved: false, id: e.pointerId };
+    wake();
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const d = dragging.current;
     if (!d) return;
+    wake();
     cursor.current = { x: e.clientX, y: e.clientY };
     if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 5) {
       d.moved = true;

@@ -41,6 +41,8 @@ export interface DemoControls {
   setForeground(app: ForegroundApp | null, url?: string | null): void;
   /** Pretend the user has been away (idle) for this many seconds. */
   setIdle(seconds: number): void;
+  /** Pretend the screen is locked or off, or battery saver is on (the fields given change; a sample goes out at once). */
+  setPower(p: { locked?: boolean; displayOff?: boolean; batterySaver?: boolean }): void;
   command(c: AppCommand): void;
   /** Give today's tasks long Todoist durations (about 11 hours in all), so the overbooked warning has something to say. */
   setHeavyDay(on: boolean): void;
@@ -195,6 +197,17 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean;
   let front: ForegroundApp | null = { name: "Visual Studio Code", exe: "code.exe", title: "brain.ts — todopet" };
   let frontUrl: string | null = null;
   let switchedAt = now();
+  let power = { locked: false, displayOff: false, batterySaver: false };
+  const emitSample = () =>
+    samples.emit({
+      app: front,
+      url: frontUrl,
+      idleSeconds: Math.max(fakeIdle, (now() - lastInput) / 1000),
+      secondsSinceKey: lastKey ? (now() - lastKey) / 1000 : 999,
+      fullscreen: false,
+      appSwitchedAt: switchedAt,
+      ...power,
+    });
   if (typeof window !== "undefined") {
     window.addEventListener("keydown", () => {
       lastKey = now();
@@ -204,16 +217,7 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean;
       lastInput = now();
       cursors.emit({ x: e.clientX, y: e.clientY });
     });
-    setInterval(() => {
-      samples.emit({
-        app: front,
-        url: frontUrl,
-        idleSeconds: Math.max(fakeIdle, (now() - lastInput) / 1000),
-        secondsSinceKey: lastKey ? (now() - lastKey) / 1000 : 999,
-        fullscreen: false,
-        appSwitchedAt: switchedAt,
-      });
-    }, 1000);
+    setInterval(emitSample, 1000);
   }
 
   const find = (id: string) => tasksNow().findIndex((t) => t.id === id);
@@ -496,6 +500,10 @@ export function createDemoBackend(opts: { now?: () => number; persist?: boolean;
       },
       setIdle(seconds) {
         fakeIdle = seconds;
+      },
+      setPower(p) {
+        power = { ...power, ...p };
+        emitSample();
       },
       command(c) {
         commands.emit(c);
