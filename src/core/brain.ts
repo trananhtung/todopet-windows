@@ -485,6 +485,8 @@ export class Brain {
   private timer: ReturnType<typeof setInterval> | null = null;
   private unsubs: (() => void)[] = [];
   private bubbleSeq = 0;
+  /** The bubble that announced the current stunt (a parade, a block, a grumble): it goes when the stunt is called off. */
+  private anticBubbleId: number | null = null;
   private inflight: Promise<void> | null = null;
   private syncQueued = false;
   /** Sync backoff after failures (Infinity while Todoist refuses the token). */
@@ -926,12 +928,15 @@ export class Brain {
     const screenOff = !!s.locked || !!s.displayOff;
     const batterySaver = !!s.batterySaver;
     if (prev.fullscreen !== s.fullscreen || screenOff !== this.state.screenOff || batterySaver !== this.state.batterySaver) {
-      // Gone out of sight (a full-screen app the pet hides for, or nobody at the screen): a stunt is called off, as
-      // hiding the pet does, since the frame loop that would finish it sleeps until the pet is seen again.
+      // Gone out of sight (a full-screen app the pet hides for, or nobody at the screen): a stunt is called off with its
+      // bubble, as hiding the pet does, since the frame loop that would finish it sleeps until the pet is seen again.
+      // Any other bubble stays (an urgent one still shows over a full-screen app).
       const hideFull = this.state.prefs.hideInFullscreen;
       const wasSeen = !(prev.fullscreen && hideFull) && !this.state.screenOff;
       const seen = !(s.fullscreen && hideFull) && !screenOff;
-      this.set({ fullscreen: s.fullscreen, screenOff, batterySaver, ...(wasSeen && !seen ? { antic: null } : {}) });
+      const stuntBubble = this.state.bubble !== null && this.state.bubble.id === this.anticBubbleId;
+      const callOff = wasSeen && !seen ? { antic: null, ...(stuntBubble ? { bubble: null } : {}) } : {};
+      this.set({ fullscreen: s.fullscreen, screenOff, batterySaver, ...callOff });
     }
     // First, while the work app from before is still the last one known.
     this.noteMeetings(now, s);
@@ -1624,6 +1629,7 @@ export class Brain {
     if (b.progress) bubble.progress = b.progress;
     if (opts.kind) bubble.kind = opts.kind;
     if (opts.card) bubble.card = opts.card;
+    if (opts.antic) this.anticBubbleId = bubble.id;
     this.lastBubbleAt = this.now();
     this.set({ bubble });
     if (opts.kind) {
