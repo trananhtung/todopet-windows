@@ -666,11 +666,13 @@ user and a dev-team session (PM, Architect, Developer, QA); the decisions settle
   1. An entry whose `n` differs from the pack's is ignored (the pack changed since): every option counts as never said.
   2. **Fresh** options were never said or were said 48 h ago or more (`FRESH_MS = 48 h`). If there is any, pick one at
      random among them. So within 48 h every option is used once before any comes back.
-  3. Otherwise (a small pack said often): the **least recently said** option; ties go to the lowest index. It cycles
-     through the pack and, with 2+ options, never says the same line twice in a row.
+  3. Otherwise (a small pack said often): the **least recently said** option; ties (every time in the future after
+     the clock went back) go to the earliest time as stored, then to the lowest index. It cycles through the pack and,
+     with 2+ options, never says the same line twice in a row, even across a clock that went back.
   4. A time in the future (the clock went back) counts as "just now".
-- `remember(entry, n, index, now) → entry`: a new entry with `at[index] = now`, every other time clamped to `≤ now`
-  (so a clock that went back stops holding lines for longer than 48 h), length exactly `n`.
+- `remember(entry, n, index, now) → entry`: a new entry with `at[index] = now`, every other time clamped to `≤ now − 1`
+  (so a clock that went back stops holding lines for longer than 48 h, and the line said now stays the newest), length
+  exactly `n`.
 - Packs with one option are returned as is and never stored.
 - `withEntry(said, key, entry)` adds or replaces a key and keeps at most `MAX_KEYS = 200` keys, dropping the ones
   used longest ago (by their newest time).
