@@ -626,3 +626,138 @@ sends nothing about you"); for MSI installs, why one-click is off and what to do
   installs the old app, starts it and waits until the installed version reads 9.9.9 and the new app is running.
 - Release: the sign job refuses to publish a signature that does not verify against the embedded public key or does
   not name the tag's version.
+
+## v0.8 "Có hồn" (Alive): a pet that feels alive
+
+Goal: lift "pet craft" from 7.5 to 9 ("genuinely charming; you want to keep it on your taskbar"), following
+[research-pet-quality.md](research-pet-quality.md). Proposal #3 (stop drawing when nobody can see the pet) shipped in
+0.7.1. This section covers proposal #1; the others get their own sections when they are designed.
+
+### 1. Non-repeating dialogue (`src/core/variety.ts`, `lines.ts`, `life.ts`, `brain.ts`)
+
+Today only 9 situations have more than one line (2–6, picked with `Math.random`, so the same one can come twice in a
+row) and most say one fixed line. A user finishing 5 tasks a day hears the same cheer the same day. Designed with the
+user and a dev-team session (PM, Architect, Developer, QA); the decisions settle what they raised.
+
+#### Decisions
+
+- **Line functions stay pure and return a pack; the brain picks.** A line function that has variants returns
+  `Pack = { key: string; options: readonly (readonly [vi: string, en: string])[] }` (the strings already filled in)
+  instead of a string. The brain turns it into text with `this.phrase(pack)`. No hidden global state.
+- **One memory for both languages.** Each option is a `[vi, en]` pair, so both languages always have the same count
+  and switching language keeps the memory right.
+- **Indices and times only, never text.** Lines interpolate task titles, and the pet never stores those. The memory
+  stores, per key, when each option (by index) was last said.
+- **Context lines are branches with their own key**, not a rule engine: `done.frog`, `done.first`, … (see below).
+- **Every task completion keeps its bubble** (it carries Undo). No animation-only completions.
+- **A line counts as said when it is chosen.** Rules only compose a counted line when no bubble is showing
+  (`runRules` returns early on a bubble), so a chosen line is nearly always shown; marking "on show" would need a
+  token threaded through `say()` for almost no gain.
+- **Only chatter varies.** Labels, buttons, errors, confirmations, update texts, streak bookkeeping and onboarding stay
+  fixed: the user needs those to read the same every time.
+
+#### Choosing (`variety.ts`, pure)
+
+- Memory: `LifeState.said: Record<string, { n: number; at: number[] }>`. `n` is the pack's option count when it was
+  last used; `at[i]` is when option `i` was last said (epoch ms, 0 = never).
+- `chooseLine(n, entry, now, random) → index`:
+  1. An entry whose `n` differs from the pack's is ignored (the pack changed since): every option counts as never said.
+  2. **Fresh** options were never said or were said 48 h ago or more (`FRESH_MS = 48 h`). If there is any, pick one at
+     random among them. So within 48 h every option is used once before any comes back.
+  3. Otherwise (a small pack said often): the **least recently said** option; ties go to the lowest index. It cycles
+     through the pack and, with 2+ options, never says the same line twice in a row.
+  4. A time in the future (the clock went back) counts as "just now".
+- `remember(entry, n, index, now) → entry`: a new entry with `at[index] = now`, every other time clamped to `≤ now`
+  (so a clock that went back stops holding lines for longer than 48 h), length exactly `n`.
+- Packs with one option are returned as is and never stored.
+- `withEntry(said, key, entry)` adds or replaces a key and keeps at most `MAX_KEYS = 200` keys, dropping the ones
+  used longest ago (by their newest time).
+
+#### Loading (`lifeFromJson`)
+
+- `said` must be an object; anything else gives `{}`. Keys must match `/^[a-z][a-zA-Z0-9.]{0,63}$/`; others are
+  dropped. `n` must be an integer in 1…40 (`MAX_OPTIONS`); otherwise the key is dropped.
+- `at` keeps its positions: a missing, non-numeric, non-finite or negative entry becomes 0 (never said), never removed,
+  so indices never shift. It is cut or padded with 0 to length `n`.
+- More than 200 keys: the ones used longest ago are dropped.
+- Saved with the batched `routine` life save (within 60 s). A lost minute of memory only means a line may come back
+  early.
+- Older versions (0.7.x) ignore the field and drop it on their next save; coming back to 0.8 starts the memory again.
+
+#### Brain (`brain.ts`)
+
+- `private phrase(pack: Pack): string` chooses with `this.random` and the brain clock, records the choice in
+  `life.said` (routine save) and returns the text in the current language.
+- Every call site of a pack-returning line goes through it (`say`, the done bubble, `speak`, the morning greeting).
+- Callers that combine lines (the morning greeting = time-of-day greeting + body) phrase each pack on its own.
+
+#### Context lines for a finished task
+
+`lines.done(task, ctx)` takes `{ completed, target, sound, frog, stuck, hour, weekday }` and returns the first that
+applies, in this order (most specific first):
+
+| Priority | Key | When |
+|---|---|---|
+| 1 | `done.target` | this completion reaches today's target (`completed === target`) |
+| 2 | `done.stuck` | the task was on the "postponed" list (`state.stuck`) when it was finished |
+| 3 | `done.frog` | it was today's frog (`day.frogId`, picked in the evening's Wrap up) |
+| 4 | `done.first` | the first task finished today |
+| 5 | `done.early` | before 9:00 |
+| 6 | `done.friday` | Friday from 15:00 |
+| 7 | `done` | everything else |
+
+The extra lines of the bubble (golden treat, combo, level up, chest…) are appended as today.
+
+#### Content
+
+- **Voice.** The pet says "mình" and calls the user "bạn" (VI), "I"/"you" (EN). Warm, casual, never scolding (worried
+  and helpful when things slip, as in v0.3). Chatter at most about 90 characters before a task title is filled in;
+  `done*` lines at most about 60, since the bubble also holds Undo. At most one emoji, at the end. Both languages say
+  the same thing in spirit, not word for word. `${sound}` (the species' voice) may appear in `done*` lines.
+- **Append only.** New options go at the end of a pack. Removing or reordering one changes `n` or shifts indices,
+  which resets or confuses that key's memory once; do it only when needed.
+- **Targets** (options per key; the existing lines count):
+
+| Area | Keys and targets |
+|---|---|
+| Greeting and morning | `greeting.{morning,midday,afternoon,evening}` 4 each; `morning.{plan,frogPicked,frog,plain}` 6 each |
+| Planning and nudges | `plan.{normal,annoyed,angry}` 6 each; `nudge.{normal,happy,annoyed,angry}` 8 each; `overdue` 6 |
+| Distraction | `distraction` 8, `distraction.angry` 4; `grumble` 6, `parade` 6, `block` 5 |
+| Finishing | `done` 20; `done.{target,stuck,frog,first}` 6 each; `done.{early,friday}` 5 each; `allDone` 8; `planComplete` 6 |
+| Pet life | `hungry` 6, `dirty` 5, `cleaned` 4, `golden` 4, `combo` 5, `levelUp` 4, `streak` 6 |
+| Focus and breaks | `focusStart` 6, `focusEnd` 6, `breakStart` 5, `breakEnd` 5, `backToWork` 6, `welcomeBack` 8 |
+| Starters and postponed | `starterStart` 4, `starterEnd` 4, `starterEnough` 4, `stuck` 6, `splitDone` 3 |
+| Meetings and timed tasks | `soon` 4, `dueNow` 4, `meetingOver` 4 |
+| Day's end and week | `review` 6, `lateNight` 5, `newWeek` 5 |
+| Trips | `tripOffer` 5, `tripStart` 4, `tripBack` 5, `tripStayed` 3 |
+| Tips and voice | `tip` 14; `voice.{cheer,grumble,angry,block,hungry}` 6, 4, 4, 3, 3 |
+
+  About 360 chatter options in all (about 300 new per language), plus the fixed lines.
+- **Batches.** Written and reviewed in batches of about 40 options, most frequent first: finishing, nudges and
+  planning, greeting and morning, then the rest. Each batch is reviewed by the user (Vietnamese) as a table
+  `key | VI | EN` before it is merged.
+- Out of scope: chest, craft and wrap-up lines (in `chests.ts`, `craft.ts`, `wrapup.ts`), labels, errors, updates.
+
+#### Phases
+
+1. **Engine and plumbing, same words.** `variety.ts` with tests; `LifeState.said`; `phrase()`; every varied line
+   function returns a pack built from today's lines; call sites move to `phrase()`. Behaviour changes only in that a
+   line never repeats while a fresh one is left. All tests green.
+2. **Content**, in the batches above, each with its review table.
+
+#### Tests
+
+- `variety.test.ts`: the rules above, and a 30-day simulation with a seeded random and a fake clock (15 completions a
+  day): no option repeats within 48 h while a fresh one is left; never the same option twice in a row with 2+ options;
+  a clock that goes back a year recovers within 48 h; `n` changing resets the key; the key cap drops the oldest.
+- `life` loading: a table of bad `said` values (not an object, bad keys, `n` out of range, `NaN`, strings, negative
+  numbers, `at` too long or short, more than 200 keys): nothing throws, positions are kept, bad entries count as never
+  said.
+- Content lint (`lines.test.ts`), over every pack each line function can return (called with sample arguments,
+  including a 60-character title): keys match the pattern; 1…40 options; no empty or duplicate string in a pack;
+  the same `${…}` placeholders filled in both languages (checked by passing marker values); length limits per the
+  voice rules; each key's option count is at least its target (phase 2 only).
+- Brain: finishing 15 tasks in a day gives 15 different `done` lines; every completion bubble made through the pet
+  still has Undo, whatever its context; the saved life, after a day with a task titled with a sentinel string,
+  never contains that string; the memory survives a restart (saved and loaded back).
+- Existing tests that assert a fixed line accept any option of its pack instead.
