@@ -24,6 +24,7 @@ Mọi tính năng của bản macOS:
 - **Hỏi "hôm nay mình làm gì?"** Nếu hôm nay chưa đủ **3 việc** (tuỳ chỉnh), pet nhắc bạn lên kế hoạch: nhẹ nhàng buổi sáng, gắt hơn khi qua giờ chốt kế hoạch.
 - **Nhắc đúng việc** theo kiểu "ăn con ếch trước", nhắc mỗi 45 phút, báo trước 10 phút với việc có giờ.
 - **Có tâm trạng thật.** Ăn mừng mỗi việc xong (kể cả việc bạn tick trong Todoist). Khi có việc quá hạn hay hàng giờ không tiến triển, pet lo lắng và gợi ý giúp: bắt đầu lại với việc quá hạn, một phiên tập trung, chia nhỏ việc to. Pet chỉ nổi cáu khi bạn đang ở trang web hay ứng dụng gây xao nhãng, lúc đó nó còn hành quân về phía con trỏ 😤
+- **Không lặp lời.** Hơn 400 câu cho mỗi ngôn ngữ, và pet nhớ mình đã nói gì: không bao giờ nói một câu hai lần liền, câu đã nói trong hai ngày qua chưa quay lại khi vẫn còn câu mới. Xong con ếch hôm nay, xong việc cứ bị dời mãi, việc đầu tiên trong ngày, xong việc từ sáng sớm hay chiều thứ Sáu đều có lời khen riêng.
 - **Làm việc với Todoist ngay trên pet:** xem việc hôm nay, đánh dấu xong, thêm việc (Hôm nay / Mai / Không hạn / cú pháp Todoist như `Gọi Anna 3pm p1 #Work`), dời, xoá (có hỏi lại), tập trung, chia nhỏ.
 - **Hẹn giờ tập trung**, **tổng kết cuối ngày**, **gợi ý khung giờ** trong lúc trống, và **chia nhỏ việc cứ bị dời** thành bước 15–30 phút (có thể nhờ Claude).
 - **Bắt quả tang web/ứng dụng gây xao nhãng.** Đọc địa chỉ tab đang mở trên Chrome, Edge, Brave, Vivaldi, Opera, Firefox qua Windows UI Automation (dự phòng bằng tiêu đề cửa sổ) và tên ứng dụng đang dùng.
@@ -115,6 +116,7 @@ Pet giữ điểm vui 0–100, tính lại mỗi 15 giây (y hệt bản macOS).
 - Phát hiện gõ phím dùng Raw Input của Windows, chỉ ghi **thời điểm phím cuối cùng được nhấn xuống**; không bao giờ biết phím nào và không dùng keyboard hook.
 - Link ICS là địa chỉ bí mật nên được lưu trong Windows Credential Manager như token, và chỉ tải từ địa chỉ Internet công khai.
 - **Bạn bè** không đi qua máy chủ nào. Thẻ thú cưng chỉ có tên, loài, phụ kiện và độ lớn của pet, số việc xong tuần này, 28 ngày đạt mục tiêu/nghỉ, ngày làm thẻ và khoá công khai của bạn (nối các thẻ của bạn cho tới khi bạn tạo danh tính thẻ mới): không bao giờ có tên việc, giờ giấc, tên ứng dụng hay tên bạn. Thẻ được ký bằng một khoá cất trong Credential Manager và chỉ rời máy khi chính bạn chép và gửi đi. Thẻ bạn thêm vào được kiểm tra (kích thước, định dạng và chữ ký), chỉ hiện dưới dạng chữ thường, và lưu trong tệp `friends` (cùng số lần ghé chơi trong ngày).
+- Để không lặp lời, pet chỉ nhớ **câu số mấy đã nói và lúc nào**, không bao giờ lưu chữ, vì câu có thể chứa tên việc của bạn.
 - Cài đặt và trạng thái pet nằm trong `%APPDATA%\com.trananhtung.todopet`; nhật ký chỉ ở máy này, trong `%LOCALAPPDATA%\com.trananhtung.todopet` (giữ 14 ngày, có thể tắt).
 
 ## Phát triển

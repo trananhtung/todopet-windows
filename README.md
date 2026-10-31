@@ -24,6 +24,7 @@ Everything from the macOS app:
 - **Asks "what are we doing today?"** If today has fewer than **3 tasks** (configurable), it asks you to plan, gently in the morning and more insistently once the planning deadline passes.
 - **Reminds you of the right task** with "eat the frog" ordering, nudges every 45 minutes, and pings you 10 minutes before timed tasks.
 - **Has real moods.** It celebrates every finished task (including ones you tick off in Todoist). When tasks are overdue or nothing moves for hours it gets worried and offers help: a fresh start for overdue tasks, a focus session, splitting a big task. It only gets grumpy while you're on a distracting site or app, and then it marches toward your cursor 😤
+- **Doesn't repeat itself.** Over 400 lines in each language, and it remembers what it said: never the same line twice in a row, and nothing said in the last two days comes back while a fresh line is left. Finishing today's frog, a task you kept postponing, your first task of the day, an early win or a Friday one each get their own cheer.
 - **Lets you work with Todoist from the pet.** Click it for today's tasks: complete, add (Today / Tomorrow / No date / full quick-add syntax like `Call Anna 3pm p1 #Work`), move, delete (after a confirmation), focus, split.
 - **Focus timer**, **end-of-day review**, **time-block suggestions** in your free gaps, and **splitting tasks you keep postponing** into 15–30 minute steps (optionally with Claude).
 - **Catches distracting websites and apps.** It reads the active tab's address in Chrome, Edge, Brave, Vivaldi, Opera and Firefox through Windows UI Automation (falling back to the window title), and the name of the app in front.
@@ -133,6 +134,7 @@ Score ≥ 75 is happy, ≥ 50 chill, and anything lower worried. It only turns g
 - **Friends** never go through a server. A pet card holds only your pet's name, species, accessories and stage, this week's finished-task count, a 28-day goal/rest record, the date and your public key (it links your cards until you make a new card identity): never task titles, times, app names or your name. It is signed with a key kept in Credential Manager, and leaves this PC only when you copy and send it yourself. The cards you add are checked (size, format and signature), shown as plain text only, and kept in the `friends` document (with the day's visits).
 - Settings, the pet's life, today's "start when…" plans, tomorrow's frog and note and your friends' cards are in `%APPDATA%\com.trananhtung.todopet`; the diary stays on this PC in `%LOCALAPPDATA%\com.trananhtung.todopet` (14 days, can be turned off).
 - Spoken lines use the voices built into Windows, offline.
+- So as not to repeat itself, the pet remembers **which line it said (by number) and when**, never the text, which can hold your task names.
 
 ## Development
 
