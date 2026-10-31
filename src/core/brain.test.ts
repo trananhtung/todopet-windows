@@ -445,8 +445,8 @@ describe("Brain and forgiving streaks", () => {
  * The demo on Wednesday 28 October, 9:00, with `life` (today's) and `prefs` saved first. `step` moves the clock on
  * and runs the rules like the heartbeat does (without the hunger clock, so the pet doesn't get hungry).
  */
-async function rig(opts: { life?: Partial<LifeState>; prefs?: Partial<Prefs>; setup?: (b: DemoBackend) => void; effects?: BrainEffects } = {}) {
-  const clock = { t: at(28, 9) };
+async function rig(opts: { life?: Partial<LifeState>; prefs?: Partial<Prefs>; setup?: (b: DemoBackend) => void; effects?: BrainEffects; at?: number } = {}) {
+  const clock = { t: opts.at ?? at(28, 9) };
   const backend = createDemoBackend({ now: () => clock.t, persist: false });
   opts.setup?.(backend);
   if (opts.life) await backend.storage.save("life", { ...demoLife(), dayKey: "2026-10-28", ...opts.life });
@@ -2917,7 +2917,10 @@ describe("Brain v0.8: lines that don't repeat (SPEC v0.8 §1)", () => {
       if (Math.max(0, ...at) !== r.clock.t) continue;
       const index = newest(brain, "done");
       const task = s.day.completed.find((t) => t.content === `${title} ${k}`)!;
-      expect(bubble.text.split("\n")[0]).toBe(lines.done(task, s.day.completed.length, s.target, brain.speciesSound, option(index)));
+      // As the brain reads it: a task added just now is neither postponed nor today's frog.
+      const when = new Date(r.clock.t);
+      const ctx = { completed: s.day.completed.length, target: s.target, sound: brain.speciesSound, frog: false, stuck: false, hour: when.getHours(), weekday: when.getDay() };
+      expect(bubble.text.split("\n")[0]).toBe(lines.done(task, ctx, option(index)));
       return { index, bubble };
     }
     throw new Error(`no done line for ${title}`);
@@ -2926,15 +2929,49 @@ describe("Brain v0.8: lines that don't repeat (SPEC v0.8 §1)", () => {
   it("finishing tasks says every done line once before any comes back, and keeps Undo on every bubble", async () => {
     const r = await rig({ prefs: { dailyTarget: 10 } });
     try {
+      const n = 20;
       const said: number[] = [];
-      for (let i = 1; i <= 5; i++) said.push((await finishDone(r, `Task ${i}`)).index);
-      expect(r.brain.getSnapshot().life.said.done.n).toBe(4);
-      expect(new Set(said.slice(0, 4)).size).toBe(4);
-      expect(said[4]).not.toBe(said[3]);
+      for (let i = 1; i <= n + 1; i++) said.push((await finishDone(r, `Task ${i}`)).index);
+      expect(r.brain.getSnapshot().life.said.done.n).toBe(n);
+      expect(new Set(said.slice(0, n)).size).toBe(n);
+      expect(said[n]).not.toBe(said[n - 1]);
     } finally {
       r.brain.stop();
     }
-  });
+  }, 60_000);
+
+  it("each context says its own line, and every bubble keeps Undo", async () => {
+    /** The bubble after `finishing` picked a `key` line just now, and has Undo. */
+    const saidNow = (r: Rig, key: string, bubble: Bubble) => {
+      expect(r.brain.getSnapshot().life.said[key]?.at, key).toContain(r.clock.t);
+      expect(bubble.actions.map((a) => a.title), key).toContain(L("Hoàn tác", "Undo"));
+    };
+    const plan = (b: DemoBackend) => void b.storage.save("plan", { plans: [{ day: "2026-10-28", frogId: "1", note: null }], doneUntil: null });
+    const rigs = {
+      // Nothing finished yet today.
+      first: await rig({ setup: (b) => void (b.todoist.completed = async () => []) }),
+      // The demo's task 1 is today's frog, picked when the day before was wrapped up; its task 3 is postponed. A target
+      // above the demo's 3, so neither reaches it (that line comes first).
+      demo: await rig({ setup: plan, prefs: { dailyTarget: 10 } }),
+      early: await rig({ at: at(28, 8, 30) }),
+      friday: await rig({ at: at(30, 15, 30) }),
+    };
+    try {
+      saidNow(rigs.first, "done.first", await finish(rigs.first, "The first one"));
+      const { demo } = rigs;
+      expect(demo.brain.getSnapshot().day.frogId).toBe("1");
+      for (const [id, key] of [["1", "done.frog"], ["3", "done.stuck"]] as const) {
+        const task = demo.brain.getSnapshot().day.today.find((t) => t.id === id) ?? demo.brain.getSnapshot().stuck.find((x) => x.task.id === id)!.task;
+        demo.clock.t += MIN;
+        await demo.brain.complete(task);
+        saidNow(demo, key, demo.brain.getSnapshot().bubble!);
+      }
+      saidNow(rigs.early, "done.early", await finish(rigs.early, "Before nine"));
+      saidNow(rigs.friday, "done.friday", await finish(rigs.friday, "Friday afternoon"));
+    } finally {
+      for (const r of Object.values(rigs)) r.brain.stop();
+    }
+  }, 30_000);
 
   it("the saved state never holds a task title", async () => {
     const r = await rig({ prefs: { dailyTarget: 10 } });
@@ -2955,13 +2992,14 @@ describe("Brain v0.8: lines that don't repeat (SPEC v0.8 §1)", () => {
     const r = await rig({ prefs: { dailyTarget: 10 } });
     let again: Brain | null = null;
     try {
-      for (let i = 1; i <= 3; i++) await finishDone(r, `Before ${i}`);
-      const unused = r.brain.getSnapshot().life.said.done.at.indexOf(0);
-      expect(unused).toBeGreaterThanOrEqual(0);
-      await vi.waitFor(async () => expect(((await r.backend.storage.load("life")) as LifeState).said.done.at.indexOf(0)).toBe(unused));
+      const used = new Set<number>();
+      for (let i = 1; i <= 3; i++) used.add((await finishDone(r, `Before ${i}`)).index);
+      const said = r.brain.getSnapshot().life.said.done;
+      await vi.waitFor(async () => expect(((await r.backend.storage.load("life")) as LifeState).said.done).toEqual(said));
       r.brain.stop();
       again = await r.boot();
-      expect((await finishDone(r, "After", again)).index).toBe(unused);
+      // The dice are fixed, so a pet that forgot would say the very first line again; this one says a line not said yet.
+      expect(used.has((await finishDone(r, "After", again)).index)).toBe(false);
     } finally {
       r.brain.stop();
       again?.stop();

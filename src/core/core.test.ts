@@ -216,7 +216,7 @@ describe("kind lines", () => {
    * padded with `undefined` (the defaults) and `say` is added.
    */
   const SAY_AFTER: Record<string, number> = {
-    greeting: 1, morning: 6, plan: 3, nudge: 3, overdue: 3, distraction: 4, done: 4, allDone: 0, review: 4, backToWork: 0,
+    greeting: 1, morning: 6, plan: 3, nudge: 3, overdue: 3, distraction: 4, done: 2, allDone: 0, review: 4, backToWork: 0,
     welcomeBack: 1, soon: 2, dueNow: 1, focusStart: 2, focusEnd: 2, breakStart: 1, breakEnd: 0, planComplete: 2, lateNight: 0,
     meetingOver: 3, starterStart: 2, starterEnd: 1, starterGone: 1, starterEnough: 0, stuck: 2, splitDone: 2, cleaned: 1,
     levelUp: 1, streak: 1, dirty: 1, golden: 0, combo: 1, hungry: 2, grumble: 1, parade: 1, block: 2, voiceGrumble: 0,
@@ -247,7 +247,10 @@ describe("kind lines", () => {
     freshStartPartial: [[2, 3, 1, 0, "offline"], [0, 2, 2, 1, "offline"]],
     freshStartUndone: [[2, 0], [1, 1]],
     distraction: moods.flatMap((m) => [[m, "youtube.com", 2, t], [m, "Discord", 1, null]]),
-    done: [[t, 1, 3, "meow"], [t, 3, 3, "meow"]],
+    done: [{}, { completed: 3 }, { stuck: true }, { frog: true }, { completed: 1 }, { hour: 7 }, { weekday: 5, hour: 16 }].map((over) => [
+      t,
+      { completed: 2, target: 3, sound: "meow", frog: false, stuck: false, hour: 11, weekday: 3, ...over },
+    ]),
     allDone: [[]],
     review: [[1, 3, 2], [1, 3, 2, "Monday"], [1, 3, 2, "Thứ Hai"], [3, 3, 0], [0, 0, 0]],
     overbooked: [

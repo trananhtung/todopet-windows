@@ -36,8 +36,9 @@ function sayEverything(say: Phrase): void {
   }
   lines.overdue("normal", 0, 23, say);
   lines.distraction("angry", "⟦A⟧", 29, null, say);
-  lines.done(T, 13, 17, "⟦S⟧", say);
-  lines.done(T, 17, 17, "⟦S⟧", say);
+  const doneIn = (over: Partial<lines.DoneContext>) =>
+    lines.done(T, { completed: 13, target: 17, sound: "⟦S⟧", frog: false, stuck: false, hour: 11, weekday: 3, ...over }, say);
+  for (const over of [{}, { completed: 17 }, { stuck: true }, { frog: true }, { completed: 1 }, { hour: 7 }, { weekday: 5, hour: 16 }]) doneIn(over);
   lines.allDone(say);
   lines.review(13, 17, 0, null, say);
   lines.review(0, 17, 0, null, say);
@@ -101,7 +102,7 @@ const KEYS = [
   "nudge.happy", "nudge.annoyed", "nudge.angry", "nudge.normal",
   "overdue.repeating", "overdue.worried", "overdue",
   "distraction.angry", "distraction",
-  "done.target", "done", "allDone",
+  "done.target", "done.stuck", "done.frog", "done.first", "done.early", "done.friday", "done", "allDone",
   "review.clear", "review.empty", "review",
   "backToWork", "welcomeBack", "soon", "dueNow",
   "focusStart.task", "focusStart", "focusEnd.task", "focusEnd", "breakStart", "breakEnd",
@@ -138,7 +139,10 @@ const TARGETS: Record<string, number> = {
   tip: 14, "voice.cheer": 6, "voice.grumble": 4, "voice.angry": 4, "voice.block": 3, "voice.hungry": 3,
 };
 /** The keys whose batch is in: they must reach their target. */
-const FILLED = new Set<string>([]);
+const FILLED = new Set<string>([
+  // Batch 1: finishing a task, by context.
+  "done", "done.target", "done.stuck", "done.frog", "done.first", "done.early", "done.friday",
+]);
 /** Keys that shipped (0.7.1) with more than one option. A pack never shrinks: an option's index is its identity. */
 const SHIPPED: Record<string, number> = {
   "plan.normal": 2, "plan.annoyed": 2, "plan.angry": 2,
@@ -213,6 +217,31 @@ describe("the packs every varied line goes through", () => {
   it("gives every key a target, and the filled ones reach it", () => {
     for (const key of KEYS) expect(TARGETS[key], key).toBeGreaterThanOrEqual(1);
     for (const p of packs) if (FILLED.has(p.key)) expect(p.options.length, p.key).toBeGreaterThanOrEqual(TARGETS[p.key]);
+  });
+
+  it("says the most specific done line", () => {
+    const ctx = (over: Partial<lines.DoneContext>): lines.DoneContext => ({
+      completed: 2, target: 13, sound: "⟦S⟧", frog: false, stuck: false, hour: 11, weekday: 3, ...over,
+    });
+    const keyOf = (c: lines.DoneContext) => {
+      let key = "";
+      lines.done(T, c, (p) => {
+        key = p.key;
+        return "";
+      });
+      return key;
+    };
+    expect(keyOf(ctx({ completed: 13, stuck: true, frog: true }))).toBe("done.target");
+    expect(keyOf(ctx({ completed: 1, stuck: true, frog: true }))).toBe("done.stuck");
+    expect(keyOf(ctx({ completed: 1, frog: true }))).toBe("done.frog");
+    expect(keyOf(ctx({ completed: 1, hour: 8 }))).toBe("done.first");
+    expect(keyOf(ctx({ hour: 8 }))).toBe("done.early");
+    expect(keyOf(ctx({ hour: 5 }))).toBe("done.early");
+    expect(keyOf(ctx({ hour: 4 }))).toBe("done");
+    expect(keyOf(ctx({ hour: 9 }))).toBe("done");
+    expect(keyOf(ctx({ weekday: 5, hour: 15 }))).toBe("done.friday");
+    expect(keyOf(ctx({ weekday: 5, hour: 14 }))).toBe("done");
+    expect(keyOf(ctx({ weekday: 6, hour: 16 }))).toBe("done");
   });
 
   it("hands random picks to tests that don't care which line", () => {
