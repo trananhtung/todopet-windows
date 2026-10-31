@@ -1,7 +1,7 @@
 {
   "name": "todopet-windows",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "A desktop pet for Windows that reads your Todoist tasks and gets happy when you work.",
   "license": "MIT",
   "type": "module",
