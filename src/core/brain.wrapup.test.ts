@@ -599,7 +599,7 @@ describe("Brain v0.4: done for today", () => {
     expect(b?.urgent).toBe(true);
     r.brain.dismissBubble(b!.id, "closed");
     const due = r.step(8);
-    expect(due?.text).toMatch(/time/i);
+    expect(everyOption((say) => lines.dueNow(sprint, say))).toContain(due?.text);
   });
 
   it("still cheers a finished task, and the pet wakes to celebrate", async () => {
@@ -1295,7 +1295,9 @@ describe("Brain v0.4 evaluation: bubbles that went stale are dropped unseen (iss
     expect(bubbleOf(r)).toBeNull();
     r.brain.runRules(r.clock.t);
     const now = bubbleOf(r)!;
-    expect(now.text).toMatch(/time/i);
+    // Due now (⏰ … time), not the "in N min" one before it.
+    expect(now.text).toMatch(/^⏰ [^\n]*time/i);
+    expect(now.text).not.toMatch(/in \d+ min/i);
     expect(now.validUntil).toBe(at(28, 10, 5));
     r.clock.t = at(28, 10, 6);
     r.brain.pruneBubble();
