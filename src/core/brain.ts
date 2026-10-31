@@ -3037,6 +3037,9 @@ export class Brain {
   private celebrate(task: TodoTask | null, viaPet: boolean, feeds = 1, sound = "yay"): { xp: number; golden: boolean; chest: chests.ChestResult | null } | null {
     const nowMs = this.now();
     this.lastCelebration = nowMs;
+    // Read before the feeding recomputes the day, which takes the finished task off the postponed list.
+    const stuck = task !== null && this.state.stuck.some((x) => x.task.id === task.id);
+    const frog = task !== null && this.state.day.frogId === task.id;
     const xpBefore = this.state.life.xp;
     let result: life.FeedResult | null = null;
     const unlocked: Accessory[] = [];
@@ -3070,7 +3073,9 @@ export class Brain {
     this.recompute();
     this.play(r.golden || levelUp !== null ? "big" : "celebrate");
     if (task) {
-      const parts = [lines.done(task, this.state.day.completed.length, this.state.target, sound, this.phrase)];
+      const at = new Date(nowMs);
+      const ctx = { completed: this.state.day.completed.length, target: this.state.target, sound, frog, stuck, hour: at.getHours(), weekday: at.getDay() };
+      const parts = [lines.done(task, ctx, this.phrase)];
       if (r.golden) parts.push(lines.golden(this.phrase));
       if (r.combo >= 2) parts.push(lines.combo(r.combo, this.phrase));
       if (r.cleaned) parts.push(lines.cleaned(this.state.life.dirt, this.phrase));
