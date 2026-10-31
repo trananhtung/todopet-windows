@@ -240,7 +240,7 @@ describe("the packs every varied line goes through", () => {
   });
 
   it("says one task, one day, one minute: never a plural after 1", () => {
-    const pluralAfterOne = /(?<![\d/])\b1 (?:[a-z-]+ )?(?:tasks|days|things|spots|steps|minutes|hours|layers|stickers|trips|sessions)\b/;
+    const pluralAfterOne = /(?<![\d/])\b1 (?:[a-z-]+ ){0,2}(?:tasks|days|things|spots|steps|minutes|hours|layers|stickers|trips|sessions)\b/;
     const english: string[] = [];
     sayWithOne((p) => {
       for (const [, en] of p.options) english.push(`${p.key}: ${en}`);
