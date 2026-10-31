@@ -100,12 +100,24 @@ export function nudge(mood: Mood, next: TodoTask, hoursIdle: number, say: Phrase
     return say({ key: "nudge.happy", options: [
       [`Đang ngon trớn! Tiếp theo là ${q(next)} nha ✨`, `On a roll! Next up: ${q(next)} ✨`],
       [`Mình thích nhịp này! Làm luôn ${q(next)} nhé 💪`, `Love this pace! Let's do ${q(next)} 💪`],
+      [`Bạn đang vào guồng rồi! ${q(next)} tiếp nhé 🚀`, `You're in the zone! ${q(next)} next? 🚀`],
+      [`Nhịp đẹp quá! Nhân tiện xử luôn ${q(next)} nha 😎`, `Great rhythm! Might as well take on ${q(next)} 😎`],
+      [`Đà này mà làm ${q(next)} là chuẩn luôn ✨`, `With this momentum, ${q(next)} is perfect timing ✨`],
+      [`Vui ghê! Mình đi tiếp với ${q(next)} nhé 🎶`, `This is fun! On to ${q(next)} 🎶`],
+      [`Năng lượng đang tốt, ${q(next)} chờ bạn đó 🌞`, `Energy's good, ${q(next)} is waiting for you 🌞`],
+      [`Cứ thế mà tiến! Tiếp theo: ${q(next)} 🏃`, `Keep it going! Next: ${q(next)} 🏃`],
     ] });
   }
   if (mood === "annoyed") {
     return say({ key: "nudge.annoyed", options: [
       [`${q(next)} có vẻ khó nhằn? Mình làm 10 phút thôi nhé 🌱`, `${q(next)} feeling heavy? Let's just do 10 minutes 🌱`],
       [`Mình hơi lo cho ${q(next)}. Bật một phiên tập trung, mình ngồi canh cho nhé? ⏱`, `I'm a little worried about ${q(next)}. Start a focus session and I'll keep watch? ⏱`],
+      [`${q(next)} trông hơi to nhỉ? Chia nhỏ ra, làm phần dễ nhất trước nhé 🧩`, `${q(next)} looks big? Break it down and start with the easiest bit 🧩`],
+      [`Mình ở đây nè. Thử 5 phút với ${q(next)} thôi, không cần xong ngay 🌱`, `I'm right here. Just 5 minutes on ${q(next)}, no need to finish 🌱`],
+      [`Có vẻ hơi khó bắt đầu. Mở ${q(next)} ra xem trước nhé? 👀`, `Hard to get started? Just open ${q(next)} and have a look 👀`],
+      [`Không sao đâu. Một bước nhỏ với ${q(next)} là đủ cho lúc này 🤍`, `It's okay. One small step on ${q(next)} is all it takes for now 🤍`],
+      [`Mình hơi lo nè. Cùng làm ${q(next)} 10 phút, mình canh giờ cho 🕙`, `I'm a bit worried. Let's do 10 minutes of ${q(next)}, I'll time it 🕙`],
+      [`Bắt đầu từ chỗ dễ nhất của ${q(next)} nhé, mình tin bạn 💛`, `Start with the easiest part of ${q(next)}, I believe in you 💛`],
     ] });
   }
   if (mood === "angry") {
@@ -113,11 +125,23 @@ export function nudge(mood: Mood, next: TodoTask, hoursIdle: number, say: Phrase
     return say({ key: "nudge.angry", options: [
       [`${h} tiếng chưa có tiến triển. Mình làm bước nhỏ đầu tiên của ${q(next)} nhé 💪`, `${h}h without a win. Let's take the first small step of ${q(next)} 💪`],
       [`Quay lại với ${q(next)} nha? Mình canh giờ cho bạn tập trung 🛡️`, `Back to ${q(next)}? I'll guard the time while you focus 🛡️`],
+      [`${h} tiếng trôi qua rồi. Mình thử 10 phút với ${q(next)} nhé? ⏳`, `${h}h have gone by. Shall we try 10 minutes of ${q(next)}? ⏳`],
+      [`Mình đứng đây chờ ${q(next)} với bạn nè. Bắt đầu thôi? 🙋`, `I'm standing by for ${q(next)} with you. Shall we start? 🙋`],
+      [`Lâu rồi chưa có việc nào xong. Bước nhỏ nhất của ${q(next)} là gì nhỉ? 🔎`, `It's been a while since a win. What's the tiniest step of ${q(next)}? 🔎`],
+      [`Mình nhớ cảm giác gạch việc lắm! Cùng làm ${q(next)} nha? 🥺`, `I miss ticking things off! Shall we do ${q(next)} together? 🥺`],
+      [`${h} tiếng rồi đó. Mình bật đồng hồ cho ${q(next)} nhé, chỉ 15 phút 🕒`, `It's been ${h}h. Let me start a timer for ${q(next)}, just 15 minutes 🕒`],
+      [`Không trách bạn đâu, mình chỉ muốn giúp. ${q(next)} trước nhé? 🤝`, `No blame here, I just want to help. ${q(next)} first? 🤝`],
     ] });
   }
   return say({ key: "nudge.normal", options: [
     [`Việc tiếp theo: ${q(next)}. Làm một phiên tập trung không?`, `Next: ${q(next)}. Want a focus session?`],
     [`Nhắc nhẹ: ${q(next)} đang chờ bạn 🙂`, `Gentle nudge: ${q(next)} is waiting 🙂`],
+    [`${q(next)} đang đợi bạn đó. Bắt đầu nhẹ nhàng nhé? 🌿`, `${q(next)} is waiting for you. Ease into it? 🌿`],
+    [`Hay mình làm ${q(next)} một chút nhỉ? ⏱`, `How about a little time on ${q(next)}? ⏱`],
+    [`Tiếp theo trong danh sách: ${q(next)}. Mình cùng làm nha 🙌`, `Next on the list: ${q(next)}. Let's do it together 🙌`],
+    [`Một phiên tập trung cho ${q(next)} không? Mình ngồi canh 🛡️`, `A focus session for ${q(next)}? I'll keep watch 🛡️`],
+    [`Bước kế tiếp: ${q(next)}. Chỉ cần mở ra xem thôi cũng được 👀`, `Next step: ${q(next)}. Even just opening it counts 👀`],
+    [`Mình nghĩ giờ hợp để làm ${q(next)} đó ✍️`, `Feels like a good moment for ${q(next)} ✍️`],
   ] });
 }
 
@@ -132,23 +156,37 @@ const staysPut = (repeating: number) =>
  */
 export function overdue(mood: Mood, movable: number, repeating = 0, say: Phrase): string {
   if (movable === 0) {
-    return say({ key: "overdue.repeating", options: [[
-      `${repeating} việc lặp lại đang quá hạn 🔁 Chúng tự quay lại theo lịch, nên xong lần này khi bạn rảnh là được.`,
-      `${n(repeating, "repeating task")} ${repeating === 1 ? "is" : "are"} overdue 🔁 They come back on their own schedule, so just tick this one off when you can.`,
-    ]] });
+    const tasks = n(repeating, "repeating task");
+    return say({ key: "overdue.repeating", options: [
+      [
+        `${repeating} việc lặp lại đang quá hạn. Chúng tự quay lại theo lịch, nên cứ thong thả 🔁`,
+        `${tasks} ${repeating === 1 ? "is" : "are"} overdue. They come back on schedule, so no rush 🔁`,
+      ],
+      [`Quá hạn: ${repeating} việc lặp lại. Không sao, lịch sẽ mang lượt sau đến 🔁`, `Overdue: ${tasks}. No stress, the schedule will bring the next round 🔁`],
+      [`${repeating} việc lặp lại đang trễ một chút. Xong khi nào tiện là được nha 🔁`, `${tasks} running a bit late. Tick off whenever it suits you 🔁`],
+    ] });
   }
   const them = movable === 1 ? "it" : "them";
+  const tasks = n(movable, "overdue task");
   if (mood === "annoyed" || mood === "angry") {
     return (
-      say({ key: "overdue.worried", options: [[
-        `${movable} việc quá hạn đang chờ… 😟 Để mình giúp: dời vào hôm nay, hoặc dời hết sang mai để bắt đầu lại.`,
-        `${n(movable, "overdue task")} waiting… 😟 Let me help: move ${them} to today, or clear ${them} to tomorrow for a fresh start.`,
-      ]] }) + staysPut(repeating)
+      say({ key: "overdue.worried", options: [
+        [`${movable} việc quá hạn đang chờ. Mình giúp nhé: dời vào hôm nay, hay sang mai bắt đầu lại? 😟`, `${tasks} waiting. I can help: move ${them} to today, or a fresh start tomorrow? 😟`],
+        [`${movable} việc quá hạn làm mình hơi lo. Sang mai bắt đầu lại cho nhẹ nhé? 😟`, `${tasks} have me a bit worried. A fresh start tomorrow, maybe? 😟`],
+        [`Mình thấy ${movable} việc quá hạn. Đừng lo: làm hôm nay, hoặc sang mai bắt đầu lại 🤝`, `I see ${tasks}. Don't worry: today, or a fresh start tomorrow 🤝`],
+        [`${movable} việc quá hạn đang chờ. Sang mai bắt đầu lại cũng là lựa chọn hay đó 🌱`, `${tasks} waiting. A fresh start tomorrow is a fine choice too 🌱`],
+      ] }) + staysPut(repeating)
     );
   }
   return (
-    say({ key: "overdue", options: [[`Có ${movable} việc quá hạn 😬 Dời vào hôm nay, hay dời hết sang mai để bắt đầu lại?`, `${n(movable, "overdue task")} 😬 Move ${them} to today, or make a fresh start tomorrow?`]] }) +
-    staysPut(repeating)
+    say({ key: "overdue", options: [
+      [`Có ${movable} việc quá hạn 😬 Dời vào hôm nay, hay dời hết sang mai để bắt đầu lại?`, `${tasks} 😬 Move ${them} to today, or make a fresh start tomorrow?`],
+      [`${movable} việc đã quá hạn. Dời vào hôm nay, hay sang mai bắt đầu lại? 🗓️`, `${tasks}. Today, or a fresh start tomorrow? 🗓️`],
+      [`Còn ${movable} việc quá hạn nè. Xử lý hôm nay, hay để mai bắt đầu lại cho nhẹ? 🌤️`, `${tasks} left. Handle ${them} today, or a fresh start tomorrow? 🌤️`],
+      [`${movable} việc lỡ hẹn rồi, không sao đâu. Dời vào hôm nay hay sang mai bắt đầu lại? 🙂`, `${tasks}, and that's okay. Today, or a fresh start tomorrow? 🙂`],
+      [`Có ${movable} việc quá hạn. Bạn chọn nhé: hôm nay, hoặc dời sang mai để bắt đầu lại 📅`, `${tasks}. Your call: today, or move ${them} for a fresh start tomorrow 📅`],
+      [`${movable} việc quá hạn đang đợi. Gom vào hôm nay, hay sang mai bắt đầu lại nhẹ nhàng? 🍃`, `${tasks} waiting. Fold ${them} into today, or a gentle fresh start tomorrow? 🍃`],
+    ] }) + staysPut(repeating)
   );
 }
 
@@ -747,8 +785,22 @@ export function distractionSummary(d: Record<string, number>): string {
 }
 
 // Spoken lines (short, no emoji): invitations, never orders.
-export const voiceGrumble = (say: Phrase) => say({ key: "voice.grumble", options: [["Mình bắt đầu một việc nhỏ nhé?", "Shall we start something small?"], ["Mình ở đây khi bạn sẵn sàng.", "I'm here when you're ready."]] });
-export const voiceAngry = (t: TodoTask, say: Phrase) => say({ key: "voice.angry", options: [[`Mình làm ${shortText(taskTitle(t), 30)} nhé? Mình ở đây với bạn.`, `How about ${shortText(taskTitle(t), 30)}? I'll keep you company.`]] });
+export const voiceGrumble = (say: Phrase) =>
+  say({ key: "voice.grumble", options: [
+    ["Mình bắt đầu một việc nhỏ nhé?", "Shall we start something small?"],
+    ["Mình ở đây khi bạn sẵn sàng.", "I'm here when you're ready."],
+    ["Mình làm cùng nhau một chút nhé?", "Want to do a little together?"],
+    ["Một bước nhỏ thôi cũng được mà.", "Even one small step is fine."],
+  ] });
+export const voiceAngry = (t: TodoTask, say: Phrase) => {
+  const title = shortText(taskTitle(t), 30);
+  return say({ key: "voice.angry", options: [
+    [`Mình làm ${title} nhé? Mình ở đây với bạn.`, `How about ${title}? I'll keep you company.`],
+    [`Thử ${title} vài phút nhé? Mình ngồi đây với bạn.`, `Try ${title} for a few minutes? I'm right here.`],
+    [`Mình cùng bắt đầu ${title} nha.`, `Let's start ${title} together.`],
+    [`Bước nhỏ đầu tiên của ${title} là gì nhỉ?`, `What's the first small step of ${title}?`],
+  ] });
+};
 export const voiceBlock = (app: string, say: Phrase) => say({ key: "voice.block", options: [[`Để ${app} lát nữa nhé?`, `Shall we leave ${app} for later?`]] });
 export const voiceHungry = (say: Phrase) => say({ key: "voice.hungry", options: [["Mình đói quá.", "I'm so hungry."]] });
 export const voiceCheer = (say: Phrase) =>

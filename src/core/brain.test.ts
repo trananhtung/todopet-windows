@@ -1066,7 +1066,9 @@ describe("Brain and kind moods", () => {
     });
     try {
       const b = until((x) => x.kind === "overdue");
-      expect(b.text).toContain("1 repeating task is overdue");
+      // A repeating-tasks line (any of them), naming how many, offering no move.
+      expect(everyOption((say) => lines.overdue("normal", 0, 1, say))).toContain(b.text);
+      expect(b.text).toContain("1 repeating task");
       expect(b.text).not.toMatch(/move|fresh start/i);
       expect(b.actions.map((a) => a.title)).toEqual(["Show"]);
     } finally {

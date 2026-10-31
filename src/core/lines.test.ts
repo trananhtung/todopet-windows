@@ -144,6 +144,8 @@ const FILLED = new Set<string>([
   "done", "done.target", "done.stuck", "done.frog", "done.first", "done.early", "done.friday",
   // Batch 2: finishing the day's plan, and the pet's rewards.
   "allDone", "planComplete.next", "planComplete", "voice.cheer", "combo", "golden", "levelUp", "streak", "hungry", "hungry.starving",
+  // Batch 3: nudges and overdue tasks.
+  "nudge.normal", "nudge.happy", "nudge.annoyed", "nudge.angry", "overdue", "overdue.worried", "overdue.repeating", "voice.grumble", "voice.angry",
 ]);
 /** Keys that shipped (0.7.1) with more than one option. A pack never shrinks: an option's index is its identity. */
 const SHIPPED: Record<string, number> = {
@@ -153,8 +155,6 @@ const SHIPPED: Record<string, number> = {
 };
 /** Shipped options that break a rule below, each until the batch that rewrites it (`key#index` → why). */
 const UNTIL_REVIEWED: Record<string, string> = {
-  "overdue.worried#0": "too long; batch 3",
-  "overdue.repeating#0": "too long; batch 3",
   "tripBack.souvenir#0": "too long; batch 8",
   "tripBack.stories#0": "too long; batch 8",
 };
