@@ -2965,23 +2965,32 @@ describe("Brain v0.8: lines that don't repeat (SPEC v0.8 §1)", () => {
     }
   });
 
-  it("a cheer said aloud is remembered only when it is heard", async () => {
-    // 95 XP: the next task grows the pet up, which the pet cheers aloud when the voice is on.
-    for (const voiceOn of [false, true]) {
-      const spoken: string[] = [];
-      const r = await rig({ life: { xp: 95 }, prefs: { dailyTarget: 10, voiceOn }, effects: { speak: (text) => spoken.push(text) } });
+  it("a cheer said aloud is remembered only when it is heard, and is read in the language it is written in", async () => {
+    // 95 XP: the next task grows the pet up, which the pet cheers aloud when the voice is on and a speaker is wired.
+    const cases = [
+      { voiceOn: false, speaker: true },
+      { voiceOn: true, speaker: false },
+      { voiceOn: true, speaker: true },
+    ];
+    for (const { voiceOn, speaker } of cases) {
+      const spoken: [string, string][] = [];
+      const effects: BrainEffects = speaker ? { speak: (text, lang) => spoken.push([text, lang]) } : {};
+      const r = await rig({ life: { xp: 95 }, prefs: { dailyTarget: 10, voiceOn, lang: null }, effects });
       try {
-        await finish(r, `Grow up, voice ${voiceOn ? "on" : "off"}`);
+        // No language chosen in the settings: the pet talks in the system's, here Vietnamese.
+        setLang("vi");
+        await finish(r, `Grow up, voice ${voiceOn ? "on" : "off"}, ${speaker ? "a" : "no"} speaker`);
         expect(r.brain.getSnapshot().life.xp).toBeGreaterThanOrEqual(100);
         const cheer = r.brain.getSnapshot().life.said["voice.cheer"];
-        if (!voiceOn) {
+        if (!voiceOn || !speaker) {
           expect(spoken).toEqual([]);
           expect(cheer).toBeUndefined();
         } else {
           expect(cheer).toBeDefined();
-          expect(spoken.at(-1)).toBe(lines.voiceCheer(option(newest(r.brain, "voice.cheer"))));
+          expect(spoken.at(-1)).toEqual([lines.voiceCheer(option(newest(r.brain, "voice.cheer"))), "vi"]);
         }
       } finally {
+        setLang("en");
         r.brain.stop();
       }
     }
