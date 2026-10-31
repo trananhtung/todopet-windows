@@ -12,6 +12,7 @@ import { defaultMoodInputs, evaluateMood, moodEmoji, moodLabel } from "./mood";
 import { addRestDays, dayRange, defaultPrefs, isWorkday, MAX_REST_DAYS, MAX_REST_RANGE, prefsFromJson } from "./prefs";
 import { appRules, currentDistraction, hostOf, matchSite, siteRules } from "./sites";
 import { findStuck, recordSeen, stuckDays } from "./stuck";
+import { everyOption, type Phrase } from "./variety";
 
 const task = (id: string, extra: Partial<TodoTask> = {}): TodoTask => ({
   ...taskFromRaw({ id, content: `Task ${id}` }),
@@ -29,6 +30,10 @@ const seenDay = (patch: Partial<life.LifeState> = {}): life.LifeState => ({
   ...patch,
 });
 const always = () => true;
+/** Holds `check` for every option a varied line can come out as: tests accept any option of a pack (SPEC v0.8 §1). */
+const forEvery = (line: (say: Phrase) => string, check: (text: string) => void) => {
+  for (const text of everyOption(line)) check(text);
+};
 
 describe("dates", () => {
   it("parses every Todoist date shape", () => {
@@ -179,14 +184,14 @@ describe("mood", () => {
 describe("kind lines", () => {
   const t = task("1", { content: "Write the report" });
   const stuckTask = { task: t, days: 5 };
-  /** Every variant of a line, in both languages. */
-  const variants = (make: () => string) => {
+  /** Every variant of a line, in both languages: every option of the packs it says, and each random pick it makes itself. */
+  const variants = (make: (say: Phrase) => string) => {
     const out: string[] = [];
     for (const lang of ["en", "vi"] as const) {
       setLang(lang);
       for (const r of [0, 0.5, 0.99]) {
         const spy = vi.spyOn(Math, "random").mockReturnValue(r);
-        out.push(make());
+        out.push(...everyOption(make));
         spy.mockRestore();
       }
     }
@@ -208,7 +213,7 @@ describe("kind lines", () => {
   const slot = { task: t, start: new Date(2026, 9, 28, 14), end: new Date(2026, 9, 28, 14, 30) };
   /**
    * Lines that vary take `say` last (SPEC v0.8 §1): how many parameters come before it, so the sample arguments are
-   * padded with `undefined` (the defaults) and a random `say` is added.
+   * padded with `undefined` (the defaults) and `say` is added.
    */
   const SAY_AFTER: Record<string, number> = {
     greeting: 1, morning: 6, plan: 3, nudge: 3, overdue: 3, distraction: 4, done: 4, allDone: 0, review: 4, backToWork: 0,
@@ -218,8 +223,8 @@ describe("kind lines", () => {
     voiceAngry: 1, voiceBlock: 1, voiceHungry: 0, voiceCheer: 0, tip: 0, tripOffer: 1, tripStayed: 0, tripStart: 2,
     tripBack: 1, newWeek: 1,
   };
-  const withSay = (name: string, args: unknown[]): unknown[] =>
-    name in SAY_AFTER ? [...args, ...new Array<undefined>(Math.max(0, SAY_AFTER[name] - args.length)).fill(undefined), lines.randomPhrase] : args;
+  const withSay = (name: string, args: unknown[], say: Phrase): unknown[] =>
+    name in SAY_AFTER ? [...args, ...new Array<undefined>(Math.max(0, SAY_AFTER[name] - args.length)).fill(undefined), say] : args;
   /** Sample arguments for every exported line (a new line needs an entry here). */
   const ARGS: Record<string, unknown[][]> = {
     randomPhrase: [[{ key: "tip", options: [["Chào", "Hi"]] }]],
@@ -399,7 +404,7 @@ describe("kind lines", () => {
     for (const [name, fn] of fns) {
       expect(ARGS[name], `sample arguments for lines.${name}`).toBeDefined();
       for (const args of ARGS[name]) {
-        for (const text of variants(() => fn(...withSay(name, args)))) {
+        for (const text of variants((say) => fn(...withSay(name, args, say)))) {
           if (DISTRACTION_TIME.has(name)) {
             expect(text, `${name}: ${text}`).not.toMatch(insults);
             expect(text, `${name}: ${text}`).not.toMatch(shouting);
@@ -454,9 +459,9 @@ describe("kind lines", () => {
 
   it("speaks kindly: the voice lines are invitations, never orders", () => {
     for (const text of [
-      ...variants(() => lines.voiceGrumble(lines.randomPhrase)),
-      ...variants(() => lines.voiceAngry(t, lines.randomPhrase)),
-      ...variants(() => lines.voiceBlock("YouTube", lines.randomPhrase)),
+      ...variants(lines.voiceGrumble),
+      ...variants((say) => lines.voiceAngry(t, say)),
+      ...variants((say) => lines.voiceBlock("YouTube", say)),
       ...variants(() => lines.voiceSummary(30)),
     ]) {
       expect(text).not.toMatch(scolding);
@@ -468,14 +473,14 @@ describe("kind lines", () => {
   it("mentions a fresh start for overdue tasks, and only offers what can be done", () => {
     for (const mood of ["normal", "annoyed", "angry"] as const) {
       setLang("en");
-      expect(lines.overdue(mood, 2, 0, lines.randomPhrase)).toMatch(/fresh start/i);
-      expect(lines.overdue(mood, 1, 1, lines.randomPhrase)).toMatch(/1 repeating task stays put/i);
+      forEvery((say) => lines.overdue(mood, 2, 0, say), (x) => expect(x).toMatch(/fresh start/i));
+      forEvery((say) => lines.overdue(mood, 1, 1, say), (x) => expect(x).toMatch(/1 repeating task stays put/i));
       // Every overdue task repeats: nothing to move, so no promise of moving.
-      expect(lines.overdue(mood, 0, 2, lines.randomPhrase)).not.toMatch(/move|fresh start/i);
-      expect(lines.overdue(mood, 0, 2, lines.randomPhrase)).toMatch(/2 repeating tasks/);
+      forEvery((say) => lines.overdue(mood, 0, 2, say), (x) => expect(x).not.toMatch(/move|fresh start/i));
+      forEvery((say) => lines.overdue(mood, 0, 2, say), (x) => expect(x).toMatch(/2 repeating tasks/));
       setLang("vi");
-      expect(lines.overdue(mood, 2, 0, lines.randomPhrase)).toMatch(/bắt đầu lại/i);
-      expect(lines.overdue(mood, 0, 2, lines.randomPhrase)).not.toMatch(/dời|bắt đầu lại/i);
+      forEvery((say) => lines.overdue(mood, 2, 0, say), (x) => expect(x).toMatch(/bắt đầu lại/i));
+      forEvery((say) => lines.overdue(mood, 0, 2, say), (x) => expect(x).not.toMatch(/dời|bắt đầu lại/i));
     }
     setLang("en");
     expect(lines.freshStart(2, 0)).toContain("2 overdue tasks");
@@ -526,33 +531,41 @@ describe("kind lines", () => {
     setLang("en");
     const call = task("2", { content: "Call Anna" });
     // Planned: the frog is the first task, said as your own pick.
-    const planned = lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Start with the intro" }, lines.randomPhrase);
-    expect(planned).toContain("Good morning");
-    expect(planned).toContain("picked");
-    expect(planned).toContain("“Write the report”");
-    expect(planned).toContain("📝");
-    expect(planned).toContain("“Start with the intro”");
+    forEvery(
+      (say) => lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Start with the intro" }, say),
+      (planned) => {
+        expect(planned).toContain("Good morning");
+        expect(planned).toContain("picked");
+        expect(planned).toContain("“Write the report”");
+        expect(planned).toContain("📝");
+        expect(planned).toContain("“Start with the intro”");
+      },
+    );
     // Not planned yet: the planning question comes first, the frog and the note follow.
-    const asking = lines.morning(at9, 1, 3, t, 3, { frog: call, note: null }, lines.randomPhrase);
-    expect(asking.split("\n")[0]).toContain("1/3");
-    expect(asking).toContain("“Call Anna”");
-    expect(asking).not.toContain("Your note");
+    forEvery(
+      (say) => lines.morning(at9, 1, 3, t, 3, { frog: call, note: null }, say),
+      (asking) => {
+        expect(asking.split("\n")[0]).toContain("1/3");
+        expect(asking).toContain("“Call Anna”");
+        expect(asking).not.toContain("Your note");
+      },
+    );
     // A frog that is not the next task is still named, next to the usual line.
-    expect(lines.morning(at9, 3, 3, t, 3, { frog: call, note: null }, lines.randomPhrase)).toMatch(/Eat the frog first: “Write the report”[\s\S]*“Call Anna”/);
+    forEvery((say) => lines.morning(at9, 3, 3, t, 3, { frog: call, note: null }, say), (x) => expect(x).toMatch(/“Write the report”[\s\S]*\n🐸.*“Call Anna”/));
     // Without a plan, nothing changes.
-    expect(lines.morning(at9, 3, 3, t, 3, null, lines.randomPhrase)).toBe(lines.morning(at9, 3, 3, t, 3, null, lines.randomPhrase));
-    expect(lines.morning(at9, 3, 3, t, 3, { frog: null, note: null }, lines.randomPhrase)).toBe(lines.morning(at9, 3, 3, t, 3, null, lines.randomPhrase));
+    const plain = everyOption((say) => lines.morning(at9, 3, 3, t, 3, null, say));
+    expect(everyOption((say) => lines.morning(at9, 3, 3, t, 3, { frog: null, note: null }, say))).toEqual(plain);
     setLang("vi");
-    expect(lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Bắt đầu từ phần mở đầu" }, lines.randomPhrase)).toContain("“Bắt đầu từ phần mở đầu”");
+    forEvery((say) => lines.morning(at9, 3, 3, t, 3, { frog: t, note: "Bắt đầu từ phần mở đầu" }, say), (x) => expect(x).toContain("“Bắt đầu từ phần mở đầu”"));
     setLang("en");
   });
 
   it("invites you to wrap up the day when it is almost over", () => {
     setLang("en");
-    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toMatch(/end of day/);
-    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toMatch(/wrap up/i);
+    forEvery((say) => lines.review(1, 3, 2, null, say), (x) => expect(x).toMatch(/end of day/));
+    forEvery((say) => lines.review(1, 3, 2, null, say), (x) => expect(x).toMatch(/wrap up/i));
     setLang("vi");
-    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toMatch(/tổng kết/i);
+    forEvery((say) => lines.review(1, 3, 2, null, say), (x) => expect(x).toMatch(/tổng kết/i));
     setLang("en");
   });
 
@@ -1185,7 +1198,7 @@ describe("lines that name the next workday (v0.4 evaluation round 2, issue 3)", 
     expect(lines.wrapIntro("Monday")).toContain("a tidy desk for Monday");
     expect(lines.wrapNoWins("Monday")).toContain("Monday is a fresh page");
     expect(lines.wrapFrogDone("Report", "Monday")).toContain("or decide on Monday");
-    expect(lines.review(1, 3, 2, "Monday", lines.randomPhrase)).toContain("move the remaining 2 to Monday?");
+    forEvery((say) => lines.review(1, 3, 2, "Monday", say), (x) => expect(x).toContain("move the remaining 2 to Monday?"));
     expect(lines.wrappedUp("Report", "Monday")).toBe("All wrapped up 🌙 Rest well. Monday starts with “Report” 🐸");
     expect(lines.movedToTomorrow(2, "Monday")).toBe("Moved 2 tasks to Monday. Rest well 🌙");
     setLang("vi");
@@ -1195,12 +1208,12 @@ describe("lines that name the next workday (v0.4 evaluation round 2, issue 3)", 
     expect(lines.wrapForLabel("Thứ Hai")).toBe("Cho Thứ Hai");
     expect(lines.wrapIntro("Thứ Hai")).toContain("dọn bàn cho Thứ Hai");
     expect(lines.wrapNoWins("Thứ Hai")).toContain("Thứ Hai là một trang mới");
-    expect(lines.review(1, 3, 2, "Thứ Hai", lines.randomPhrase)).toContain("dời hết sang Thứ Hai?");
+    forEvery((say) => lines.review(1, 3, 2, "Thứ Hai", say), (x) => expect(x).toContain("dời hết sang Thứ Hai?"));
     expect(lines.wrappedUp("Report", "Thứ Hai")).toContain("Thứ Hai mình bắt đầu với “Report” 🐸");
     expect(lines.movedToTomorrow(2, "Thứ Hai")).toContain("sang Thứ Hai");
     // On a weekday nothing changes.
-    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toContain("dời hết sang mai?");
+    forEvery((say) => lines.review(1, 3, 2, null, say), (x) => expect(x).toContain("dời hết sang mai?"));
     setLang("en");
-    expect(lines.review(1, 3, 2, null, lines.randomPhrase)).toContain("move the remaining 2 to tomorrow?");
+    forEvery((say) => lines.review(1, 3, 2, null, say), (x) => expect(x).toContain("move the remaining 2 to tomorrow?"));
   });
 });

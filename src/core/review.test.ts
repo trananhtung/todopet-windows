@@ -4,6 +4,7 @@ import type { ForegroundApp, SystemSample } from "../backend/types";
 import type { CalEvent } from "./calendar";
 import { setLang } from "./l10n";
 import * as lines from "./lines";
+import { everyOption } from "./variety";
 import { taskFromRaw, type TodoTask } from "./models";
 import { defaultPrefs, prefsFromJson } from "./prefs";
 import { isPrivateTitle, resumeSummary, snapshot, withoutDetails, workUrl, type WorkContext } from "./resume";
@@ -385,9 +386,9 @@ describe("the resume card's words (item 14, M2)", () => {
     expect(lines.triggerKindText({ kind: "afterLunch" })).toBe("after lunch");
     const e = ev("a", "Team sync", at(10), at(11));
     const next = ev("b", "Design", at(11, 8), at(12));
-    expect(lines.meetingOver(e, next, 4, lines.randomPhrase)).toContain("a 4-minute breather");
-    expect(lines.meetingOver(e, next, undefined, lines.randomPhrase)).toContain("a 5-minute breather");
-    expect(lines.meetingOver(e, null, undefined, lines.randomPhrase)).not.toContain("breather");
+    for (const text of everyOption((say) => lines.meetingOver(e, next, 4, say))) expect(text).toContain("a 4-minute breather");
+    for (const text of everyOption((say) => lines.meetingOver(e, next, undefined, say))) expect(text).toContain("a 5-minute breather");
+    for (const text of everyOption((say) => lines.meetingOver(e, null, undefined, say))) expect(text).not.toContain("breather");
   });
 });
 
