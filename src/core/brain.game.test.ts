@@ -6,8 +6,10 @@ import { Brain, type Bubble } from "./brain";
 import { dayKey } from "./dates";
 import { setLang } from "./l10n";
 import { demoLife, type LifeState } from "./life";
+import * as lines from "./lines";
 import { defaultPrefs, type Prefs } from "./prefs";
 import { DECOR_IDS } from "./types";
+import { everyOption } from "./variety";
 
 const MIN = 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -417,7 +419,8 @@ describe("Brain and trips", () => {
     expect(s().trip).toBeNull();
     expect(s().life.souvenirs).toHaveLength(4);
     expect(s().life.week.trips).toBe(0);
-    expect(s().bubble?.text).toMatch(/back|home/i);
+    // One of the early-return lines (no souvenir, no XP: the place doesn't show).
+    expect(everyOption((say) => lines.tripBack({ place: "hoian", minutes: 10, souvenir: null, xp: 0 }, say))).toContain(s().bubble?.text);
     expect(s().reveal).toMatchObject({ kind: "souvenir", souvenir: null });
     brain.callBack();
     // A stray click doesn't cost the day's trip.

@@ -1106,7 +1106,8 @@ describe("Brain and the nudge budget", () => {
       b = step(0);
       expect(b?.text).toContain("Meeting in 4 min");
       b = step(0);
-      expect(b?.text).toMatch(/in 4 min/i);
+      // The timed task's own reminder (⏰), not the meeting's (📅) still showing.
+      expect(b?.text).toMatch(/^⏰ [^\n]*in 4 min/i);
       expect(left()).toBe(7);
       brain.dismissBubble(b!.id, "closed");
       // Late in the day: every reminder costs one, the end-of-day review costs nothing.
@@ -2768,7 +2769,7 @@ describe("Brain v0.4 review: the 2-minute starter, the breather and the related 
       r.clock.t += 2 * MIN + 1000;
       r.brain.tick();
       const b = r.brain.getSnapshot().bubble!;
-      expect(b.text).toMatch(/done/i);
+      expect(everyOption((say) => lines.starterGone(task, say))).toContain(b.text);
       expect(titles(b)).toEqual(["That's enough"]);
     } finally {
       r.brain.stop();
@@ -2945,6 +2946,19 @@ describe("Brain v0.8: lines that don't repeat (SPEC v0.8 §1)", () => {
       r.brain.stop();
     }
   }, 60_000);
+
+  it("a postponed task finished in the Todoist app says its postponed line too", async () => {
+    const r = await rig({ prefs: { dailyTarget: 10 } });
+    try {
+      const task = r.brain.getSnapshot().stuck.find((x) => x.task.id === "3")!.task;
+      r.clock.t += MIN;
+      await r.backend.todoist.close(task.id);
+      await r.brain.refresh();
+      expect(r.brain.getSnapshot().life.said["done.stuck"]?.at, "done.stuck").toContain(r.clock.t);
+    } finally {
+      r.brain.stop();
+    }
+  });
 
   it("each context says its own line, and every bubble keeps Undo", async () => {
     /** The bubble after `finishing` picked a `key` line just now, and has Undo. */

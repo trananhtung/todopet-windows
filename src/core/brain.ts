@@ -1201,8 +1201,10 @@ export class Brain {
     // Celebrate (and feed the pet for) tasks completed in the Todoist app since the last sync.
     const fresh = this.completed.filter((t) => !this.knownCompleted.has(t.id) && !this.completedViaPet.has(t.id));
     if (this.didLoadOnce && fresh.length > 0) {
+      // Whether it was postponed, read before the recompute takes it off that list.
+      const wasStuck = this.state.stuck.some((x) => x.task.id === fresh[0].id);
       this.recompute();
-      this.celebrate(fresh[0], false, fresh.length);
+      this.celebrate(fresh[0], false, fresh.length, undefined, wasStuck);
     }
     this.knownCompleted = new Set([...this.completed.map((t) => t.id), ...this.completedViaPet]);
     this.didLoadOnce = true;
@@ -3034,11 +3036,18 @@ export class Brain {
 
   /** Feeds the pet once per finished task, then dances with a random (sometimes rare golden) celebration. */
   /** Returns what the feeding gave (XP, golden), so Undo can take back exactly that. */
-  private celebrate(task: TodoTask | null, viaPet: boolean, feeds = 1, sound = "yay"): { xp: number; golden: boolean; chest: chests.ChestResult | null } | null {
+  /** `wasStuck`: whether the task was on the postponed list, when the caller has already recomputed the day. */
+  private celebrate(
+    task: TodoTask | null,
+    viaPet: boolean,
+    feeds = 1,
+    sound = "yay",
+    wasStuck?: boolean,
+  ): { xp: number; golden: boolean; chest: chests.ChestResult | null } | null {
     const nowMs = this.now();
     this.lastCelebration = nowMs;
     // Read before the feeding recomputes the day, which takes the finished task off the postponed list.
-    const stuck = task !== null && this.state.stuck.some((x) => x.task.id === task.id);
+    const stuck = wasStuck ?? (task !== null && this.state.stuck.some((x) => x.task.id === task.id));
     const frog = task !== null && this.state.day.frogId === task.id;
     const xpBefore = this.state.life.xp;
     let result: life.FeedResult | null = null;
