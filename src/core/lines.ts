@@ -315,11 +315,13 @@ export interface DoneContext {
 /** The cheer for a finished task: the most specific line that applies, in the order of the spec's table. */
 export function done(t: TodoTask, c: DoneContext, say: Phrase): string {
   const { completed, target, sound } = c;
+  // The voice as a cry: "meow!", but "mochi!" and "chill~" already end in their own mark.
+  const cry = /[!~?…]$/.test(sound) ? sound : `${sound}!`;
   if (completed === target) {
     return say({ key: "done.target", options: [
       [`Đủ ${target} việc rồi!!! Bạn là nhất 🏆`, `That's ${target}!!! You're the best 🏆`],
       [`Chạm mốc ${target} việc hôm nay rồi! Tự hào về bạn ghê 🏆`, `${target} tasks today, target hit! So proud of you 🏆`],
-      [`${sound}! Đủ chỉ tiêu ${target} việc rồi nè 🎊`, `${sound}! That's the ${target}-task goal, done 🎊`],
+      [`${cry} Đủ chỉ tiêu ${target} việc rồi nè 🎊`, `${cry} That's the ${target}-task goal, done 🎊`],
       [`Mục tiêu ${target} việc: xong! Thêm nữa là thưởng thôi 🌟`, `Goal of ${target}: done! Anything more is a bonus 🌟`],
       [`Đủ ${target} việc! Hôm nay thắng rồi nha 🌈`, `All ${target} done! Today's a win 🌈`],
       [`${target}/${target}! Giờ làm gì cũng là thêm, nhẹ nhàng thôi nhé 🍵`, `${target}/${target}! The rest is extra, take it easy 🍵`],
@@ -332,7 +334,7 @@ export function done(t: TodoTask, c: DoneContext, say: Phrase): string {
       ["Việc bạn cứ dời mãi đã xong rồi. Nhẹ hẳn người nhỉ? 🪶", "The one you kept putting off is done. Lighter now? 🪶"],
       [`Hết dời rồi nhé! ${q(t)} xong rồi ✅`, `No more postponing! ${q(t)} is done ✅`],
       ["Mình biết việc này khó bắt đầu lắm. Bạn giỏi thật 🌟", "I know this one was hard to start. Well done 🌟"],
-      [`${sound}! ${q(t)} không còn phải chờ nữa 🥳`, `${sound}! ${q(t)} doesn't have to wait anymore 🥳`],
+      [`${cry} ${q(t)} không còn phải chờ nữa 🥳`, `${cry} ${q(t)} doesn't have to wait anymore 🥳`],
     ] });
   }
   if (c.frog) {
@@ -340,7 +342,7 @@ export function done(t: TodoTask, c: DoneContext, say: Phrase): string {
       [`Ăn xong con ếch ${q(t)} rồi! 🐸`, `Frog eaten: ${q(t)}! 🐸`],
       ["Việc khó nhất hôm nay xong rồi. Phần còn lại nhẹ hơn nhiều 🐸", "Today's hardest task is done. The rest will feel easier 🐸"],
       [`Đúng con ếch bạn chọn từ trước: ${q(t)} xong! 🎯`, `The frog you picked before you left: ${q(t)}, done! 🎯`],
-      [`${sound}! Con ếch hết đường chạy rồi 🐸`, `${sound}! That frog didn't stand a chance 🐸`],
+      [`${cry} Con ếch hết đường chạy rồi 🐸`, `${cry} That frog didn't stand a chance 🐸`],
       ["Xong con ếch rồi, cả ngày còn lại nhẹ tênh 🍃", "Frog done, the rest of the day feels light 🍃"],
       [`Bạn giữ lời với chính mình rồi đó: ${q(t)} ✅`, `You kept your word to yourself: ${q(t)} ✅`],
     ] });
@@ -350,7 +352,7 @@ export function done(t: TodoTask, c: DoneContext, say: Phrase): string {
       ["Việc đầu tiên hôm nay xong rồi! Khởi động ngon lành 🚀", "First one of the day, done! Great start 🚀"],
       [`Mở hàng rồi nè: ${q(t)} ✅`, `First of the day: ${q(t)} ✅`],
       [`1/${target}! Bước đầu luôn khó nhất, và bạn đã qua 💪`, `1/${target}! The first step is the hardest, and it's done 💪`],
-      [`${sound}! Một ngày tốt bắt đầu từ đây 🌞`, `${sound}! A good day starts here 🌞`],
+      [`${cry} Một ngày tốt bắt đầu từ đây 🌞`, `${cry} A good day starts here 🌞`],
       ["Xong việc đầu tiên, mình bắt đầu thấy hào hứng rồi 😄", "First task done, I'm getting excited 😄"],
       ["Đà có rồi đó! Giữ nhịp nhẹ nhàng thôi nhé 🌱", "Momentum! Let's keep a gentle pace 🌱"],
     ] });
@@ -361,7 +363,7 @@ export function done(t: TodoTask, c: DoneContext, say: Phrase): string {
       [`Mới sáng sớm đã xong ${q(t)}, ghê thật 🌅`, `${q(t)} done this early? Impressive 🌅`],
       ["Dậy sớm làm việc, mình nể bạn ghê ☕", "Up early and getting things done, respect ☕"],
       [`Buổi sáng hiệu quả quá! (${completed}/${target}) 🌄`, `What a productive morning! (${completed}/${target}) 🌄`],
-      [`${sound}! Chim dậy sớm có… việc xong sớm 🐦`, `${sound}! The early bird gets… things done 🐦`],
+      [`${cry} Chim dậy sớm có… việc xong sớm 🐦`, `${cry} The early bird gets… things done 🐦`],
       ["Xong việc trước 9 giờ, cả ngày rộng rãi hẳn 🌤️", "Done before 9, the whole day opens up 🌤️"],
     ] });
   }
@@ -370,25 +372,25 @@ export function done(t: TodoTask, c: DoneContext, say: Phrase): string {
       ["Chiều thứ Sáu mà vẫn xong việc, bạn đỉnh thật 🎉", "Friday afternoon and still getting it done, wow 🎉"],
       [`Xong ${q(t)}! Cuối tuần đang vẫy tay kìa 👋`, `${q(t)} done! The weekend is waving at you 👋`],
       [`Thứ Sáu khép lại đẹp quá (${completed}/${target}) 🌇`, `A lovely way to wrap up Friday (${completed}/${target}) 🌇`],
-      [`${sound}! Một việc nữa trước cuối tuần 🍹`, `${sound}! One more before the weekend 🍹`],
+      [`${cry} Một việc nữa trước cuối tuần 🍹`, `${cry} One more before the weekend 🍹`],
       ["Tuần này bạn làm tốt lắm. Nghỉ ngơi xứng đáng nhé 🌴", "You did great this week. You've earned the rest 🌴"],
     ] });
   }
   return say({ key: "done", options: [
     [`Xong ${q(t)}! 🎉 (${completed}/${target})`, `Done: ${q(t)}! 🎉 (${completed}/${target})`],
     [`Tuyệt vời! ✔︎ ${q(t)}`, `Awesome! ✔︎ ${q(t)}`],
-    [`${sound}! Mình vui quá 🥳 (${completed}/${target})`, `${sound}! So happy 🥳 (${completed}/${target})`],
+    [`${cry} Mình vui quá 🥳 (${completed}/${target})`, `${cry} So happy 🥳 (${completed}/${target})`],
     [`Giỏi quá! Tiếp tục giữ nhịp nhé 💪`, `Nice! Keep the rhythm 💪`],
     [`Xong rồi! ${q(t)} đã gạch khỏi danh sách ✨`, `Done! ${q(t)} is off the list ✨`],
     [`Một việc nữa xong rồi nè (${completed}/${target}) 🌟`, `One more down (${completed}/${target}) 🌟`],
-    [`${sound}! ${q(t)} xong rồi, mình mừng ghê 🎉`, `${sound}! ${q(t)} is done, I'm so glad 🎉`],
+    [`${cry} ${q(t)} xong rồi, mình mừng ghê 🎉`, `${cry} ${q(t)} is done, I'm so glad 🎉`],
     [`Gọn gàng ghê! ${q(t)} ✔︎`, `Neat! ${q(t)} ✔︎`],
     [`Bạn làm được rồi đó! (${completed}/${target}) 💪`, `You did it! (${completed}/${target}) 💪`],
     ["Thêm một việc xong, thêm một nụ cười cho mình 😊", "Another one done, another smile for me 😊"],
     [`Xong ${q(t)}. Nhẹ cả người luôn 🍃`, `${q(t)} done. Feels lighter already 🍃`],
     [`${completed} việc rồi đó, đều tay ghê 👏`, `That's ${completed} now, nice and steady 👏`],
     [`Mình ghi công cho bạn: ${q(t)} ✅`, `Credit to you: ${q(t)} ✅`],
-    [`${sound} ${sound}! Xong thêm một việc rồi 🥳`, `${sound} ${sound}! Another one done 🥳`],
+    [`${sound} ${cry} Xong thêm một việc rồi 🥳`, `${sound} ${cry} Another one done 🥳`],
     [`Yay, ${q(t)} xong! Mình nhảy một điệu nha 💃`, `Yay, ${q(t)} is done! Time for a little dance 💃`],
     ["Từng bước một, bạn đang làm rất tốt 🌱", "Step by step, you're doing great 🌱"],
     [`Tích! ${q(t)} xong rồi. Việc tiếp theo nào? 🎯`, `Tick! ${q(t)} is done. What's next? 🎯`],
