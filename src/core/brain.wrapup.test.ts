@@ -380,7 +380,8 @@ describe("Brain v0.4: tomorrow's frog and note in the morning", () => {
 
     expect(brain.getSnapshot().todayPlan).toEqual({ day: "2026-10-29", frogId: "2", note: "Start with the intro" });
     const b = r.until((x) => x.text.includes("Good morning"));
-    expect(b.text).toContain("The frog you picked before you left: “Call client ABC”");
+    // Any of the picked-frog lines: each says you picked it, then names it.
+    expect(b.text).toMatch(/picked[^\n]*“Call client ABC”/);
     expect(b.text).toContain("📝 Your note: “Start with the intro”");
     expect(b.kind).toBeUndefined();
     expect(b.reminder).toBe(true);
@@ -435,7 +436,8 @@ describe("Brain v0.4: tomorrow's frog and note in the morning", () => {
     r.backend.todoist.tasks = async (f) => (await tasks(f)).filter((t) => t.id === "2");
     await r.boot();
     const b = r.until((x) => x.text.includes("Good morning"));
-    expect(b.text.split("\n")[0]).toMatch(/What are our 3 things today/);
+    // The planning question (any of its lines) shows planned against the target of 3.
+    expect(b.text.split("\n")[0]).toMatch(/\d+\/3\b/);
     expect(b.text).toContain("“Call client ABC”");
     expect(b.text).toContain("Your note");
   });
@@ -443,7 +445,8 @@ describe("Brain v0.4: tomorrow's frog and note in the morning", () => {
   it("greets as always when there is no plan", async () => {
     const r = await started({ setup: combine(meetings(), untimed) });
     const b = r.until((x) => x.text.includes("Good morning"));
-    expect(b.text).toContain("Eat the frog first");
+    // The usual line names the next task as today's frog, never as one you picked.
+    expect(b.text).toMatch(/frog/i);
     expect(b.text).not.toContain("picked");
     expect(b.text).not.toContain("Your note");
   });
@@ -1554,7 +1557,7 @@ describe("Brain v0.4 evaluation round 2: the morning greeting after a day with n
     const seen = await wakeUp(r);
     const first = seen[0];
     expect(first.text).toContain("Good morning");
-    expect(first.text).toContain("The frog you picked before you left: “Call client ABC”");
+    expect(first.text).toMatch(/picked[^\n]*“Call client ABC”/);
     expect(first.text).toContain("📝 Your note: “Start with the numbers tab”");
     // The kind word comes after the greeting, in the same bubble, and is said only once.
     expect(first.text).toContain("Nothing got done yesterday, so I ate a snack to keep your 🔥5 streak safe");
@@ -1572,7 +1575,7 @@ describe("Brain v0.4 evaluation round 2: the morning greeting after a day with n
     const first = seen[0];
     expect(new Date(r.clock.t).getDay()).toBe(1);
     expect(first.text).toContain("Good morning");
-    expect(first.text).toContain("The frog you picked before you left: “Call client ABC”");
+    expect(first.text).toMatch(/picked[^\n]*“Call client ABC”/);
     expect(first.text).toContain("Your note: “Start with the numbers tab”");
     expect(first.text).toContain("ate a snack");
     expect(first.text).toContain("3 days ago");

@@ -111,7 +111,7 @@ describe("Brain with the demo backend", () => {
     const b = brain.getSnapshot().bubble;
     expect(b?.text).toContain("Good morning");
     // The demo day is planned (3 today + 1 done), so it points at the frog, then sums up the calendar.
-    expect(b?.text).toContain("Eat the frog first");
+    expect(b?.text).toMatch(/frog/i);
     expect(b?.text).toContain("2 meetings today");
     expect(b?.actions[0].title).toBe("▶ Focus 25'");
     expect(b?.reminder).toBe(true);
