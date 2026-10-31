@@ -246,7 +246,8 @@ describe("the packs every varied line goes through", () => {
       for (const [, en] of p.options) english.push(`${p.key}: ${en}`);
       return "";
     });
-    expect(english.filter((text) => pluralAfterOne.test(text))).toEqual([]);
+    const pluralVerbAfterOne = /(?<![\d/])\b1 (?:[a-z-]+ ){0,2}(?:task|day|step) (?:have|are|were)\b/;
+    expect(english.filter((text) => pluralAfterOne.test(text) || pluralVerbAfterOne.test(text))).toEqual([]);
   });
 
   it("says only what is true where it is said", () => {
@@ -257,6 +258,11 @@ describe("the packs every varied line goes through", () => {
       breakEnd: /next task is waiting|việc tiếp theo đang chờ/i,
       "done.friday": /afternoon|chiều/i,
       "review.empty": /^Hết giờ làm rồi/,
+      // Planning lines show up when even one task is missing: "a few" can ask for more than the target needs.
+      "plan.normal": /a few|vài việc/i,
+      "morning.plan": /a few|vài việc/i,
+      // In this app "the zone" is flow, when the pet stays quiet: a nudge never shows then.
+      "nudge.happy": /in the zone/i,
     };
     for (const p of packs)
       if (p.key in untrue) for (const [vi, en] of p.options) for (const text of [vi, en]) expect(text, `${p.key}: ${text}`).not.toMatch(untrue[p.key]);

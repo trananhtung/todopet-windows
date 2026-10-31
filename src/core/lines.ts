@@ -83,7 +83,7 @@ export function morning(now: Date, plannedCount: number, openCount: number, next
     text = `${g} ${say({ key: "morning.plan", options: [
       [`Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc thôi 📝`, `What are our ${n(target, "thing")} today? Only ${plannedCount}/${target} planned so far 📝`],
       [`Hôm nay mình chọn ${target} việc nhé? Đang có ${plannedCount}/${target} 📝`, `Shall we pick ${n(target, "task")} today? ${plannedCount}/${target} so far 📝`],
-      [`Kế hoạch hôm nay: ${plannedCount}/${target} việc. Thêm vài việc nữa nha ✍️`, `Today's plan: ${plannedCount}/${target} tasks. A few more to add ✍️`],
+      [`Kế hoạch hôm nay: ${plannedCount}/${target} việc. Thêm nốt cho đủ nha ✍️`, `Today's plan: ${plannedCount}/${target} tasks. Let's fill the rest ✍️`],
       [`Mới lên ${plannedCount}/${target} việc thôi. Cùng chọn nốt nhé? 🗂️`, `Just ${plannedCount}/${target} planned. Pick the rest together? 🗂️`],
       [`Mình lên kế hoạch cho hôm nay nha: ${plannedCount}/${target} việc rồi 📋`, `Let's plan today: ${plannedCount}/${target} tasks so far 📋`],
       [`Hôm nay việc gì quan trọng nhất? Mới có ${plannedCount}/${target} việc 🤔`, `What matters most today? ${plannedCount}/${target} planned 🤔`],
@@ -150,7 +150,7 @@ export function plan(mood: Mood, plannedCount: number, target: number, say: Phra
     [`Hôm nay mới lên ${plannedCount}/${target} việc. Thêm ${k} việc nữa cho đủ nhé 📋`, `${plannedCount}/${target} planned so far. ${k} more to round out the day 📋`],
     [`Cùng chọn ${k} việc cho hôm nay nha? Mình đợi bạn ✍️`, `Shall we pick ${n(k, "task")} for today? I'll wait ✍️`],
     [`Kế hoạch hôm nay còn trống ${k} chỗ. Việc nào đáng làm nhất? 🤔`, `Today's plan has ${n(k, "open spot")}. What matters most? 🤔`],
-    [`Mục tiêu ${target} việc, mới có ${plannedCount}. Thêm vài việc vào hôm nay nhé 🗂️`, `Aiming for ${target}, ${plannedCount} so far. Add a few to today? 🗂️`],
+    [`Mục tiêu ${target} việc, mới có ${plannedCount}. Thêm ${k} việc vào hôm nay nhé 🗂️`, `Aiming for ${target}, ${plannedCount} so far. Add ${k} more to today? 🗂️`],
   ] });
 }
 
@@ -159,7 +159,7 @@ export function nudge(mood: Mood, next: TodoTask, hoursIdle: number, say: Phrase
     return say({ key: "nudge.happy", options: [
       [`Đang ngon trớn! Tiếp theo là ${q(next)} nha ✨`, `On a roll! Next up: ${q(next)} ✨`],
       [`Mình thích nhịp này! Làm luôn ${q(next)} nhé 💪`, `Love this pace! Let's do ${q(next)} 💪`],
-      [`Bạn đang vào guồng rồi! ${q(next)} tiếp nhé 🚀`, `You're in the zone! ${q(next)} next? 🚀`],
+      [`Bạn đang vào guồng rồi! ${q(next)} tiếp nhé 🚀`, `You've got a rhythm going! ${q(next)} next? 🚀`],
       [`Nhịp đẹp quá! Nhân tiện xử luôn ${q(next)} nha 😎`, `Great rhythm! Might as well take on ${q(next)} 😎`],
       [`Đà này mà làm ${q(next)} là chuẩn luôn ✨`, `With this momentum, ${q(next)} is perfect timing ✨`],
       [`Vui ghê! Mình đi tiếp với ${q(next)} nhé 🎶`, `This is fun! On to ${q(next)} 🎶`],
@@ -231,7 +231,7 @@ export function overdue(mood: Mood, movable: number, repeating = 0, say: Phrase)
     return (
       say({ key: "overdue.worried", options: [
         [`${movable} việc quá hạn đang chờ. Mình giúp nhé: dời vào hôm nay, hay sang mai bắt đầu lại? 😟`, `${tasks} waiting. I can help: move ${them} to today, or a fresh start tomorrow? 😟`],
-        [`${movable} việc quá hạn làm mình hơi lo. Sang mai bắt đầu lại cho nhẹ nhé? 😟`, `${tasks} have me a bit worried. A fresh start tomorrow, maybe? 😟`],
+        [`${movable} việc quá hạn làm mình hơi lo. Sang mai bắt đầu lại cho nhẹ nhé? 😟`, `${tasks} ${movable === 1 ? "has" : "have"} me a bit worried. A fresh start tomorrow, maybe? 😟`],
         [`Mình thấy ${movable} việc quá hạn. Đừng lo: làm hôm nay, hoặc sang mai bắt đầu lại 🤝`, `I see ${tasks}. Don't worry: today, or a fresh start tomorrow 🤝`],
         [`${movable} việc quá hạn đang chờ. Sang mai bắt đầu lại cũng là lựa chọn hay đó 🌱`, `${tasks} waiting. A fresh start tomorrow is a fine choice too 🌱`],
       ] }) + staysPut(repeating)
