@@ -43,7 +43,7 @@ const busyPose = (over: Partial<PetPose> = {}): PetPose =>
   });
 
 describe("species registry", () => {
-  it("lists all 25 species in SPECIES_IDS order", () => {
+  it("lists all registered species in SPECIES_IDS order", () => {
     expect(SPECIES.map((s) => s.id)).toEqual([...SPECIES_IDS]);
   });
 

@@ -256,7 +256,7 @@ function App() {
         <div>
           <h1>TodoPet pet gallery</h1>
           <p>
-            25 species drawn by one renderer. Every mood, gait, life state, accessory and celebration.
+            {SPECIES.length} species drawn by one renderer. Every mood, gait, life state, accessory and celebration.
             {STATIC ? " Time is frozen at t = 1.3." : ""}
           </p>
         </div>

@@ -395,7 +395,15 @@ export function mouth(c: Ctx): string {
   const { fx, my, mood } = c;
   const line = c.pal.line;
   if (c.held) return ell(fx, my + 2.4 * sy, 2.7 * sy, 3.2 * sy, `fill="${MOUTH}"`);
+  if (kind === "baby" && c.act?.mouth === "open") return babySmile(c, 0.75 + c.act.open * 0.3);
   if (c.act && c.act.mouth) return actMouth(c, c.act.mouth, c.act.open, sx, sy);
+  if (kind === "baby" && mood !== "sleeping") {
+    if (mood === "happy" || mood === "celebrating" || c.petted) return babySmile(c, mood === "celebrating" ? 1.15 : 1);
+    // A soft cupid's bow and full lower lip, rather than a permanent cartoon smile.
+    const w = 5.6 * sx, pout = mood === "angry" || mood === "annoyed";
+    return path(`M${p(fx - w, my + 1)}Q${p(fx - w * 0.35, my - 2.1)} ${p(fx, my - 0.8)}Q${p(fx + w * 0.35, my - 2.1)} ${p(fx + w, my + 1)}Q${p(fx, my + (pout ? 4 : 3))} ${p(fx - w, my + 1)}Z`, 'fill="#D89188"') +
+      path(`M${p(fx - w * 0.8, my + 1)}Q${p(fx, my + (pout ? 0.1 : 0.9))} ${p(fx + w * 0.8, my + 1)}`, st("#9C6058", 0.7));
+  }
   switch (mood) {
     case "normal":
     case "focus":
@@ -434,10 +442,25 @@ export function mouth(c: Ctx): string {
   }
 }
 
+/** Rounded laugh with a row of little milk teeth, used only by human chibi companions. */
+function babySmile(c: Ctx, amount: number): string {
+  const { fx, my } = c;
+  const w = 11.4 * amount * (c.def.face.mouthW ?? 1), h = 10 * amount;
+  const d = `M${p(fx - w, my)}Q${p(fx, my - 3.1)} ${p(fx + w, my)}C${p(fx + w * 0.95, my + h)} ${p(fx - w * 0.95, my + h)} ${p(fx - w, my)}Z`;
+  const td = `M${p(fx - w * 0.77, my - 0.25)}Q${p(fx, my - 2.1)} ${p(fx + w * 0.77, my - 0.25)}L${p(fx + w * 0.65, my + 2)}Q${p(fx, my + 3)} ${p(fx - w * 0.65, my + 2)}Z`;
+  let out = path(d, 'fill="#63352F" stroke="#B77A70" stroke-width="1.2"') + path(td, 'fill="#FFF8E9"');
+  for (const i of [-1, 0, 1]) out += path(`M${p(fx + i * w * 0.39, my - 0.8)}L${p(fx + i * w * 0.36, my + 2.1)}`, st("#D7BBA6", 0.55));
+  out += ell(fx, my + h * 0.64, w * 0.42, h * 0.13, 'fill="#D68A88"');
+  return out;
+}
+
 export function face(c: Ctx): string {
   const a = c.act;
   const m = mouth(c);
-  let out = cheeks(c) + eyes(c) + (a && a.twitch ? `<g transform="translate(0 ${r(a.twitch)})">${m}</g>` : m);
+  const aspect = c.def.face.eyeAspect ?? 1;
+  const eyeParts = eyes(c);
+  const eyeArt = aspect === 1 ? eyeParts : `<g transform="translate(0 ${r(c.ey)}) scale(1 ${r(aspect)}) translate(0 ${r(-c.ey)})">${eyeParts}</g>`;
+  let out = cheeks(c) + eyeArt + (a && a.twitch ? `<g transform="translate(0 ${r(a.twitch)})">${m}</g>` : m);
   if (a && a.tear > 0.02) {
     // A sleepy tear in the front eye's corner after a yawn.
     const s = U * (c.def.face.eyeScale ?? 1);

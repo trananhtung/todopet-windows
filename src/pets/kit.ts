@@ -25,7 +25,7 @@ export const moodTable = (
   celebrating = happy,
 ): MoodTable => ({ happy, normal, annoyed, angry, sleeping, focus, celebrating });
 
-export type MouthKind = "cat" | "wide" | "beak" | "bill";
+export type MouthKind = "cat" | "wide" | "beak" | "bill" | "baby";
 export type ColorKey = "top" | "bottom" | "line" | "belly" | "mark" | "accent" | "inner" | "foot" | "arm";
 
 export interface FaceSpec {
@@ -34,6 +34,8 @@ export interface FaceSpec {
   /** Half the distance between the eyes, as a fraction of the body width. */
   eyeDX: number;
   eyeScale?: number;
+  /** Vertical eye/expression scale around the eye line; 1 preserves the shared round eyes. */
+  eyeAspect?: number;
   /** Mouth line below the eyes, as a fraction of the body height (default 0.17). */
   mouthY?: number;
   mouth?: MouthKind;

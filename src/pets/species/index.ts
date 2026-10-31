@@ -25,6 +25,7 @@ import { redpanda } from "./redpanda";
 import { seal } from "./seal";
 import { shiba } from "./shiba";
 import { unicorn } from "./unicorn";
+import { yaoyiyao } from "./yaoyiyao";
 
 export const DEFS: Readonly<Record<SpeciesId, SpeciesDef>> = {
   mochi,
@@ -49,6 +50,7 @@ export const DEFS: Readonly<Record<SpeciesId, SpeciesDef>> = {
   lamb,
   piglet,
   banhbao,
+  yaoyiyao,
   bee,
   dragon,
   unicorn,
