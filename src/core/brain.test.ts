@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDemoBackend, type DemoBackend } from "../backend/demo";
 import { BackendError, type RawTask, type SystemSample } from "../backend/types";
-import { Brain, type Bubble } from "./brain";
+import { Brain, type BrainEffects, type Bubble } from "./brain";
 import { L, setLang } from "./l10n";
 import { demoLife, type LifeState } from "./life";
+import * as lines from "./lines";
 import { defaultPrefs, type Prefs } from "./prefs";
 
 const MIN = 60_000;
@@ -428,7 +429,7 @@ describe("Brain and forgiving streaks", () => {
  * The demo on Wednesday 28 October, 9:00, with `life` (today's) and `prefs` saved first. `step` moves the clock on
  * and runs the rules like the heartbeat does (without the hunger clock, so the pet doesn't get hungry).
  */
-async function rig(opts: { life?: Partial<LifeState>; prefs?: Partial<Prefs>; setup?: (b: DemoBackend) => void } = {}) {
+async function rig(opts: { life?: Partial<LifeState>; prefs?: Partial<Prefs>; setup?: (b: DemoBackend) => void; effects?: BrainEffects } = {}) {
   const clock = { t: at(28, 9) };
   const backend = createDemoBackend({ now: () => clock.t, persist: false });
   opts.setup?.(backend);
@@ -444,7 +445,7 @@ async function rig(opts: { life?: Partial<LifeState>; prefs?: Partial<Prefs>; se
     ...patch,
   });
   const boot = async () => {
-    const b = await Brain.create(backend, { demo: true, now: () => clock.t, random: () => 0.5 });
+    const b = await Brain.create(backend, { demo: true, now: () => clock.t, random: () => 0.5, effects: opts.effects ?? {} });
     setLang("en");
     await b.start();
     // The demo hello is a reply (urgent, no reason): closing it changes nothing.
@@ -2885,16 +2886,23 @@ describe("Brain v0.8: lines that don't repeat (SPEC v0.8 §1)", () => {
     const at = b.getSnapshot().life.said[key]?.at ?? [];
     return at.indexOf(Math.max(...at));
   };
+  /** A `say` that says option `i` of the pack, as the pet does once it has chosen. */
+  const option = (i: number) => (p: { options: readonly (readonly [string, string])[] }) => L(p.options[i][0], p.options[i][1]);
   /**
    * Finishes tasks until one is cheered with a `done` line (the one that reaches today's target has a line of its
-   * own, `done.target`); returns which option it was and the bubble.
+   * own, `done.target`); returns which option it was and the bubble, after checking the bubble says that option.
    */
   const finishDone = async (r: Rig, title: string, brain: Brain = r.brain): Promise<{ index: number; bubble: Bubble }> => {
     for (let k = 1; k <= 3; k++) {
       const bubble = await finish(r, `${title} ${k}`, brain);
       expect(bubble.actions.map((a) => a.title), `${title} ${k}`).toContain(L("Hoàn tác", "Undo"));
-      const at = brain.getSnapshot().life.said.done?.at ?? [];
-      if (Math.max(0, ...at) === r.clock.t) return { index: newest(brain, "done"), bubble };
+      const s = brain.getSnapshot();
+      const at = s.life.said.done?.at ?? [];
+      if (Math.max(0, ...at) !== r.clock.t) continue;
+      const index = newest(brain, "done");
+      const task = s.day.completed.find((t) => t.content === `${title} ${k}`)!;
+      expect(bubble.text.split("\n")[0]).toBe(lines.done(task, s.day.completed.length, s.target, brain.speciesSound, option(index)));
+      return { index, bubble };
     }
     throw new Error(`no done line for ${title}`);
   };
@@ -2949,12 +2957,33 @@ describe("Brain v0.8: lines that don't repeat (SPEC v0.8 §1)", () => {
     try {
       const first = (await finishDone(r, "In English")).index;
       setLang("vi");
-      const second = await finishDone(r, "Bằng tiếng Việt");
-      expect(second.index).not.toBe(first);
-      expect(second.bubble.text.split("\n")[0]).toMatch(/Xong|Tuyệt vời|Mình vui|Giỏi quá/);
+      // finishDone checks the bubble says the recorded option, here in Vietnamese.
+      expect((await finishDone(r, "Bằng tiếng Việt")).index).not.toBe(first);
     } finally {
       setLang("en");
       r.brain.stop();
+    }
+  });
+
+  it("a cheer said aloud is remembered only when it is heard", async () => {
+    // 95 XP: the next task grows the pet up, which the pet cheers aloud when the voice is on.
+    for (const voiceOn of [false, true]) {
+      const spoken: string[] = [];
+      const r = await rig({ life: { xp: 95 }, prefs: { dailyTarget: 10, voiceOn }, effects: { speak: (text) => spoken.push(text) } });
+      try {
+        await finish(r, `Grow up, voice ${voiceOn ? "on" : "off"}`);
+        expect(r.brain.getSnapshot().life.xp).toBeGreaterThanOrEqual(100);
+        const cheer = r.brain.getSnapshot().life.said["voice.cheer"];
+        if (!voiceOn) {
+          expect(spoken).toEqual([]);
+          expect(cheer).toBeUndefined();
+        } else {
+          expect(cheer).toBeDefined();
+          expect(spoken.at(-1)).toBe(lines.voiceCheer(option(newest(r.brain, "voice.cheer"))));
+        }
+      } finally {
+        r.brain.stop();
+      }
     }
   });
 });

@@ -1809,8 +1809,10 @@ export class Brain {
     return s.hiddenUntil !== null || (s.fullscreen && s.prefs.hideInFullscreen) || s.life.trip !== null;
   }
 
-  private speak(text: string): void {
-    if (this.state.prefs.voiceOn && !this.outOfTheWay) this.effects.speak?.(text, this.state.prefs.lang ?? langFromLocale(null));
+  /** Says a line aloud. The line is chosen only when it will be heard, so a line nobody heard is not remembered as said. */
+  private speak(line: (say: Phrase) => string): void {
+    const speak = this.effects.speak;
+    if (speak && this.state.prefs.voiceOn && !this.outOfTheWay) speak(line(this.phrase), this.state.prefs.lang ?? langFromLocale(null));
   }
 
   /**
@@ -2255,7 +2257,7 @@ export class Brain {
           why: L(`đang cáu và ở ${d.app} ${Math.trunc(d.minutes)} phút → nhảy lên chắn màn hình`, `grumpy and on ${d.app} for ${Math.trunc(d.minutes)} min → jumped in the way`),
         },
       );
-      this.speak(lines.voiceBlock(d.app, this.phrase));
+      this.speak((say) => lines.voiceBlock(d.app, say));
       return;
     }
     if (stunts && d.minutes >= 5 && next && this.sample.secondsSinceKey > 60 && this.remindEvery("antic", 20)) {
@@ -2269,7 +2271,7 @@ export class Brain {
           why: L(`đang cáu và ở ${d.app} ${Math.trunc(d.minutes)} phút, không gõ phím → diễu hành với biển`, `grumpy and on ${d.app} for ${Math.trunc(d.minutes)} min, not typing → sign parade`) + this.reasonSuffix(),
         },
       );
-      this.speak(lines.voiceAngry(next, this.phrase));
+      this.speak((say) => lines.voiceAngry(next, say));
       return;
     }
     if (ctx.inWork && open.length > 0 && d && d.minutes >= 2 && this.remindEvery("distract", 10)) {
@@ -2438,7 +2440,7 @@ export class Brain {
         { text: lines.hungry(s.life.satiety, next, this.phrase), actions: next ? [this.focusAction(next), this.laterAction()] : [], seconds: 30, ...(next ? { stillValid: this.whileOpen(next) } : {}) },
         { why: L(`độ no còn ${Math.trunc(s.life.satiety)}%`, `only ${Math.trunc(s.life.satiety)}% full`), kind: "hungry" },
       );
-      this.speak(lines.voiceHungry(this.phrase));
+      this.speak(lines.voiceHungry);
       return;
     }
 
@@ -2459,7 +2461,7 @@ export class Brain {
             why: L(`tâm trạng đi xuống, ở ${d.app} ${minutes} phút`, `in a low mood, on ${d.app} for ${minutes} min`) + this.reasonSuffix(),
           },
         );
-        this.speak(lines.voiceGrumble(this.phrase));
+        this.speak(lines.voiceGrumble);
         return;
       }
     }
@@ -2514,7 +2516,7 @@ export class Brain {
           kind: "distractsum",
         },
       );
-      this.speak(lines.voiceSummary(Math.trunc(life.distractionTotal(s.life) / 60)));
+      this.speak(() => lines.voiceSummary(Math.trunc(life.distractionTotal(s.life) / 60)));
       return;
     }
 
@@ -3074,7 +3076,7 @@ export class Brain {
       this.lastBubbleAt = nowMs;
       const big = unlocked.length > 0 || levelUp !== null || repaired !== null || chest?.reward === "accessory";
       this.set({ bubble: { id: ++this.bubbleSeq, text: parts.join("\n"), actions, seconds: big ? 14 : 8, urgent: true, reminder: false } });
-      if (levelUp !== null || r.golden) this.speak(lines.voiceCheer(this.phrase));
+      if (levelUp !== null || r.golden) this.speak(lines.voiceCheer);
     }
     this.later(() => this.recompute(), 4200);
     return { xp: this.state.life.xp - xpBefore - (chest?.xp ?? 0), golden: r.golden, chest };
