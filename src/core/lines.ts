@@ -27,10 +27,37 @@ export const randomPhrase: Phrase = (p) => pick(p.options);
 
 export function greeting(now: Date, say: Phrase): string {
   const h = now.getHours();
-  if (h < 11) return say({ key: "greeting.morning", options: [["Chào buổi sáng! ☀️", "Good morning! ☀️"]] });
-  if (h < 13) return say({ key: "greeting.midday", options: [["Chào buổi trưa! 🌤", "Good day! 🌤"]] });
-  if (h < 18) return say({ key: "greeting.afternoon", options: [["Chào buổi chiều! 🌇", "Good afternoon! 🌇"]] });
-  return say({ key: "greeting.evening", options: [["Chào buổi tối! 🌙", "Good evening! 🌙"]] });
+  // Every option keeps its opening: it says what time of day it is.
+  if (h < 11) {
+    return say({ key: "greeting.morning", options: [
+      ["Chào buổi sáng! ☀️", "Good morning! ☀️"],
+      ["Chào buổi sáng! Hôm nay mình cùng cố gắng nhé 🌅", "Good morning! Let's make today a good one 🌅"],
+      ["Chào buổi sáng! Ngủ ngon không bạn? ☕", "Good morning! Did you sleep well? ☕"],
+      ["Chào buổi sáng! Mình đợi bạn từ sớm đó 🐾", "Good morning! I've been waiting for you 🐾"],
+    ] });
+  }
+  if (h < 13) {
+    return say({ key: "greeting.midday", options: [
+      ["Chào buổi trưa! 🌤", "Good day! 🌤"],
+      ["Chào buổi trưa! Ăn trưa chưa đó? 🍱", "Good day! Had lunch yet? 🍱"],
+      ["Chào buổi trưa! Nửa ngày rồi, mình vẫn ở đây 🌤", "Good day! Halfway through, and I'm still here 🌤"],
+      ["Chào buổi trưa! Nghỉ chút cho khoẻ nhé 😌", "Good day! Take a breather if you need one 😌"],
+    ] });
+  }
+  if (h < 18) {
+    return say({ key: "greeting.afternoon", options: [
+      ["Chào buổi chiều! 🌇", "Good afternoon! 🌇"],
+      ["Chào buổi chiều! Buổi chiều thong thả nha 🍵", "Good afternoon! Let's take the afternoon easy 🍵"],
+      ["Chào buổi chiều! Mình nhớ bạn ghê 🌇", "Good afternoon! I missed you 🌇"],
+      ["Chào buổi chiều! Còn cả buổi để làm điều hay 🌻", "Good afternoon! Plenty of day left for good things 🌻"],
+    ] });
+  }
+  return say({ key: "greeting.evening", options: [
+    ["Chào buổi tối! 🌙", "Good evening! 🌙"],
+    ["Chào buổi tối! Gặp bạn vui ghê 🌙", "Good evening! Glad to see you 🌙"],
+    ["Chào buổi tối! Mình ở đây, nhẹ nhàng thôi nhé 🕯️", "Good evening! I'm here, let's keep it gentle 🕯️"],
+    ["Chào buổi tối! Trời tối rồi, nhớ nghỉ ngơi nha ⭐", "Good evening! It's dark out, remember to rest ⭐"],
+  ] });
 }
 
 export function hello(name: string): string {
@@ -52,15 +79,35 @@ export function morning(now: Date, plannedCount: number, openCount: number, next
   const picked = frog !== null && frog.id === next?.id;
   let text: string;
   if (plannedCount < target) {
-    text = `${g} ${say({ key: "morning.plan", options: [[
-      `Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc thôi 📝`,
-      `What are our ${target} things today? Only ${plannedCount}/${target} planned so far 📝`,
-    ]] })}`;
+    // Every option shows how many are planned against the target.
+    text = `${g} ${say({ key: "morning.plan", options: [
+      [`Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc thôi 📝`, `What are our ${target} things today? Only ${plannedCount}/${target} planned so far 📝`],
+      [`Hôm nay mình chọn ${target} việc nhé? Đang có ${plannedCount}/${target} 📝`, `Shall we pick ${target} tasks today? ${plannedCount}/${target} so far 📝`],
+      [`Kế hoạch hôm nay: ${plannedCount}/${target} việc. Thêm vài việc nữa nha ✍️`, `Today's plan: ${plannedCount}/${target} tasks. A few more to add ✍️`],
+      [`Mới lên ${plannedCount}/${target} việc thôi. Cùng chọn nốt nhé? 🗂️`, `Just ${plannedCount}/${target} planned. Pick the rest together? 🗂️`],
+      [`Mình lên kế hoạch cho hôm nay nha: ${plannedCount}/${target} việc rồi 📋`, `Let's plan today: ${plannedCount}/${target} tasks so far 📋`],
+      [`Hôm nay việc gì quan trọng nhất? Mới có ${plannedCount}/${target} việc 🤔`, `What matters most today? ${plannedCount}/${target} planned 🤔`],
+    ] })}`;
   } else if (next) {
+    // The picked frog's lines say you picked it; the others name the next task as today's frog.
     text = `${g} ${
       picked
-        ? say({ key: "morning.frogPicked", options: [[`Hôm nay có ${openCount} việc. Con ếch bạn đã chọn từ trước: ${q(next)} 🐸`, `${openCount} tasks today. The frog you picked before you left: ${q(next)} 🐸`]] })
-        : say({ key: "morning.frog", options: [[`Hôm nay có ${openCount} việc. Ăn con ếch trước: ${q(next)} 🐸`, `${openCount} tasks today. Eat the frog first: ${q(next)} 🐸`]] })
+        ? say({ key: "morning.frogPicked", options: [
+            [`Hôm nay có ${openCount} việc. Con ếch bạn đã chọn từ trước: ${q(next)} 🐸`, `${openCount} tasks today. The frog you picked before you left: ${q(next)} 🐸`],
+            [`Hôm nay có ${openCount} việc. Bắt đầu với con ếch bạn đã chọn: ${q(next)} 🐸`, `${openCount} tasks today. Start with the frog you picked: ${q(next)} 🐸`],
+            [`Bạn đã chọn ${q(next)} làm con ếch hôm nay. Mình bắt đầu nhé? 🐸`, `You picked ${q(next)} as today's frog. Shall we start? 🐸`],
+            [`${openCount} việc đang chờ, mở màn bằng con ếch bạn chọn: ${q(next)} 🎬`, `${openCount} tasks waiting, opening with the frog you picked: ${q(next)} 🎬`],
+            [`Đúng như bạn đã chọn hôm trước: ${q(next)} đi đầu nha 🐸`, `Just as you picked last time: ${q(next)} goes first 🐸`],
+            [`Con ếch bạn tự chọn đang chờ: ${q(next)}. Ăn nó trước nha 🐸`, `The frog you picked is waiting: ${q(next)}. Eat it first 🐸`],
+          ] })
+        : say({ key: "morning.frog", options: [
+            [`Hôm nay có ${openCount} việc. Ăn con ếch trước: ${q(next)} 🐸`, `${openCount} tasks today. Eat the frog first: ${q(next)} 🐸`],
+            [`Hôm nay có ${openCount} việc. Con ếch hôm nay: ${q(next)} 🐸`, `${openCount} tasks today. Today's frog: ${q(next)} 🐸`],
+            [`${openCount} việc cho hôm nay. Ếch trước: ${q(next)}, phần còn lại dễ thở hơn 🐸`, `${openCount} tasks for today. Frog first: ${q(next)}, then the rest gets easier 🐸`],
+            [`Có ${openCount} việc nè. Mình xử con ếch ${q(next)} trước nhé? 🐸`, `${openCount} tasks here. Shall we tackle the frog, ${q(next)}, first? 🐸`],
+            [`Con ếch to nhất hôm nay là ${q(next)}. Bắt đầu từ nó nha 🐸`, `Today's biggest frog is ${q(next)}. Let's start there 🐸`],
+            [`${openCount} việc hôm nay, ếch ${q(next)} đi đầu. Mình cổ vũ bạn 🐸`, `${openCount} tasks today, with the frog ${q(next)} up first. I'm cheering for you 🐸`],
+          ] })
     }`;
   } else {
     text = g;
@@ -696,7 +743,19 @@ export const combo = (n: number, say: Phrase) =>
     [`🔥 ${n} việc liên tiếp, nóng tay quá!`, `🔥 ${n} in a row, you're on a roll!`],
     [`🔥 Combo ×${n}, mình theo không kịp luôn!`, `🔥 Combo ×${n}, I can barely keep up!`],
   ] });
-export const cleaned = (dirtLeft: number, say: Phrase) => (dirtLeft === 0 ? say({ key: "cleaned.clean", options: [["🛁 Mình sạch bong rồi!", "🛁 Squeaky clean again!"]] }) : say({ key: "cleaned", options: [["🛁 Sạch hơn chút rồi…", "🛁 A bit cleaner…"]] }));
+export const cleaned = (dirtLeft: number, say: Phrase) =>
+  dirtLeft === 0
+    ? say({ key: "cleaned.clean", options: [
+        ["🛁 Mình sạch bong rồi!", "🛁 Squeaky clean again!"],
+        ["🛁 Sạch tinh tươm, thơm phức luôn!", "🛁 Spotless and smelling lovely!"],
+        ["🛁 Tắm xong rồi, cảm ơn bạn nhiều!", "🛁 All clean, thank you so much!"],
+      ] })
+    : say({ key: "cleaned", options: [
+        ["🛁 Sạch hơn chút rồi…", "🛁 A bit cleaner…"],
+        ["🛁 Bớt lấm lem rồi nè…", "🛁 Less smudgy now…"],
+        ["🛁 Tráng sơ rồi, thêm vài việc nữa là sạch bong", "🛁 A quick rinse, a few more tasks and I'm spotless"],
+        ["🛁 Cảm ơn bạn, mình sạch hơn rồi", "🛁 Thank you, I'm cleaner already"],
+      ] });
 export const levelUp = (s: StageIndex, say: Phrase) =>
   say({ key: "levelUp", options: [
     [`⬆️ Mình lớn lên thành ${stageName(s)}!`, `⬆️ I grew up: ${stageName(s)}!`],
@@ -717,7 +776,13 @@ export const streak = (n: number, say: Phrase) =>
     [`🔥 ${n} ngày rồi! Mình vui vì được đồng hành cùng bạn`, `🔥 ${n} days! I'm glad to be on this with you`],
   ] });
 export const dirty = (dirt: number, say: Phrase) =>
-  say({ key: "dirty", options: [[`🛁 Mình hơi lấm lem (lỡ ${dirt} ngày). Xong 1 việc là mình được tắm nè!`, `🛁 I'm a bit grubby (${n(dirt, "missed day")}). Finish one task and I get a bath!`]] });
+  say({ key: "dirty", options: [
+    [`🛁 Mình hơi lấm lem (lỡ ${dirt} ngày). Xong 1 việc là mình được tắm nè!`, `🛁 I'm a bit grubby (${n(dirt, "missed day")}). Finish one task and I get a bath!`],
+    [`🛁 Mình dính bụi ${dirt} ngày rồi. Một việc xong là mình được tắm`, `🛁 Dusty after ${n(dirt, "missed day")}. One finished task and I'm in the bath`],
+    [`🛁 Lỡ ${dirt} ngày nên mình hơi bẩn. Xong một việc là sạch ngay`, `🛁 A bit grubby after ${n(dirt, "missed day")}. One task and I'm clean again`],
+    [`🛁 Mình lấm lem sau ${dirt} ngày nè. Xong một việc là tắm cho mình nhé?`, `🛁 All smudgy after ${n(dirt, "missed day")}. Finish a task to give me a bath?`],
+    [`🛁 ${dirt} ngày chưa tắm rồi đó. Một việc nhỏ thôi là mình sạch`, `🛁 ${n(dirt, "missed day")} without a bath. One small task is all I need to get clean`],
+  ] });
 
 // Forgiving streaks: one kind word the morning after, never a scolding. `when` is "yesterday" / "3 days ago".
 
