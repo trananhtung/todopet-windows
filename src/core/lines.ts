@@ -146,7 +146,7 @@ export function plan(mood: Mood, plannedCount: number, target: number, say: Phra
   }
   return say({ key: "plan.normal", options: [
     [`Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc 📝`, `What are our ${n(target, "thing")} today? ${plannedCount}/${target} planned 📝`],
-    [`Chọn ${k} việc quan trọng nhất cho hôm nay nhé ✍️`, `Pick the ${k} most important tasks for today ✍️`],
+    [`Chọn ${k} việc quan trọng nhất cho hôm nay nhé ✍️`, `Pick the ${k === 1 ? "most important task" : `${k} most important tasks`} for today ✍️`],
     [`Hôm nay mới lên ${plannedCount}/${target} việc. Thêm ${k} việc nữa cho đủ nhé 📋`, `${plannedCount}/${target} planned so far. ${k} more to round out the day 📋`],
     [`Cùng chọn ${k} việc cho hôm nay nha? Mình đợi bạn ✍️`, `Shall we pick ${n(k, "task")} for today? I'll wait ✍️`],
     [`Kế hoạch hôm nay còn trống ${k} chỗ. Việc nào đáng làm nhất? 🤔`, `Today's plan has ${n(k, "open spot")}. What matters most? 🤔`],
