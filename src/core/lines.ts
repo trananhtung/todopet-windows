@@ -291,7 +291,16 @@ export function done(t: TodoTask, c: DoneContext, say: Phrase): string {
 }
 
 export const allDone = (say: Phrase) =>
-  say({ key: "allDone", options: [["Xong hết việc hôm nay rồi! 🎉 Nghỉ ngơi, hoặc chọn sẵn 3 việc cho mai nhé.", "Everything's done for today! 🎉 Rest, or pick tomorrow's 3 tasks."]] });
+  say({ key: "allDone", options: [
+    ["Xong hết việc hôm nay rồi! 🎉 Nghỉ ngơi, hoặc chọn sẵn 3 việc cho mai nhé.", "Everything's done for today! 🎉 Rest, or pick tomorrow's 3 tasks."],
+    ["Danh sách hôm nay trống trơn rồi! Phần còn lại của ngày là của bạn 🎉", "Today's list is all clear! The rest of the day is yours 🎉"],
+    ["Xong sạch! Mình tự hào về bạn lắm. Nghỉ chút nhé ☕", "All done! I'm so proud of you. Take a little break ☕"],
+    ["Hết việc rồi nè! Muốn chọn sẵn việc cho mai thì bấm nút dưới nhé 📝", "Nothing left! Want to line up tomorrow? The button's right below 📝"],
+    ["Một ngày trọn vẹn! Hôm nay bạn đã làm rất tốt 🌟", "A full day! You did really well today 🌟"],
+    ["Xong hết rồi, giờ mình được chơi với bạn rồi phải không? 🥰", "All done, so now we get to hang out, right? 🥰"],
+    ["Không còn việc nào hôm nay. Thư giãn đi, bạn xứng đáng mà 🛋️", "No tasks left today. Relax, you've earned it 🛋️"],
+    ["Hôm nay xong rồi! Lần sau mình lại cùng nhau tiếp nhé 🌙", "Today's done! We'll pick it up together next time 🌙"],
+  ] });
 
 /**
  * `day` in `review`, `wrappedUp` and `movedToTomorrow` is the next workday's name ("Monday", "Thứ Hai") when it isn't tomorrow, else null: the day
@@ -348,8 +357,22 @@ export const breakEnd = (say: Phrase) => say({ key: "breakEnd", options: [["Hế
 export const added = (title: string) => L(`Đã thêm “${shortText(title)}” ✔︎`, `Added “${shortText(title)}” ✔︎`);
 
 export function planComplete(target: number, next: TodoTask | null, say: Phrase): string {
-  if (next) return say({ key: "planComplete.next", options: [[`Đủ ${target} việc cho hôm nay rồi! Bắt đầu với ${q(next)} nhé 🐸`, `${target} tasks planned! Start with ${q(next)} 🐸`]] });
-  return say({ key: "planComplete", options: [[`Đủ ${target} việc cho hôm nay rồi! 🐸`, `${target} tasks planned for today! 🐸`]] });
+  if (next) {
+    return say({ key: "planComplete.next", options: [
+      [`Đủ ${target} việc cho hôm nay rồi! Bắt đầu với ${q(next)} nhé 🐸`, `${target} tasks planned! Start with ${q(next)} 🐸`],
+      [`Kế hoạch ${target} việc xong rồi! Mở đầu bằng ${q(next)} nhé 🐸`, `Your ${target} tasks are set! Open with ${q(next)} 🐸`],
+      [`Đủ ${target} việc, kế hoạch gọn gàng. Bắt đầu từ ${q(next)} thôi 🚀`, `${target} tasks, a tidy plan. Let's start with ${q(next)} 🚀`],
+      [`Lên kế hoạch xong! Việc đầu tiên: ${q(next)} 🎯`, `Plan done! First up: ${q(next)} 🎯`],
+      [`${target} việc đã vào hàng. ${q(next)} đứng đầu nè 🐸`, `${target} tasks lined up. ${q(next)} goes first 🐸`],
+      [`Tuyệt, có kế hoạch rồi! Thử bắt tay vào ${q(next)} nhé 💪`, `Great, the plan's ready! Try getting into ${q(next)} 💪`],
+    ] });
+  }
+  return say({ key: "planComplete", options: [
+    [`Đủ ${target} việc cho hôm nay rồi! 🐸`, `${target} tasks planned for today! 🐸`],
+    [`Kế hoạch ${target} việc cho hôm nay đã sẵn sàng 📋`, `Today's plan of ${target} tasks is ready 📋`],
+    [`Đủ ${target} việc rồi! Mình sẵn sàng cùng bạn 💪`, `${target} tasks planned! I'm ready when you are 💪`],
+    ["Kế hoạch xong xuôi. Từng việc một thôi nhé 🌱", "Plan all set. One task at a time 🌱"],
+  ] });
 }
 
 export const lateNight = (say: Phrase) => say({ key: "lateNight", options: [["Khuya rồi đó… đi ngủ để mai làm tốt hơn nha 😴", "It's late… sleep now, crush it tomorrow 😴"]] });
@@ -597,14 +620,41 @@ export const unplanned = (t: TodoTask) =>
 
 // Pet life
 
-export const golden = (say: Phrase) => say({ key: "golden", options: [["✨ HIẾM! Bánh vàng cho bạn! ✨", "✨ RARE! A golden treat! ✨"]] });
-export const combo = (n: number, say: Phrase) => say({ key: "combo", options: [[`🔥 Combo ×${n}! Đang cháy quá!`, `🔥 Combo ×${n}! You're on fire!`]] });
+export const golden = (say: Phrase) =>
+  say({ key: "golden", options: [
+    ["✨ HIẾM! Bánh vàng cho bạn! ✨", "✨ RARE! A golden treat! ✨"],
+    ["✨ Bánh vàng hiếm xuất hiện! Hôm nay may mắn ghê", "✨ A rare golden treat appeared! Lucky day"],
+    ["✨ Ôi, bánh vàng! Mình chia bạn một nửa nha", "✨ Ooh, a golden treat! Half of it is yours"],
+    ["✨ Trúng bánh vàng hiếm, thêm XP thưởng nè", "✨ Rare golden treat, bonus XP!"],
+  ] });
+export const combo = (n: number, say: Phrase) =>
+  say({ key: "combo", options: [
+    [`🔥 Combo ×${n}! Đang cháy quá!`, `🔥 Combo ×${n}! You're on fire!`],
+    [`🔥 ×${n} liền tay!`, `🔥 ×${n} in a row!`],
+    [`🔥 Combo ×${n}! Đà đang lên rồi`, `🔥 Combo ×${n}! You've got momentum`],
+    [`🔥 ${n} việc liên tiếp, nóng tay quá!`, `🔥 ${n} in a row, you're on a roll!`],
+    [`🔥 Combo ×${n}, mình theo không kịp luôn!`, `🔥 Combo ×${n}, I can barely keep up!`],
+  ] });
 export const cleaned = (dirtLeft: number, say: Phrase) => (dirtLeft === 0 ? say({ key: "cleaned.clean", options: [["🛁 Mình sạch bong rồi!", "🛁 Squeaky clean again!"]] }) : say({ key: "cleaned", options: [["🛁 Sạch hơn chút rồi…", "🛁 A bit cleaner…"]] }));
-export const levelUp = (s: StageIndex, say: Phrase) => say({ key: "levelUp", options: [[`⬆️ Mình lớn lên thành ${stageName(s)}!`, `⬆️ I grew up: ${stageName(s)}!`]] });
+export const levelUp = (s: StageIndex, say: Phrase) =>
+  say({ key: "levelUp", options: [
+    [`⬆️ Mình lớn lên thành ${stageName(s)}!`, `⬆️ I grew up: ${stageName(s)}!`],
+    [`⬆️ Mình vừa lớn thêm một chút. Giai đoạn mới: ${stageName(s)}!`, `⬆️ I just grew a little. New stage: ${stageName(s)}!`],
+    [`⬆️ Nhìn mình nè: ${stageName(s)} rồi! Cảm ơn bạn đã chăm mình`, `⬆️ Look at me now: ${stageName(s)}! Thanks for looking after me`],
+    [`⬆️ Lên cấp! Giờ mình là ${stageName(s)}`, `⬆️ Level up! Stage: ${stageName(s)}`],
+  ] });
 export const unlocked = (items: Accessory[]) => L("🎁 Mở khoá: ", "🎁 Unlocked: ") + items.map((a) => `${accessoryEmoji(a)} ${accessoryName(a)}`).join(", ");
 export const speciesUnlocked = (emoji: string, name: string) =>
   L(`🥚 Bạn mới mở khoá một bạn mới: ${emoji} ${name}! Đổi trong Cài đặt nhé.`, `🥚 New friend unlocked: ${emoji} ${name}! Switch in Settings.`);
-export const streak = (n: number, say: Phrase) => say({ key: "streak", options: [[`🔥 Chuỗi ${n} ngày — giữ nhé!`, `🔥 ${n}-day streak — keep it going!`]] });
+export const streak = (n: number, say: Phrase) =>
+  say({ key: "streak", options: [
+    [`🔥 Chuỗi ${n} ngày — giữ nhé!`, `🔥 ${n}-day streak — keep it going!`],
+    [`🔥 ${n} ngày liền rồi, mình nhớ từng ngày đó!`, `🔥 ${n} days in a row, and I remember every one!`],
+    [`🔥 Chuỗi ${n} ngày, đều đặn ghê`, `🔥 A ${n}-day streak, so steady`],
+    [`🔥 Ngày thứ ${n} liên tiếp. Hôm nay mình đi tiếp nhé?`, `🔥 Day ${n} in a row. Shall we keep going today?`],
+    [`🔥 ${n} ngày không đứt quãng, bạn kiên trì thật`, `🔥 ${n} days without a break, you really stick with it`],
+    [`🔥 ${n} ngày rồi! Mình vui vì được đồng hành cùng bạn`, `🔥 ${n} days! I'm glad to be on this with you`],
+  ] });
 export const dirty = (dirt: number, say: Phrase) =>
   say({ key: "dirty", options: [[`🛁 Mình hơi lấm lem (lỡ ${dirt} ngày). Xong 1 việc là mình được tắm nè!`, `🛁 I'm a bit grubby (${n(dirt, "missed day")}). Finish one task and I get a bath!`]] });
 
@@ -651,7 +701,22 @@ export const dayOff = (on: boolean, streak: number) =>
 
 export function hungry(satiety: number, next: TodoTask | null, say: Phrase): string {
   const n = next ? L(` Xong ${q(next)} cho mình ăn với 🥺`, ` Finish ${q(next)} and feed me 🥺`) : "";
-  return (satiety < 10 ? say({ key: "hungry.starving", options: [["Đói lả rồi… 😵‍💫", "Starving… 😵‍💫"]] }) : say({ key: "hungry", options: [["Bụng mình réo rồi nè 🍙", "My tummy is rumbling 🍙"]] })) + n;
+  const line =
+    satiety < 10
+      ? say({ key: "hungry.starving", options: [
+          ["Đói lả rồi… 😵‍💫", "Starving… 😵‍💫"],
+          ["Mình đói muốn xỉu luôn… 😵", "So hungry I could faint… 😵"],
+          ["Bụng rỗng tuếch rồi… 🫠", "Totally empty tummy… 🫠"],
+        ] })
+      : say({ key: "hungry", options: [
+          ["Bụng mình réo rồi nè 🍙", "My tummy is rumbling 🍙"],
+          ["Mình hơi đói rồi 🍪", "I'm getting a bit hungry 🍪"],
+          ["Bụng mình kêu ọc ọc nè 🥨", "My tummy is grumbling 🥨"],
+          ["Có ai cho mình ăn không ta? 🍜", "Anyone got a snack for me? 🍜"],
+          ["Mình thèm một bữa ngon quá 🍱", "I'm craving something tasty 🍱"],
+          ["Đói đói rồi, nhưng mình vẫn ổn 🙂", "A little peckish, but I'm okay 🙂"],
+        ] });
+  return line + n;
 }
 
 export const grumble = (next: TodoTask, say: Phrase) =>
@@ -686,7 +751,15 @@ export const voiceGrumble = (say: Phrase) => say({ key: "voice.grumble", options
 export const voiceAngry = (t: TodoTask, say: Phrase) => say({ key: "voice.angry", options: [[`Mình làm ${shortText(taskTitle(t), 30)} nhé? Mình ở đây với bạn.`, `How about ${shortText(taskTitle(t), 30)}? I'll keep you company.`]] });
 export const voiceBlock = (app: string, say: Phrase) => say({ key: "voice.block", options: [[`Để ${app} lát nữa nhé?`, `Shall we leave ${app} for later?`]] });
 export const voiceHungry = (say: Phrase) => say({ key: "voice.hungry", options: [["Mình đói quá.", "I'm so hungry."]] });
-export const voiceCheer = (say: Phrase) => say({ key: "voice.cheer", options: [["Tuyệt vời!", "Awesome!"], ["Hoan hô!", "Hooray!"]] });
+export const voiceCheer = (say: Phrase) =>
+  say({ key: "voice.cheer", options: [
+    ["Tuyệt vời!", "Awesome!"],
+    ["Hoan hô!", "Hooray!"],
+    ["Giỏi quá!", "Well done!"],
+    ["Hay lắm luôn!", "That's amazing!"],
+    ["Tuyệt quá đi!", "So great!"],
+    ["Đỉnh thật!", "Brilliant!"],
+  ] });
 export const voiceSummary = (minutes: number) => L(`Hôm nay có ${minutes} phút xao nhãng. Mai mình làm lại nhé.`, `${minutes} minutes of detours today. Tomorrow is a fresh start.`);
 
 /** Short, evidence-based productivity tips the pet drops occasionally. */

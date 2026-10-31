@@ -142,6 +142,8 @@ const TARGETS: Record<string, number> = {
 const FILLED = new Set<string>([
   // Batch 1: finishing a task, by context.
   "done", "done.target", "done.stuck", "done.frog", "done.first", "done.early", "done.friday",
+  // Batch 2: finishing the day's plan, and the pet's rewards.
+  "allDone", "planComplete.next", "planComplete", "voice.cheer", "combo", "golden", "levelUp", "streak", "hungry", "hungry.starving",
 ]);
 /** Keys that shipped (0.7.1) with more than one option. A pack never shrinks: an option's index is its identity. */
 const SHIPPED: Record<string, number> = {
