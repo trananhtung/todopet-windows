@@ -6,7 +6,7 @@ import * as lines from "./lines";
 import { taskFromRaw } from "./models";
 import { SOUVENIR_IDS } from "./trips";
 import type { Mood } from "./types";
-import { LINE_KEY, MAX_OPTIONS, type Pack, type Phrase } from "./variety";
+import { LINE_KEY, MAX_OPTIONS, everyOption, type Pack, type Phrase } from "./variety";
 
 const T = taskFromRaw({ id: "1", content: "⟦T⟧" });
 const at = (h: number, m = 0) => new Date(2026, 9, 30, h, m);
@@ -201,6 +201,14 @@ describe("the packs every varied line goes through", () => {
   it("has a target for exactly the keys of the table, and every key reaches it", () => {
     expect(Object.keys(TARGETS).sort()).toEqual([...KEYS].sort());
     for (const p of packs) expect(p.options.length, p.key).toBeGreaterThanOrEqual(TARGETS[p.key]);
+  });
+
+  it("never doubles the pet's own exclamation mark (\"mochi!\", \"rawr!\")", () => {
+    const base = { completed: 2, target: 13, frog: false, stuck: false, hour: 11, weekday: 3 };
+    const contexts = [{}, { completed: 13 }, { stuck: true }, { frog: true }, { completed: 1 }, { hour: 7 }, { weekday: 5, hour: 16 }];
+    for (const sound of ["mochi!", "chill~", "meow"])
+      for (const over of contexts)
+        for (const text of everyOption((say) => lines.done(T, { ...base, sound, ...over }, say))) expect(text, text).not.toMatch(/mochi!!|chill~!/);
   });
 
   it("says the most specific done line", () => {
