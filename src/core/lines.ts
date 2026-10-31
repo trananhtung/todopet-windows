@@ -81,17 +81,29 @@ export function plan(mood: Mood, plannedCount: number, target: number, say: Phra
     return say({ key: "plan.angry", options: [
       [`Mình cùng kéo hôm nay lại nhé: chọn thêm ${k} việc, mình giúp bạn bắt đầu 💪`, `Let's get today back on track: pick ${k} more and I'll help you start 💪`],
       [`Mình cùng lên nốt kế hoạch hôm nay nhé: còn ${k} việc nữa thôi 📝`, `Let's plan the rest of today together: just ${k} more to go 📝`],
+      [`Hôm nay mình làm lại từ đầu nhé: chọn ${k} việc, bắt đầu từ việc dễ nhất 🔄`, `Let's reset today: pick ${n(k, "task")} and start with the easiest 🔄`],
+      [`Mình muốn giúp bạn có một ngày tốt. Chỉ cần thêm ${k} việc nữa thôi 🤗`, `I want to help you have a good day. Just ${n(k, "more task")} 🤗`],
+      [`Còn ${k} chỗ trong kế hoạch. Mình chọn cùng nhau, nhanh thôi ⏱️`, `${n(k, "spot")} left in the plan. Let's pick together, it's quick ⏱️`],
+      [`Ngày còn dài mà! Chọn ${k} việc, mình đi cùng bạn 💪`, `There's still plenty of day left! Pick ${k}, and I'll go with you 💪`],
     ] });
   }
   if (mood === "annoyed") {
     return say({ key: "plan.annoyed", options: [
       [`Mình hơi lo… hôm nay mới có ${plannedCount}/${target} việc. Chọn thêm ${k} việc cùng mình nhé? 📝`, `I'm a little worried… only ${plannedCount}/${target} planned. Pick ${k} more with me? 📝`],
       [`Kế hoạch chưa đủ cũng không sao. Chọn ${k} việc nhỏ cho dễ bắt đầu nhé 🌱`, `Not fully planned yet, and that's okay. Pick ${n(k, "small task")} to get going 🌱`],
+      [`Mình hơi lo hôm nay chưa có kế hoạch rõ. Chọn ${k} việc thôi là được 🌱`, `I'm a bit worried today has no clear plan. Just ${n(k, "task")} will do 🌱`],
+      [`Chưa đủ ${target} việc cho hôm nay (${plannedCount}/${target}). Mình cùng chọn nhé? 🤝`, `Not quite ${target} for today yet (${plannedCount}/${target}). Pick some together? 🤝`],
+      [`Không cần hoàn hảo đâu. Thêm ${k} việc nhỏ là hôm nay ổn rồi 🍃`, `No need to be perfect. ${n(k, "small task")} and today's set 🍃`],
+      [`Kế hoạch còn mỏng quá, mình lo nè. Chọn ${k} việc cùng mình nha? 📝`, `The plan's looking thin, and I'm a little worried. Choose ${k} with me? 📝`],
     ] });
   }
   return say({ key: "plan.normal", options: [
     [`Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc 📝`, `What are our ${target} things today? ${plannedCount}/${target} planned 📝`],
     [`Chọn ${k} việc quan trọng nhất cho hôm nay nhé ✍️`, `Pick the ${k} most important tasks for today ✍️`],
+    [`Hôm nay mới lên ${plannedCount}/${target} việc. Thêm ${k} việc nữa cho đủ nhé 📋`, `${plannedCount}/${target} planned so far. ${k} more to round out the day 📋`],
+    [`Cùng chọn ${k} việc cho hôm nay nha? Mình đợi bạn ✍️`, `Shall we pick ${n(k, "task")} for today? I'll wait ✍️`],
+    [`Kế hoạch hôm nay còn trống ${k} chỗ. Việc nào đáng làm nhất? 🤔`, `Today's plan has ${n(k, "open spot")}. What matters most? 🤔`],
+    [`Mục tiêu ${target} việc, mới có ${plannedCount}. Thêm vài việc vào hôm nay nhé 🗂️`, `Aiming for ${target}, ${plannedCount} so far. Add a few to today? 🗂️`],
   ] });
 }
 
@@ -219,11 +231,22 @@ export const freshStartUndone = (back: number, failed: number) =>
 
 export function distraction(mood: Mood, app: string, left: number, next: TodoTask | null, say: Phrase): string {
   if (mood === "angry" && next) {
-    return say({ key: "distraction.angry", options: [[`Lại ${app} rồi nè 👀 ${q(next)} đang nhớ bạn đó, quay lại với mình nhé? 😤`, `Psst, ${app} again? 👀 ${q(next)} misses you. Come back to it with me? 😤`]] });
+    return say({ key: "distraction.angry", options: [
+      [`Lại ${app} rồi nè 👀 ${q(next)} đang nhớ bạn đó, quay lại với mình nhé? 😤`, `Psst, ${app} again? 👀 ${q(next)} misses you. Come back to it with me? 😤`],
+      [`Lại ${app} rồi nè… ${q(next)} vẫn đợi bạn đó 😤`, `${app} again… ${q(next)} is still waiting for you 😤`],
+      [`Mình kéo nhẹ tay áo nè: rời ${app}, sang ${q(next)} nhé? 🫳`, `Gentle tug on your sleeve: leave ${app}, over to ${q(next)}? 🫳`],
+      [`${app} hấp dẫn thật, nhưng ${q(next)} cần bạn hơn đó 😤`, `${app} is tempting, but ${q(next)} needs you more 😤`],
+    ] });
   }
   return say({ key: "distraction", options: [
     [`Ê! Đang ${app} đó hả? 👀 Còn ${left} việc kìa.`, `Hey! On ${app}? 👀 ${n(left, "task")} left.`],
     [`Mình thấy bạn mở ${app} nha 👀 Quay lại làm việc chứ?`, `I see ${app} 👀 Back to work?`],
+    [`Ồ, ${app} hả? Danh sách còn ${left} việc đang chờ nè 👀`, `Oh, ${app}? Still ${n(left, "task")} on the list 👀`],
+    [`Mình thấy ${app} rồi nha. Nghỉ xíu thôi rồi quay lại nhé? 😉`, `Spotted ${app}. A short break, then back to it? 😉`],
+    [`${app} vui ghê ha. Còn ${left} việc, làm xong rồi xem tiếp nhé 🙂`, `${app} is fun, huh. ${n(left, "task")} to go, then it's all yours 🙂`],
+    [`Psst… ${app} đó hả? Mình giữ chỗ cho việc tiếp theo nha 🪑`, `Psst… is that ${app}? I'm saving a seat for your next task 🪑`],
+    [`Lạc sang ${app} rồi kìa. Quay về với ${left} việc của mình nhé? 🧭`, `Drifted over to ${app}? Let's head back to our ${n(left, "task")} 🧭`],
+    [`${app} sẽ vẫn ở đó lát nữa thôi. Việc trước nha? ⏸️`, `${app} will still be there later. Task first? ⏸️`],
   ] });
 }
 
@@ -761,13 +784,33 @@ export const grumble = (next: TodoTask, say: Phrase) =>
   say({ key: "grumble", options: [
     [`Haizzz… 😮‍💨 ${q(next)} vẫn đang chờ bạn đó.`, `Sigh… 😮‍💨 ${q(next)} is still waiting for you.`],
     [`*giậm chân* Mình giữ ${q(next)} cho bạn lâu lắm rồi nè 😤`, `*taps foot* I've been saving ${q(next)} for you 😤`],
+    [`Hừm… ${q(next)} vẫn nằm đó chờ bạn kìa 🥱`, `Hmm… ${q(next)} is still sitting there waiting 🥱`],
+    [`*phụng phịu* Mình nhớ ${q(next)} quá đi 😗`, `*pouts* I really miss ${q(next)} 😗`],
+    [`Mình ngồi cạnh ${q(next)} chờ bạn nãy giờ nè 🪑`, `I've been sitting next to ${q(next)}, waiting for you 🪑`],
+    [`*thở dài* Một chút ${q(next)} thôi cũng được mà 😮‍💨`, `*sighs* Even a little bit of ${q(next)} would do 😮‍💨`],
   ] });
 
-export const parade = (next: TodoTask, say: Phrase) => say({ key: "parade", options: [[`Mình sẽ diễu hành tới khi bạn làm ${q(next)} thì thôi! 📢`, `I'm marching until you do ${q(next)}! 📢`]] });
+export const parade = (next: TodoTask, say: Phrase) =>
+  say({ key: "parade", options: [
+    [`Mình sẽ diễu hành tới khi bạn làm ${q(next)} thì thôi! 📢`, `I'm marching until you do ${q(next)}! 📢`],
+    [`Một, hai! Một, hai! Biển ghi: ${q(next)} 🪧`, `Left, right! Left, right! The sign says: ${q(next)} 🪧`],
+    [`Đoàn diễu hành vì ${q(next)} xin đi qua nè 🥁`, `The parade for ${q(next)} is coming through 🥁`],
+    [`Mình cầm biển ${q(next)} đi vòng vòng tới khi bạn bắt đầu 🎺`, `I'll carry the ${q(next)} sign around until you start 🎺`],
+    [`Tùng tùng! Hôm nay là ngày của ${q(next)} 🎉`, `Ba-dum! Today is ${q(next)} day 🎉`],
+    [`Mình đi đều bước cổ vũ ${q(next)} đây 📣`, `Marching in step to cheer on ${q(next)} 📣`],
+  ] });
 
 export function block(app: string, next: TodoTask | null, say: Phrase): string {
   const n = next ? L(` Mình cùng làm ${q(next)} nhé?`, ` Shall we do ${q(next)} together?`) : "";
-  return say({ key: "block", options: [[`(╯°□°)╯︵ ┻━┻ ${app} lâu quá rồi đó!`, `(╯°□°)╯︵ ┻━┻ That's a lot of ${app}!`]] }) + n;
+  return (
+    say({ key: "block", options: [
+      [`(╯°□°)╯︵ ┻━┻ ${app} lâu quá rồi đó!`, `(╯°□°)╯︵ ┻━┻ That's a lot of ${app}!`],
+      [`*nhảy ra che màn hình* ${app} nghỉ chút nha 🙈`, `*jumps in front of the screen* Time out for ${app} 🙈`],
+      [`Ối, mình đứng chắn ${app} rồi. Xin lỗi nha 😇`, `Oops, I'm standing in front of ${app}. Sorry 😇`],
+      [`Tạm dừng ${app} một chút, mình ở đây nè 🛑`, `Pausing ${app} for a bit, I'm right here 🛑`],
+      [`(｀・ω・´) Mình giữ ${app} giúp bạn một lát`, `(｀・ω・´) I'll hold ${app} for you for a bit`],
+    ] }) + n
+  );
 }
 
 /** The end-of-day note on time spent on distracting apps and sites: a neutral tally, then an offer. */
@@ -801,7 +844,12 @@ export const voiceAngry = (t: TodoTask, say: Phrase) => {
     [`Bước nhỏ đầu tiên của ${title} là gì nhỉ?`, `What's the first small step of ${title}?`],
   ] });
 };
-export const voiceBlock = (app: string, say: Phrase) => say({ key: "voice.block", options: [[`Để ${app} lát nữa nhé?`, `Shall we leave ${app} for later?`]] });
+export const voiceBlock = (app: string, say: Phrase) =>
+  say({ key: "voice.block", options: [
+    [`Để ${app} lát nữa nhé?`, `Shall we leave ${app} for later?`],
+    [`${app} chờ được mà, mình làm việc trước nhé?`, `${app} can wait, shall we do a task first?`],
+    [`Mình tạm cất ${app} đi một lát nha.`, `Let's put ${app} away for a little while.`],
+  ] });
 export const voiceHungry = (say: Phrase) => say({ key: "voice.hungry", options: [["Mình đói quá.", "I'm so hungry."]] });
 export const voiceCheer = (say: Phrase) =>
   say({ key: "voice.cheer", options: [
