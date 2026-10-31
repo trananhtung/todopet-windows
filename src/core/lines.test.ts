@@ -156,6 +156,9 @@ const FILLED = new Set<string>([
   // Batch 7: two-minute starters, postponed tasks, meetings.
   "starterStart.task", "starterStart", "starterEnd.task", "starterEnd", "starterGone", "starterEnough", "stuck", "stuck.angry", "splitDone",
   "soon", "dueNow", "meetingOver",
+  // Batch 8: the day's end, the week, trips, tips.
+  "review", "review.clear", "review.empty", "lateNight", "newWeek.recap", "newWeek", "tripOffer", "tripStart",
+  "tripBack.souvenir", "tripBack.stories", "tripBack.early", "tripStayed", "tip",
 ]);
 /** Keys that shipped (0.7.1) with more than one option. A pack never shrinks: an option's index is its identity. */
 const SHIPPED: Record<string, number> = {
@@ -165,8 +168,6 @@ const SHIPPED: Record<string, number> = {
 };
 /** Shipped options that break a rule below, each until the batch that rewrites it (`key#index` → why). */
 const UNTIL_REVIEWED: Record<string, string> = {
-  "tripBack.souvenir#0": "too long; batch 8",
-  "tripBack.stories#0": "too long; batch 8",
 };
 
 const markers = (s: string) => [...s.matchAll(/⟦.⟧/g)].map((m) => m[0]).sort();

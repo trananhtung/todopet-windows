@@ -418,12 +418,28 @@ export const review = (completed: number, plannedCount: number, left: number, da
   left === 0
     ? // Nothing left to move: only the wrap-up is offered.
       completed > 0
-        ? say({ key: "review.clear", options: [[`Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc 🎉 Mình tổng kết ngày nhé?`, `Almost end of day: ${completed}/${plannedCount} done 🎉 Wrap up the day?`]] })
-        : say({ key: "review.empty", options: [["Sắp hết giờ làm. Danh sách hôm nay đã trống. Mình tổng kết ngày nhé?", "Almost end of day, and the list is clear. Wrap up the day?"]] })
-    : say({ key: "review", options: [[
-        `Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc. Còn ${left} việc — tổng kết ngày, hay dời hết sang ${day ?? "mai"}?`,
-        `Almost end of day: ${completed}/${plannedCount} done. Wrap up the day, or move the remaining ${left} to ${day ?? "tomorrow"}?`,
-      ]] });
+        ? say({ key: "review.clear", options: [
+            [`Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc 🎉 Mình tổng kết ngày nhé?`, `Almost end of day: ${completed}/${plannedCount} done 🎉 Wrap up the day?`],
+            [`Sắp hết giờ làm, xong ${completed}/${plannedCount} việc rồi. Tổng kết ngày nhé? 🎉`, `Almost end of day, ${completed}/${plannedCount} done. Shall we wrap up? 🎉`],
+            [`Hôm nay gọn gàng ghê: ${completed}/${plannedCount} việc. Mình tổng kết ngày nha? 🌇`, `A tidy day: ${completed}/${plannedCount} done. Wrap up the day? 🌇`],
+            [`Xong ${completed}/${plannedCount} việc, không còn gì phải dời. Tổng kết ngày thôi nào 🌙`, `${completed}/${plannedCount} done, nothing left to move. Time to wrap up the day 🌙`],
+          ] })
+        : say({ key: "review.empty", options: [
+            ["Sắp hết giờ làm. Danh sách hôm nay đã trống. Mình tổng kết ngày nhé?", "Almost end of day, and the list is clear. Wrap up the day?"],
+            ["Gần hết giờ làm, danh sách hôm nay trống rồi. Tổng kết ngày nhẹ nhàng nhé? 🌙", "Nearly end of day, and the list is empty. A gentle wrap-up? 🌙"],
+            ["Hết giờ làm rồi, không còn việc nào chờ. Mình tổng kết ngày nha 🍃", "Workday's nearly over, nothing waiting. Let's wrap up the day 🍃"],
+          ] })
+    : say({ key: "review", options: [
+        [
+          `Sắp hết giờ làm. Hôm nay xong ${completed}/${plannedCount} việc. Còn ${left} việc — tổng kết ngày, hay dời hết sang ${day ?? "mai"}?`,
+          `Almost end of day: ${completed}/${plannedCount} done. Wrap up the day, or move the remaining ${left} to ${day ?? "tomorrow"}?`,
+        ],
+        [`Gần hết giờ làm rồi: xong ${completed}/${plannedCount}, còn ${left} việc. Tổng kết ngày, hay dời hết sang ${day ?? "mai"}? 🌇`, `Nearly end of day: ${completed}/${plannedCount} done. Wrap up the day, or move the remaining ${left} to ${day ?? "tomorrow"}? 🌇`],
+        [`Cuối ngày rồi nè! Hôm nay ${completed}/${plannedCount} việc, còn ${left}. Tổng kết, hay dời hết sang ${day ?? "mai"}? 🌙`, `Nearly the end of day! ${completed}/${plannedCount} today. Wrap up, or move the remaining ${left} to ${day ?? "tomorrow"}? 🌙`],
+        [`Ngày sắp khép lại (${completed}/${plannedCount}), còn ${left} việc. Tổng kết ngày, hay dời hết sang ${day ?? "mai"}? ✨`, `The end of day is close (${completed}/${plannedCount}). Wrap up the day, or move the remaining ${left} to ${day ?? "tomorrow"}? ✨`],
+        [`Sắp hết giờ làm, bạn đã xong ${completed}/${plannedCount}! Còn ${left} việc: tổng kết, hay dời hết sang ${day ?? "mai"}? 👏`, `Almost end of day, and ${completed}/${plannedCount} done! Wrap up, or move the remaining ${left} to ${day ?? "tomorrow"}? 👏`],
+        [`Giờ làm sắp hết. ${completed}/${plannedCount} xong, còn ${left}. Mình tổng kết ngày, hay dời hết sang ${day ?? "mai"}? 🍵`, `Soon it's end of day: ${completed}/${plannedCount} done. Wrap up, or move the remaining ${left} to ${day ?? "tomorrow"}? 🍵`],
+      ] });
 
 /** "Done for today": a good evening, naming the frog that starts the next workday when you picked one. */
 export const wrappedUp = (frog: TodoTask | string | null, day: string | null = null) => {
@@ -561,7 +577,13 @@ export function planComplete(target: number, next: TodoTask | null, say: Phrase)
   ] });
 }
 
-export const lateNight = (say: Phrase) => say({ key: "lateNight", options: [["Khuya rồi đó… đi ngủ để mai làm tốt hơn nha 😴", "It's late… sleep now, crush it tomorrow 😴"]] });
+export const lateNight = (say: Phrase) => say({ key: "lateNight", options: [
+  ["Khuya rồi đó… đi ngủ để mai làm tốt hơn nha 😴", "It's late… sleep now, crush it tomorrow 😴"],
+  ["Khuya lắm rồi, mai mình làm tiếp nhé. Ngủ ngon 🌙", "It's very late, let's continue tomorrow. Sleep well 🌙"],
+  ["Mình díp mắt rồi… bạn cũng nghỉ đi nha 😪", "My eyes are closing… you should rest too 😪"],
+  ["Đêm rồi đó. Việc còn lại để mai, sức khoẻ trước nha 🛌", "It's night now. The rest can wait for tomorrow, health first 🛌"],
+  ["Trăng lên cao rồi. Tắt máy đi ngủ thôi bạn ơi ⭐", "The moon is high. Time to switch off and sleep ⭐"],
+] });
 export const error = (e: string) => L(`Mình không kết nối được Todoist 😵 ${e}`, `I can't reach Todoist 😵 ${e}`);
 export const connected = () => L("Kết nối Todoist thành công! 🎉", "Connected to Todoist! 🎉");
 export const demoHello = () =>
@@ -1065,41 +1087,70 @@ export const tip = (say: Phrase) =>
     ["Mẹo: cuối ngày dành 5 phút chọn sẵn 3 việc cho mai — sáng mai vào việc ngay.", "Tip: spend 5 minutes at day's end picking tomorrow's 3 tasks."],
     ["Mẹo: mỗi lần bị gián đoạn cần khá lâu để tập trung lại — tắt thông báo khi tập trung nhé.", "Tip: every interruption costs a long refocus — mute notifications while focusing."],
     ["Mẹo: uống nước & đứng dậy vươn vai sau mỗi phiên tập trung 💧", "Tip: drink water and stretch after each focus session 💧"],
+    ["Mẹo: chọn việc theo năng lượng — việc khó lúc tỉnh táo, việc nhẹ lúc mệt 🔋", "Tip: match tasks to your energy: hard ones when fresh, light ones when tired 🔋"],
+    ["Mẹo: ghi lại chỗ bạn dừng trước khi nghỉ, lúc quay lại sẽ vào việc nhanh hơn 📌", "Tip: note where you stopped before a break; getting back in is quicker 📌"],
+    ["Mẹo: không biết bắt đầu từ đâu? Thử 2 phút thôi, phần khó nhất là mở đầu ⏱", "Tip: not sure where to start? Try 2 minutes; starting is the hardest part ⏱"],
+    ["Mẹo: khi bí, nói to bước tiếp theo ra thành lời, đầu óc sẽ thông hơn 🗣️", "Tip: stuck? Say the next step out loud; it often unblocks your head 🗣️"],
+    ["Mẹo: gom các việc nhỏ (email, tin nhắn) làm một lượt cho đỡ bị cắt ngang 📥", "Tip: batch small tasks (email, messages) in one go, so they interrupt less 📥"],
+    ["Mẹo: viết việc bắt đầu bằng động từ (“Gọi…”, “Viết…”) để dễ hành động hơn ✍️", "Tip: start tasks with a verb (“Call…”, “Write…”); they get easier to act on ✍️"],
+    ["Mẹo: 3 việc quan trọng mỗi ngày là tốt lắm rồi, không cần ôm hết 🎯", "Tip: 3 important tasks a day is plenty; you don't need to do it all 🎯"],
+    ["Mẹo: xong việc thì gạch ngay, cảm giác tiến bộ giúp bạn có đà làm tiếp ✅", "Tip: tick tasks off right away; feeling progress keeps you going ✅"],
   ] });
 
 // v0.5 Game: trips and the Monday fresh start (chest and craft lines live with their rules in chests.ts and craft.ts).
 
 export const tripOffer = (back: Date, say: Phrase) =>
-  say({ key: "tripOffer", options: [[
-    `Xong hết kế hoạch hôm nay rồi! 🎉 Cho mình đi chơi một chuyến nhé? ${timeString(back)} mình về 🎒`,
-    `Today's plan is all done! 🎉 Can I go on a little trip? Back at ${timeString(back)} 🎒`,
-  ]] });
+  say({ key: "tripOffer", options: [
+    [
+      `Xong hết kế hoạch hôm nay rồi! 🎉 Cho mình đi chơi một chuyến nhé? ${timeString(back)} mình về 🎒`,
+      `Today's plan is all done! 🎉 Can I go on a little trip? Back at ${timeString(back)} 🎒`,
+    ],
+    [`Hôm nay xong hết rồi! Mình đi dạo một chuyến được không? ${timeString(back)} mình về 🎒`, `All done for today! May I wander off for a bit? Back at ${timeString(back)} 🎒`],
+    [`Kế hoạch hôm nay gọn rồi, cho mình đi chơi tí nha? ${timeString(back)} mình về 🧳`, `Today's plan is done, can I go out for a bit? Back at ${timeString(back)} 🧳`],
+    [`Bạn làm hết việc rồi, mình được đi du lịch chưa? Hẹn ${timeString(back)} gặp lại 🗺️`, `You've finished everything. Can I go on a trip? See you at ${timeString(back)} 🗺️`],
+    [`Ngày tuyệt quá! Mình xin đi khám phá một chút, ${timeString(back)} về nha 🌍`, `What a day! Mind if I go exploring? Back by ${timeString(back)} 🌍`],
+  ] });
 export const tripGo = () => L("Đi đi!", "Go!");
 export const tripStay = () => L("Ở lại nha", "Stay");
-export const tripStayed = (say: Phrase) => say({ key: "tripStayed", options: [["Vậy mình ở lại chơi với bạn 🥰", "Then I'll stay right here with you 🥰"]] });
+export const tripStayed = (say: Phrase) => say({ key: "tripStayed", options: [
+  ["Vậy mình ở lại chơi với bạn 🥰", "Then I'll stay right here with you 🥰"],
+  ["Được thôi, mình ở đây với bạn nha 🤗", "Okay, I'll stay here with you 🤗"],
+  ["Ở nhà cũng vui mà, mình ngồi cạnh bạn nè 🛋️", "Staying home is fun too, I'll sit right next to you 🛋️"],
+] });
 
 export const tripStart = (place: string, back: Date, say: Phrase) =>
-  say({ key: "tripStart", options: [[
-    `Mình đi ${place} đây! 🎒 ${timeString(back)} mình về. Cần mình thì bấm vào tấm biển nhé.`,
-    `Off to ${place}! 🎒 Back at ${timeString(back)}. Click my sign if you need me.`,
-  ]] });
+  say({ key: "tripStart", options: [
+    [
+      `Mình đi ${place} đây! 🎒 ${timeString(back)} mình về. Cần mình thì bấm vào tấm biển nhé.`,
+      `Off to ${place}! 🎒 Back at ${timeString(back)}. Click my sign if you need me.`,
+    ],
+    [`Đi ${place} thôi! Mình về lúc ${timeString(back)}. Bấm tấm biển nếu cần mình nhé 🧭`, `Off I go to ${place}! Back at ${timeString(back)}. Click the sign if you need me 🧭`],
+    [`Tạm biệt nha, mình tới ${place} chơi. Gặp lại lúc ${timeString(back)} 👋`, `Bye for now, I'm visiting ${place}. See you at ${timeString(back)} 👋`],
+    [`Hành lý xong, ${place} thẳng tiến! ${timeString(back)} mình về, có gì bấm vào biển nhé 🧳`, `Bags packed, next stop ${place}! Back at ${timeString(back)}, click my sign if needed 🧳`],
+  ] });
 
 export function tripBack(r: TripReturn, say: Phrase): string {
   const place = placeName(r.place);
   if (r.souvenir) {
     const gift = `${emojiOf(r.souvenir)} ${itemName(r.souvenir)}`;
-    return say({ key: "tripBack.souvenir", options: [[
-      `Mình về rồi nè! 🥰 Quà từ ${place} cho bạn: ${gift}. Có bưu thiếp trong nhật ký đó 💌`,
-      `I'm back from ${place}! 🥰 Here's your souvenir: ${gift}. There's a postcard waiting in the diary 💌`,
-    ]] });
+    return say({ key: "tripBack.souvenir", options: [
+      [`Mình về rồi nè! Quà từ ${place} cho bạn: ${gift}. Bưu thiếp ở trong nhật ký 💌`, `Back from ${place}! Your souvenir: ${gift}. A postcard is in the diary 💌`],
+      [`Mình đi ${place} về, có quà nè: ${gift} 🎁`, `Home from ${place}, with a gift: ${gift} 🎁`],
+      [`Về tới nhà rồi! ${gift} từ ${place} là dành cho bạn đó 🥰`, `I'm home! This ${gift} from ${place} is for you 🥰`],
+    ] });
   }
   if (r.xp > 0) {
-    return say({ key: "tripBack.stories", options: [[
-      `Mình đi ${place} về rồi! 🥰 Quà ở đó mình có rồi, nên mang về toàn chuyện vui: +${r.xp} XP 💌`,
-      `I'm back from ${place}! 🥰 I already had its souvenir, so I brought back stories instead: +${r.xp} XP 💌`,
-    ]] });
+    return say({ key: "tripBack.stories", options: [
+      [`Mình đi ${place} về rồi! Quà ở đó có rồi, nên mang về chuyện vui: +${r.xp} XP 💌`, `Back from ${place}! I had its souvenir, so I brought stories: +${r.xp} XP 💌`],
+      [`Về rồi nè! ${place} vui lắm, mình kể bạn nghe nha: +${r.xp} XP 📖`, `I'm back! ${place} was fun, let me tell you all about it: +${r.xp} XP 📖`],
+      [`${place} lần này toàn chuyện hay, +${r.xp} XP cho mình 🌟`, `${place} was full of stories this time, +${r.xp} XP for me 🌟`],
+    ] });
   }
-  return say({ key: "tripBack.early", options: [["Mình về sớm nè! Chưa đi được xa, nhưng mà nhớ bạn quá 🥰", "Back already! I didn't get far, but I missed you 🥰"]] });
+  return say({ key: "tripBack.early", options: [
+    ["Mình về sớm nè! Chưa đi được xa, nhưng mà nhớ bạn quá 🥰", "Back already! I didn't get far, but I missed you 🥰"],
+    ["Mình về sớm hơn dự định, nhớ bạn quá nên quay về 🥰", "I came back early, I missed you too much 🥰"],
+    ["Đi chưa xa đã muốn về rồi. Ở nhà với bạn vẫn vui nhất 🏡", "I didn't get far before wanting to come home. Being with you is the best 🏡"],
+  ] });
 }
 
 export const postcard = (place: string, text: string) => L(`💌 Bưu thiếp từ ${place}: ${text}`, `💌 A postcard from ${place}: ${text}`);
@@ -1108,8 +1159,18 @@ export const postcard = (place: string, text: string) => L(`💌 Bưu thiếp t�
 export function newWeek(last: WeekStats | null, say: Phrase): string {
   const recap = weekRecap(last);
   return recap
-    ? say({ key: "newWeek.recap", options: [[`🌱 Tuần mới, khởi đầu mới! Tuần trước: ${recap}.`, `🌱 New week, fresh start! Last week: ${recap}.`]] })
-    : say({ key: "newWeek", options: [["🌱 Tuần mới, khởi đầu mới! Tuần này mới tinh, mình cùng bắt đầu nhẹ nhàng nhé.", "🌱 New week, fresh start! A brand-new week; let's ease in together."]] });
+    ? say({ key: "newWeek.recap", options: [
+        [`🌱 Tuần mới, khởi đầu mới! Tuần trước: ${recap}.`, `🌱 New week, fresh start! Last week: ${recap}.`],
+        [`🌱 Tuần mới tới rồi! Tuần trước bạn có: ${recap}.`, `🌱 A new week is here! Last week you had: ${recap}.`],
+        [`🌱 Chào tuần mới! Nhìn lại tuần trước: ${recap}.`, `🌱 Hello, new week! Looking back: ${recap}.`],
+        [`🌱 Tuần trước thật đáng nhớ: ${recap}. Tuần này mình đi tiếp nha`, `🌱 Last week to remember: ${recap}. On we go this week`],
+        [`🌱 Trang mới cho tuần mới. Tuần qua: ${recap}`, `🌱 A fresh page for a fresh week. Last week: ${recap}`],
+      ] })
+    : say({ key: "newWeek", options: [
+        ["🌱 Tuần mới, khởi đầu mới! Tuần này mới tinh, mình cùng bắt đầu nhẹ nhàng nhé.", "🌱 New week, fresh start! A brand-new week; let's ease in together."],
+        ["🌱 Tuần mới rồi! Mình bắt đầu từ từ, từng việc một nhé", "🌱 A new week! Let's start slowly, one task at a time"],
+        ["🌱 Chào tuần mới tinh. Mình ở đây cùng bạn nè", "🌱 Hello, brand-new week. I'm right here with you"],
+      ] });
 }
 
 // v0.7 "Always fresh": the update notice, its buttons, the install and the first start of a new version. Warm and brief:

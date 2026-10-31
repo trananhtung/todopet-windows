@@ -14,8 +14,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const at = (month: number, day: number, h: number, m = 0) => new Date(2026, month - 1, day, h, m).getTime();
 const YOUTUBE = { app: { name: "Google Chrome", exe: "chrome.exe", title: "Cats - YouTube" }, url: "https://www.youtube.com/watch?v=1" };
 
-/** The trip offer: a check-in, so it has no kind (only counted reminders do); it's known by its words. */
-const isTripOffer = (b: Bubble) => b.text.includes("Can I go on a little trip?");
+/** The trip offer: a check-in, so it has no kind (only counted reminders do); it's known by its "Go!" button. */
+const isTripOffer = (b: Bubble) => b.actions.some((a) => a.title === "Go!");
 
 /** Random numbers from `values`, then 0.5. */
 const seq = (values: number[]) => () => values.shift() ?? 0.5;
@@ -365,7 +365,8 @@ describe("Brain and trips", () => {
     expect(s().trip).not.toBeNull();
     expect(s().life.tripDay).toBe("2026-10-28");
     const bye = s().bubble!;
-    expect(bye.text).toContain("Back at");
+    // Any of its lines: each says when the pet will be back.
+    expect(bye.text).toMatch(/\d{2}:\d{2}/);
     brain.dismissBubble(bye.id, "ignored");
     // Coming back to the PC while it's away: no welcome-back.
     show({ idleSeconds: 20 * 60 });
@@ -416,7 +417,7 @@ describe("Brain and trips", () => {
     expect(s().trip).toBeNull();
     expect(s().life.souvenirs).toHaveLength(4);
     expect(s().life.week.trips).toBe(0);
-    expect(s().bubble?.text).toContain("Back already");
+    expect(s().bubble?.text).toMatch(/back|home/i);
     expect(s().reveal).toMatchObject({ kind: "souvenir", souvenir: null });
     brain.callBack();
     // A stray click doesn't cost the day's trip.
@@ -653,7 +654,7 @@ describe("Brain and weekly chapters", () => {
     expect(s().life.lastWeek).toEqual({ key: "2026-10-26", done: 11, stickers: 2, trips: 2 });
     const hello = step()!;
     expect(hello.text).toContain("Good morning");
-    expect(hello.text).toContain("New week, fresh start!");
+    expect(hello.text).toMatch(/week/i);
     expect(hello.text).toContain("11 tasks · 2 stickers · 2 trips");
     expect(s().life.weekGreeted).toBe("2026-11-02");
     brain.dismissBubble(hello.id, "closed");
