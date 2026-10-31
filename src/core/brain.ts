@@ -16,7 +16,7 @@ import {
 } from "./calendar";
 import { addDays, atHour, dayKey, daysAgo, parseDate, shortText, startOfDay, timeString, utcString, weekdayName } from "./dates";
 import { Diary } from "./diary";
-import { L, langFromLocale, plural, setLang } from "./l10n";
+import { L, getLang, langFromLocale, plural, setLang } from "./l10n";
 import * as life from "./life";
 import * as lines from "./lines";
 import { dayLoad, isOverbooked, taskEstimate, type DayLoad, type DayLoadInput } from "./load";
@@ -1809,10 +1809,13 @@ export class Brain {
     return s.hiddenUntil !== null || (s.fullscreen && s.prefs.hideInFullscreen) || s.life.trip !== null;
   }
 
-  /** Says a line aloud. The line is chosen only when it will be heard, so a line nobody heard is not remembered as said. */
+  /**
+   * Says a line aloud, in the language it is written in (the UI's, which follows the system when none is chosen). The
+   * line is chosen only when it will be heard, so a line nobody heard is not remembered as said.
+   */
   private speak(line: (say: Phrase) => string): void {
     const speak = this.effects.speak;
-    if (speak && this.state.prefs.voiceOn && !this.outOfTheWay) speak(line(this.phrase), this.state.prefs.lang ?? langFromLocale(null));
+    if (speak && this.state.prefs.voiceOn && !this.outOfTheWay) speak(line(this.phrase), getLang());
   }
 
   /**
