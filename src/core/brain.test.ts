@@ -365,6 +365,22 @@ describe("Brain and forgiving streaks", () => {
     }
   });
 
+  it("a growth note waiting to be told keeps the line it picked", async () => {
+    // Guards nothing while `levelUp` has one line (a one-line pack is never stored); it bites once the pack grows.
+    const { brain, clock } = await boot({ xp: 290, streak: 2 }, doneOn27(3));
+    try {
+      const picked = structuredClone(brain.getSnapshot().life.said.levelUp);
+      for (let i = 0; i < 4; i++) {
+        clock.t += 15_000;
+        brain.tick();
+      }
+      await laterThanHello(brain, clock);
+      expect(brain.getSnapshot().life.said.levelUp).toEqual(picked);
+    } finally {
+      brain.stop();
+    }
+  });
+
   it("keeps the morning-after note for its own day, and not before an hour ahead of work", async () => {
     const nothingDone = (b: DemoBackend) => {
       b.todoist.completed = async () => [];

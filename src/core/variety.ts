@@ -1,5 +1,6 @@
 // Which line the pet says (SPEC v0.8 §1): nothing said in the last two days while a fresh line is left, and never the
 // same line twice in a row. Pure: the brain keeps the memory in `LifeState.said` and passes the clock and the dice.
+import { L } from "./l10n";
 
 /** The options of one situation, each a [vi, en] pair. Append only: an option's index is its identity in the memory. */
 export interface Pack {
@@ -60,6 +61,23 @@ export function remember(entry: SaidEntry | undefined, n: number, index: number,
   const at = Array.from({ length: n }, (_, i) => Math.min(entry?.n === n ? (entry.at[i] ?? 0) : 0, now - 1));
   at[index] = now;
   return { n, at };
+}
+
+/**
+ * A `say` for text that is rebuilt while it waits (the day-close note): each key is chosen once with `pick`, then the
+ * same option comes back every time, in the language of the moment.
+ */
+export function stickyPhrase(pick: (pack: Pack) => number): Phrase {
+  const chosen = new Map<string, number>();
+  return (pack) => {
+    let i = chosen.get(pack.key);
+    if (i === undefined) {
+      i = pick(pack);
+      chosen.set(pack.key, i);
+    }
+    const option = pack.options[i];
+    return option ? L(option[0], option[1]) : "";
+  };
 }
 
 const newest = (entry: SaidEntry): number => entry.at.reduce((a, b) => Math.max(a, b), 0);
