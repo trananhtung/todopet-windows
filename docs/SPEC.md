@@ -742,6 +742,11 @@ The extra lines of the bubble (golden treat, combo, level up, chest…) are appe
 - **Batches.** Written and reviewed in batches of about 40 options, most frequent first: finishing, nudges and
   planning, greeting and morning, then the rest. Each batch is reviewed by the user (Vietnamese) as a table
   `key | VI | EN` before it is merged.
+- **Kept openings.** Where a test or the user tells a bubble apart by its words, every option keeps them and only
+  the rest varies: the greeting's time of day ("Chào buổi sáng!" / "Good morning!"…), "Bạn về rồi!" / "Welcome
+  back!", an English meeting check-in's "“…” is over", the review's "end of day", "wrap up" and move-to-day
+  question ("tổng kết", "dời hết sang …?"), an overdue line's fresh start, a picked frog's "picked", and the
+  minutes of focus, break and starter lines. Spoken lines (`voice.*`) carry no "!" and no emoji.
 - Out of scope: chest, craft and wrap-up lines (in `chests.ts`, `craft.ts`, `wrapup.ts`), labels, errors, updates.
 
 #### Phases
@@ -749,7 +754,9 @@ The extra lines of the bubble (golden treat, combo, level up, chest…) are appe
 1. **Engine and plumbing, same words.** `variety.ts` with tests; `LifeState.said`; `phrase()`; every varied line
    function returns a pack built from today's lines; call sites move to `phrase()`. Behaviour changes only in that a
    line never repeats while a fresh one is left. All tests green.
-2. **Content**, in the batches above, each with its review table.
+2. **Content**, in the batches above, each with its review table. Done: eight batches, 315 new options (409 per
+   language), tables in `docs/dialogue/batch-1…8-*.md`; batches 1–5 were reviewed by the user line by line, 6–8
+   went in under the user's instruction to finish without asking and are open to review in the pull request.
 
 #### Tests
 
