@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { setLang } from "./l10n";
 import { lifeFromJson, newLife } from "./life";
-import { FRESH_MS, MAX_KEYS, chooseLine, normalizeSaid, remember, stickyPhrase, withEntry, type Pack, type SaidEntry } from "./variety";
+import { FRESH_MS, MAX_KEYS, chooseLine, everyOption, normalizeSaid, remember, stickyPhrase, withEntry, type Pack, type SaidEntry } from "./variety";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -85,6 +85,15 @@ describe("stickyPhrase", () => {
     }
     expect(say({ key: "streak", options: [["Chuỗi", "Streak"], ["Chuỗi 2", "Streak 2"]] })).toBe("Streak 2");
     expect(picked).toEqual(["levelUp", "streak"]);
+  });
+});
+
+describe("everyOption", () => {
+  it("lists every way a line can come out", () => {
+    const two: Pack = { key: "a", options: [["A1", "a1"], ["A2", "a2"]] };
+    const three: Pack = { key: "b", options: [["B1", "b1"], ["B2", "b2"], ["B3", "b3"]] };
+    expect(everyOption((say) => `${say(two)} ${say(three)}`).sort()).toEqual(["a1 b1", "a1 b2", "a1 b3", "a2 b1", "a2 b2", "a2 b3"]);
+    expect(everyOption(() => "fixed")).toEqual(["fixed"]);
   });
 });
 

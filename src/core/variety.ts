@@ -80,6 +80,33 @@ export function stickyPhrase(pick: (pack: Pack) => number): Phrase {
   };
 }
 
+/**
+ * Every text `line` can come out as, in the current language: one per combination of the options of the packs it says,
+ * for tests that hold a line to something whichever option the pet picks.
+ */
+export function everyOption(line: (say: Phrase) => string): string[] {
+  const sizes: number[] = [];
+  line((pack) => {
+    sizes.push(pack.options.length);
+    return "";
+  });
+  const at = sizes.map(() => 0);
+  const out: string[] = [];
+  for (;;) {
+    let call = 0;
+    out.push(
+      line((pack) => {
+        const option = pack.options[at[call++]];
+        return option ? L(option[0], option[1]) : "";
+      }),
+    );
+    // The next combination, the last pack turning fastest; done once every pack has wrapped around.
+    let d = at.length - 1;
+    while (d >= 0 && ++at[d] >= sizes[d]) at[d--] = 0;
+    if (d < 0) return out;
+  }
+}
+
 const newest = (entry: SaidEntry): number => entry.at.reduce((a, b) => Math.max(a, b), 0);
 
 /** The `MAX_KEYS` keys said most recently. */
