@@ -6,7 +6,9 @@ import { Brain, showsOverBoard, type Bubble } from "./brain";
 import { dayKey } from "./dates";
 import { setLang } from "./l10n";
 import { demoLife, type LifeState } from "./life";
+import * as lines from "./lines";
 import { defaultPrefs, type Prefs } from "./prefs";
+import { everyOption } from "./variety";
 import { chooseFrog, chooseMove, newDraft, planFromJson, setNote, type WrapDraft } from "./wrapup";
 
 const MIN = 60_000;
@@ -694,7 +696,8 @@ describe("Brain v0.4: done for today", () => {
     r.brain.resumeDay();
     expect(r.brain.getSnapshot().doneUntil).toBeNull();
     expect(r.brain.getSnapshot().mood).not.toBe("sleeping");
-    expect(r.brain.getSnapshot().bubble?.text).toContain("I'm up again");
+    // The pet wakes up (any of its back-to-work lines).
+    expect(everyOption(lines.backToWork)).toContain(r.brain.getSnapshot().bubble?.text);
     expect((await planOnDisk(r))?.doneUntil).toBeNull();
     // What you wrote for tomorrow stays.
     expect((await planOnDisk(r))?.plans[0].note).toBe("Keep me");

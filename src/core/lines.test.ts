@@ -151,6 +151,8 @@ const FILLED = new Set<string>([
   // Batch 5: greetings, the morning line, and baths.
   "greeting.morning", "greeting.midday", "greeting.afternoon", "greeting.evening", "morning.plan", "morning.frogPicked", "morning.frog",
   "dirty", "cleaned", "cleaned.clean",
+  // Batch 6: focus and breaks.
+  "focusStart.task", "focusStart", "focusEnd.task", "focusEnd", "breakStart", "breakEnd", "backToWork", "welcomeBack", "voice.hungry",
 ]);
 /** Keys that shipped (0.7.1) with more than one option. A pack never shrinks: an option's index is its identity. */
 const SHIPPED: Record<string, number> = {
