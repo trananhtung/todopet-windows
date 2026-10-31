@@ -706,7 +706,7 @@ applies, in this order (most specific first):
 | 2 | `done.stuck` | the task was on the "postponed" list (`state.stuck`) when it was finished |
 | 3 | `done.frog` | it was today's frog (`day.frogId`, picked in the evening's Wrap up) |
 | 4 | `done.first` | the first task finished today |
-| 5 | `done.early` | before 9:00 |
+| 5 | `done.early` | from 5:00 to 8:59 (a finish at 2 a.m. isn't "up early") |
 | 6 | `done.friday` | Friday from 15:00 |
 | 7 | `done` | everything else |
 
@@ -720,23 +720,25 @@ The extra lines of the bubble (golden treat, combo, level up, chest…) are appe
   the same thing in spirit, not word for word. `${sound}` (the species' voice) may appear in `done*` lines.
 - **Append only.** New options go at the end of a pack. Removing or reordering one changes `n` or shifts indices,
   which resets or confuses that key's memory once; do it only when needed.
-- **Targets** (options per key; the existing lines count):
+- **Targets** (options per key, the shipped lines included; one row per key the code says, as `TARGETS` in
+  `lines.test.ts` holds them). With no next task the morning line is the greeting alone, so there is no
+  `morning.plain`.
 
 | Area | Keys and targets |
 |---|---|
-| Greeting and morning | `greeting.{morning,midday,afternoon,evening}` 4 each; `morning.{plan,frogPicked,frog,plain}` 6 each |
-| Planning and nudges | `plan.{normal,annoyed,angry}` 6 each; `nudge.{normal,happy,annoyed,angry}` 8 each; `overdue` 6 |
+| Greeting and morning | `greeting.{morning,midday,afternoon,evening}` 4 each; `morning.{plan,frogPicked,frog}` 6 each |
+| Planning and nudges | `plan.{normal,annoyed,angry}` 6 each; `nudge.{normal,happy,annoyed,angry}` 8 each; `overdue` 6, `overdue.worried` 4, `overdue.repeating` 3 |
 | Distraction | `distraction` 8, `distraction.angry` 4; `grumble` 6, `parade` 6, `block` 5 |
-| Finishing | `done` 20; `done.{target,stuck,frog,first}` 6 each; `done.{early,friday}` 5 each; `allDone` 8; `planComplete` 6 |
-| Pet life | `hungry` 6, `dirty` 5, `cleaned` 4, `golden` 4, `combo` 5, `levelUp` 4, `streak` 6 |
-| Focus and breaks | `focusStart` 6, `focusEnd` 6, `breakStart` 5, `breakEnd` 5, `backToWork` 6, `welcomeBack` 8 |
-| Starters and postponed | `starterStart` 4, `starterEnd` 4, `starterEnough` 4, `stuck` 6, `splitDone` 3 |
+| Finishing | `done` 20; `done.{target,stuck,frog,first}` 6 each; `done.{early,friday}` 5 each; `allDone` 8; `planComplete.next` 6, `planComplete` 4 |
+| Pet life | `hungry` 6, `hungry.starving` 3, `dirty` 5, `cleaned` 4, `cleaned.clean` 3, `golden` 4, `combo` 5, `levelUp` 4, `streak` 6 |
+| Focus and breaks | `focusStart.task` 6, `focusStart` 4, `focusEnd.task` 6, `focusEnd` 4, `breakStart` 5, `breakEnd` 5, `backToWork` 6, `welcomeBack` 8 |
+| Starters and postponed | `starterStart.task` 4, `starterStart` 3, `starterEnd.task` 4, `starterEnd` 3, `starterGone` 3, `starterEnough` 4, `stuck` 6, `stuck.angry` 4, `splitDone` 3 |
 | Meetings and timed tasks | `soon` 4, `dueNow` 4, `meetingOver` 4 |
-| Day's end and week | `review` 6, `lateNight` 5, `newWeek` 5 |
-| Trips | `tripOffer` 5, `tripStart` 4, `tripBack` 5, `tripStayed` 3 |
+| Day's end and week | `review` 6, `review.clear` 4, `review.empty` 3, `lateNight` 5, `newWeek.recap` 5, `newWeek` 3 |
+| Trips | `tripOffer` 5, `tripStart` 4, `tripBack.{souvenir,stories,early}` 3 each, `tripStayed` 3 |
 | Tips and voice | `tip` 14; `voice.{cheer,grumble,angry,block,hungry}` 6, 4, 4, 3, 3 |
 
-  About 360 chatter options in all (about 300 new per language), plus the fixed lines.
+  409 options per language in all: 94 shipped in 0.7.1, 315 new.
 - **Batches.** Written and reviewed in batches of about 40 options, most frequent first: finishing, nudges and
   planning, greeting and morning, then the rest. Each batch is reviewed by the user (Vietnamese) as a table
   `key | VI | EN` before it is merged.
@@ -757,10 +759,12 @@ The extra lines of the bubble (golden treat, combo, level up, chest…) are appe
 - `life` loading: a table of bad `said` values (not an object, bad keys, `n` out of range, `NaN`, strings, negative
   numbers, `at` too long or short, more than 200 keys): nothing throws, positions are kept, bad entries count as never
   said.
-- Content lint (`lines.test.ts`), over every pack each line function can return (called with sample arguments,
-  including a 60-character title): keys match the pattern; 1…40 options; no empty or duplicate string in a pack;
-  the same `${…}` placeholders filled in both languages (checked by passing marker values); length limits per the
-  voice rules; each key's option count is at least its target (phase 2 only).
+- Content lint (`lines.test.ts`), over every pack each line function can return (called with sample arguments: marker
+  strings for titles, apps and places, distinctive numbers, times at minute 37): keys match the pattern; 1…40 options;
+  no empty or duplicate string in a pack; the same `${…}` placeholders filled in both languages (checked by passing
+  marker values); the same numbers and times in both languages; one pack size per key wherever it is said; never fewer
+  options than the key shipped with; length limits per the voice rules, measured with the title (app, place) left out;
+  each key's option count is at least its target, for the keys whose batch is in (phase 2).
 - Brain: finishing 15 tasks in a day gives 15 different `done` lines; every completion bubble made through the pet
   still has Undo, whatever its context; the saved life, after a day with a task titled with a sentinel string,
   never contains that string; the memory survives a restart (saved and loaded back).
