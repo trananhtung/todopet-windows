@@ -172,7 +172,7 @@ describe("Brain with the demo backend", () => {
     t += 26 * MIN;
     brain.tick();
     const b = brain.getSnapshot().bubble;
-    expect(b?.text).toContain("25 minutes up");
+    expect(b?.text).toContain("25 minutes");
     expect(b?.actions[0].title).toBe("✓ Done");
     expect(brain.getSnapshot().focus).toBeNull();
   });

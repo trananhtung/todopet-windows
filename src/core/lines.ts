@@ -444,24 +444,90 @@ export const wrapFrogDone = (title: string, day: string | null = null) =>
   L(`“${title}” đã xong rồi, giỏi quá! Chọn việc khác hoặc để ${day ?? "mai"} tính.`, `“${title}” is already done, nice! Pick another, or decide ${day ? `on ${day}` : "tomorrow"}.`);
 export const wrapNoteLabel = (day: string | null = null) => L(`${day ?? "Mai"} mình bắt đầu từ đâu?`, `Where do I start ${day ? `on ${day}` : "tomorrow"}?`);
 
-export const backToWork = (say: Phrase) => say({ key: "backToWork", options: [["Mình dậy rồi 🌤 Cần gì cứ gọi mình nhé.", "I'm up again 🌤 Call me whenever you need me."]] });
+export const backToWork = (say: Phrase) =>
+  say({ key: "backToWork", options: [
+    ["Mình dậy rồi 🌤 Cần gì cứ gọi mình nhé.", "I'm up again 🌤 Call me whenever you need me."],
+    ["Ơ, bạn làm tiếp hả? Mình dậy liền nè ☀️", "Oh, back at it? I'm awake ☀️"],
+    ["Mình thức rồi! Có gì cần cứ bảo mình nha 🙋", "I'm awake! Just tell me if you need anything 🙋"],
+    ["*dụi mắt* Mình sẵn sàng rồi đây 😊", "*rubs eyes* I'm ready 😊"],
+    ["Bạn quay lại rồi, mình cũng dậy luôn 🌤", "You're back, so I'm up too 🌤"],
+    ["Chào lại nha! Mình ở đây nếu bạn cần 💛", "Hello again! I'm here if you need me 💛"],
+  ] });
 
-export const welcomeBack = (t: TodoTask, say: Phrase) => say({ key: "welcomeBack", options: [[`Bạn về rồi! 👋 Tiếp tục với ${q(t)} nhé?`, `Welcome back! 👋 Continue with ${q(t)}?`]] });
+/** Every option opens with "Welcome back!": the tests tell this bubble apart by it. */
+export const welcomeBack = (t: TodoTask, say: Phrase) =>
+  say({ key: "welcomeBack", options: [
+    [`Bạn về rồi! 👋 Tiếp tục với ${q(t)} nhé?`, `Welcome back! 👋 Continue with ${q(t)}?`],
+    [`Bạn về rồi! Mình nhớ bạn đó. Làm tiếp ${q(t)} nha? 🥰`, `Welcome back! I missed you. Back to ${q(t)}? 🥰`],
+    [`Bạn về rồi! Mình giữ chỗ cho ${q(t)} nè 🪑`, `Welcome back! I saved a spot for ${q(t)} 🪑`],
+    [`Bạn về rồi! Nghỉ ngơi thoải mái chưa? ${q(t)} đang đợi 🙂`, `Welcome back! Feeling rested? ${q(t)} is waiting 🙂`],
+    [`Bạn về rồi! Mình làm tiếp từ ${q(t)} nhé? 🔄`, `Welcome back! Pick up again with ${q(t)}? 🔄`],
+    [`Bạn về rồi! Một phiên ngắn cho ${q(t)} không? ⏱`, `Welcome back! A short session for ${q(t)}? ⏱`],
+    [`Bạn về rồi! Chỗ bạn dừng là ${q(t)} đó 📍`, `Welcome back! You left off at ${q(t)} 📍`],
+    [`Bạn về rồi! Mình mừng ghê. Tiếp ${q(t)} nhé? 🐾`, `Welcome back! So happy to see you. On with ${q(t)}? 🐾`],
+  ] });
 export const soon = (t: TodoTask, minutes: number, say: Phrase) => say({ key: "soon", options: [[`⏰ ${minutes} phút nữa: ${q(t)}`, `⏰ In ${minutes} min: ${q(t)}`]] });
 export const dueNow = (t: TodoTask, say: Phrase) => say({ key: "dueNow", options: [[`⏰ Đến giờ rồi: ${q(t)}!`, `⏰ It's time: ${q(t)}!`]] });
 
+/** Every focus line says how long the session is ("25 minutes"). */
 export function focusStart(t: TodoTask | null, minutes: number, say: Phrase): string {
-  if (t) return say({ key: "focusStart.task", options: [[`Bắt đầu ${minutes} phút cho ${q(t)}. Mình sẽ ngồi im canh bạn 🤫`, `${n(minutes, "minute")} on ${q(t)}. I'll sit quietly and guard 🤫`]] });
-  return say({ key: "focusStart", options: [[`Bắt đầu ${minutes} phút tập trung. Mình ngồi im canh nhé 🤫`, `${n(minutes, "minute")} of focus. I'll stay quiet 🤫`]] });
+  const m = n(minutes, "minute");
+  if (t) {
+    return say({ key: "focusStart.task", options: [
+      [`Bắt đầu ${minutes} phút cho ${q(t)}. Mình sẽ ngồi im canh bạn 🤫`, `${m} on ${q(t)}. I'll sit quietly and guard 🤫`],
+      [`${minutes} phút cho ${q(t)}, bắt đầu! Mình giữ yên lặng nha 🤫`, `${m} for ${q(t)}, go! I'll keep it quiet 🤫`],
+      [`Tập trung vào ${q(t)} trong ${minutes} phút nhé. Mình canh cửa cho 🚪`, `Focus on ${q(t)} for ${m}. I'll guard the door 🚪`],
+      [`Hẹn giờ ${minutes} phút cho ${q(t)}. Mình im như tượng luôn 🗿`, `Timer set: ${m} for ${q(t)}. I'll be still as a statue 🗿`],
+      [`Bắt đầu nào: ${q(t)}, ${minutes} phút. Mình ngồi đây cổ vũ thầm 🤍`, `Here we go: ${q(t)}, ${m}. Cheering you on quietly 🤍`],
+      [`${minutes} phút chỉ dành cho ${q(t)}. Mình không làm phiền đâu 🔕`, `${m} just for ${q(t)}. I won't interrupt 🔕`],
+    ] });
+  }
+  return say({ key: "focusStart", options: [
+    [`Bắt đầu ${minutes} phút tập trung. Mình ngồi im canh nhé 🤫`, `${m} of focus. I'll stay quiet 🤫`],
+    [`${minutes} phút tập trung, bắt đầu! Mình giữ im lặng 🤫`, `${m} of focus, go! I'll stay quiet 🤫`],
+    [`Hẹn giờ ${minutes} phút rồi nhé. Mình không làm phiền đâu 🔕`, `Timer set for ${m}. I won't interrupt 🔕`],
+    [`Một phiên ${minutes} phút cho bạn. Mình canh giờ giúp ⏳`, `A session of ${m} for you. I'll keep time ⏳`],
+  ] });
 }
 
 export function focusEnd(t: TodoTask | null, minutes: number, say: Phrase): string {
-  if (t) return say({ key: "focusEnd.task", options: [[`Hết ${minutes} phút rồi! ${q(t)} xong chưa?`, `${minutes === 1 ? "Time's up" : `${minutes} minutes up`}! Is ${q(t)} done?`]] });
-  return say({ key: "focusEnd", options: [[`Hết ${minutes} phút rồi! Nghỉ chút nhé?`, `${minutes === 1 ? "Time's up" : `${minutes} minutes up`}! Take a break?`]] });
+  const m = n(minutes, "minute");
+  const up = minutes === 1 ? "Time's up" : `${minutes} minutes up`;
+  if (t) {
+    return say({ key: "focusEnd.task", options: [
+      [`Hết ${minutes} phút rồi! ${q(t)} xong chưa?`, `${up}! Is ${q(t)} done?`],
+      [`Xong ${minutes} phút rồi! ${q(t)} tới đâu rồi? ⏰`, `${m} done! How far did ${q(t)} get? ⏰`],
+      [`Hết ${minutes} phút. Đánh dấu xong ${q(t)}, hay thêm một phiên nữa? 🔁`, `That's ${m}. Mark ${q(t)} done, or another round? 🔁`],
+      [`Ting! ${minutes} phút cho ${q(t)} đã xong. Nghỉ chút nhé? 🔔`, `Ding! ${m} on ${q(t)}, complete. A short break? 🔔`],
+      [`Hết giờ rồi nè! Sau ${minutes} phút, ${q(t)} xong chưa bạn? 🙂`, `Time! After ${m}, is ${q(t)} done? 🙂`],
+      [`${minutes} phút trôi qua nhẹ nhàng. ${q(t)} ổn chưa? ✨`, `${m} flew by. How's ${q(t)} looking? ✨`],
+    ] });
+  }
+  return say({ key: "focusEnd", options: [
+    [`Hết ${minutes} phút rồi! Nghỉ chút nhé?`, `${up}! Take a break?`],
+    [`Xong ${minutes} phút tập trung! Nghỉ ngơi chút nhé ☕`, `${m} of focus done! Time for a breather ☕`],
+    [`Ting! Hết ${minutes} phút rồi. Vươn vai cái nào 🙆`, `Ding! ${m}, all done. Time to stretch 🙆`],
+    [`${minutes} phút tuyệt vời. Bạn muốn nghỉ hay làm tiếp? 🤔`, `${m}, nicely done. Break or keep going? 🤔`],
+  ] });
 }
 
-export const breakStart = (m: number, say: Phrase) => say({ key: "breakStart", options: [[`Nghỉ ${m} phút nhé ☕ Uống nước, vươn vai đi!`, `${m}-minute break ☕ Water and stretch!`]] });
-export const breakEnd = (say: Phrase) => say({ key: "breakEnd", options: [["Hết giờ nghỉ! Quay lại thôi 💪", "Break's over! Let's go 💪"]] });
+/** Every option says "N-minute break". */
+export const breakStart = (m: number, say: Phrase) =>
+  say({ key: "breakStart", options: [
+    [`Nghỉ ${m} phút nhé ☕ Uống nước, vươn vai đi!`, `${m}-minute break ☕ Water and stretch!`],
+    [`Nghỉ ${m} phút thôi nha. Hít thở sâu nào 🌿`, `A ${m}-minute break. Take a deep breath 🌿`],
+    [`Giờ nghỉ ${m} phút bắt đầu. Đứng dậy đi lại chút nhé 🚶`, `Your ${m}-minute break starts now. Get up and move a little 🚶`],
+    [`${m} phút cho bạn thư giãn. Mình trông chừng mọi thứ 🛋️`, `${m}-minute break, all yours. I'll keep an eye on things 🛋️`],
+    [`Nghỉ ${m} phút, nhìn ra xa cho mắt đỡ mỏi nha 👀`, `${m}-minute break: look far away to rest your eyes 👀`],
+  ] });
+export const breakEnd = (say: Phrase) =>
+  say({ key: "breakEnd", options: [
+    ["Hết giờ nghỉ! Quay lại thôi 💪", "Break's over! Let's go 💪"],
+    ["Nghỉ xong rồi! Mình quay lại nhẹ nhàng nhé 🌱", "Break's done! Let's ease back in 🌱"],
+    ["Ting! Hết giờ nghỉ. Sẵn sàng chưa? 🔔", "Ding! Break time's over. Ready? 🔔"],
+    ["Nạp năng lượng xong rồi, mình tiếp tục thôi ⚡", "Recharged! Let's carry on ⚡"],
+    ["Hết giờ nghỉ rồi nè. Việc tiếp theo đang chờ đó 🙂", "That's the break. Your next task is waiting 🙂"],
+  ] });
 export const added = (title: string) => L(`Đã thêm “${shortText(title)}” ✔︎`, `Added “${shortText(title)}” ✔︎`);
 
 export function planComplete(target: number, next: TodoTask | null, say: Phrase): string {
@@ -915,7 +981,12 @@ export const voiceBlock = (app: string, say: Phrase) =>
     [`${app} chờ được mà, mình làm việc trước nhé?`, `${app} can wait, shall we do a task first?`],
     [`Mình tạm cất ${app} đi một lát nha.`, `Let's put ${app} away for a little while.`],
   ] });
-export const voiceHungry = (say: Phrase) => say({ key: "voice.hungry", options: [["Mình đói quá.", "I'm so hungry."]] });
+export const voiceHungry = (say: Phrase) =>
+  say({ key: "voice.hungry", options: [
+    ["Mình đói quá.", "I'm so hungry."],
+    ["Bụng mình kêu rồi.", "My tummy is rumbling."],
+    ["Cho mình ăn một chút nhé?", "Could you feed me a little?"],
+  ] });
 export const voiceCheer = (say: Phrase) =>
   say({ key: "voice.cheer", options: [
     ["Tuyệt vời!", "Awesome!"],

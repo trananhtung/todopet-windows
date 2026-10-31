@@ -162,7 +162,7 @@ describe("Brain and chests", () => {
     expect(s().bubble).toBeNull();
     clock.t = start + 25 * MIN;
     brain.tick();
-    expect(s().bubble?.text).toContain("25 minutes up");
+    expect(s().bubble?.text).toContain("25 minutes");
     expect(s().bubble?.text).toContain("I found a chest!");
     brain.stop();
   });
@@ -208,7 +208,7 @@ describe("Brain and crafting", () => {
     clock.t = start + 25 * MIN;
     brain.tick();
     const b = s().bubble!;
-    expect(b.text).toContain("25 minutes up");
+    expect(b.text).toContain("25 minutes");
     expect(b.text).toContain("All done! A potted plant");
     expect(s().life).toMatchObject({ craft: 0, decor: ["rug", "plant"] });
     expect(s().craft).toBeNull();
