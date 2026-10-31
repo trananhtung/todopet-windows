@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { setLang } from "./l10n";
 import { lifeFromJson, newLife } from "./life";
-import { FRESH_MS, MAX_KEYS, chooseLine, normalizeSaid, remember, withEntry, type SaidEntry } from "./variety";
+import { FRESH_MS, MAX_KEYS, chooseLine, normalizeSaid, remember, stickyPhrase, withEntry, type Pack, type SaidEntry } from "./variety";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -64,6 +65,26 @@ describe("remember", () => {
     const entry: SaidEntry = { n: 2, at: [1, 2] };
     remember(entry, 2, 0, now);
     expect(entry).toEqual({ n: 2, at: [1, 2] });
+  });
+});
+
+describe("stickyPhrase", () => {
+  it("chooses once per key and keeps that option, in the language of the moment", () => {
+    const picked: string[] = [];
+    const say = stickyPhrase((p) => {
+      picked.push(p.key);
+      return 1;
+    });
+    const grown: Pack = { key: "levelUp", options: [["Lớn rồi", "Grown"], ["Cao rồi", "Taller"]] };
+    expect(say(grown)).toBe("Taller");
+    setLang("vi");
+    try {
+      expect(say(grown)).toBe("Cao rồi");
+    } finally {
+      setLang("en");
+    }
+    expect(say({ key: "streak", options: [["Chuỗi", "Streak"], ["Chuỗi 2", "Streak 2"]] })).toBe("Streak 2");
+    expect(picked).toEqual(["levelUp", "streak"]);
   });
 });
 

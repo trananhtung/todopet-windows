@@ -90,7 +90,7 @@ import * as trips from "./trips";
 import * as fr from "./friends";
 // v0.7 "Always fresh".
 import * as updates from "./updates";
-import { chooseLine, remember, withEntry, type Phrase } from "./variety";
+import { chooseLine, remember, stickyPhrase, withEntry, type Pack, type Phrase } from "./variety";
 
 const MIN = 60_000;
 const NEVER = -8.64e15;
@@ -1513,9 +1513,11 @@ export class Brain {
       if (r.repairOffered && after.repair) text += L(`, có nhiệm vụ nối chuỗi tới hết ${after.repair.until}`, `, repair quest open until ${after.repair.until}`);
       if (r.repairExpired) text += L(", nhiệm vụ nối chuỗi đã hết hạn", ", the repair quest ran out");
       this.diary.add("life", text, r.sticker ? { tag: "sticker", day: r.day } : {});
-      const note = this.dayCloseNote(r, after, nowMs);
+      // The note is rebuilt while it waits, so it picks each of its lines once and keeps them.
+      const say = stickyPhrase((p) => this.pickLine(p));
+      const note = this.dayCloseNote(r, after, nowMs, say);
       // A later close with nothing to say (a Saturday) doesn't wipe the words still waiting; stale ones are dropped when told.
-      if (note) this.dayNote = { day: today, text: note, rebuild: (n) => this.dayCloseNote(r, after, n) };
+      if (note) this.dayNote = { day: today, text: note, rebuild: (n) => this.dayCloseNote(r, after, n, say) };
     }
     if (r.unlocked.length > 0) this.say({ text: lines.unlocked(r.unlocked), seconds: 12, urgent: true });
   }
@@ -1524,7 +1526,7 @@ export class Brain {
    * The morning-after explanation of a frozen, excused or broken (repairable) day, a quest that ran out, a filled
    * sticker page and a growth stage the day's XP reached.
    */
-  private dayCloseNote(r: life.DayClose, s: life.LifeState, nowMs: number): string | null {
+  private dayCloseNote(r: life.DayClose, s: life.LifeState, nowMs: number, say: Phrase): string | null {
     const when = daysAgo(r.day, new Date(nowMs));
     const parts: string[] = [];
     if (r.outcome === "frozen") parts.push(lines.dayFrozen(when, s.streak, s.snacks));
@@ -1533,7 +1535,7 @@ export class Brain {
     if (r.outcome === "broken" && r.repairOffered && s.repair) parts.push(lines.dayBroken(when, r.lost, life.REPAIR_TASKS, life.activeRepair(s) !== null));
     if (r.repairExpired) parts.push(lines.repairExpired(s.streak));
     if (r.pageDone) parts.push(lines.pageDone(s.stickerPage - 1, r.snackEarned));
-    if (r.levelUp !== null) parts.push(lines.levelUp(r.levelUp, this.phrase));
+    if (r.levelUp !== null) parts.push(lines.levelUp(r.levelUp, say));
     return parts.length > 0 ? parts.join("\n") : null;
   }
 
@@ -1607,22 +1609,26 @@ export class Brain {
   // ---------- Talking ----------
 
   /**
-   * Turns a pack of lines into what the pet says (SPEC v0.8 §1): one not said in the last two days while one is left,
-   * never the same twice in a row. The pick is kept in `life.said`, by index and time only (lines carry task titles).
+   * Which option of a pack to say (SPEC v0.8 §1): one not said in the last two days while one is left, never the same
+   * twice in a row. The pick is kept in `life.said`, by index and time only (lines carry task titles).
    */
-  private readonly phrase: Phrase = (pack) => {
+  private pickLine(pack: Pack): number {
     const n = pack.options.length;
-    if (n === 0) return "";
-    let i = 0;
-    if (n > 1) {
-      const now = this.now();
-      const entry = this.state.life.said[pack.key];
-      i = chooseLine(n, entry, now, this.random);
-      this.mutateLife((s) => {
-        s.said = withEntry(s.said, pack.key, remember(entry, n, i, now));
-      }, "routine");
-    }
-    return L(pack.options[i][0], pack.options[i][1]);
+    if (n <= 1) return 0;
+    const now = this.now();
+    const entry = this.state.life.said[pack.key];
+    const i = chooseLine(n, entry, now, this.random);
+    this.mutateLife((s) => {
+      s.said = withEntry(s.said, pack.key, remember(entry, n, i, now));
+    }, "routine");
+    return i;
+  }
+
+  /** Turns a pack of lines into what the pet says, picked by `pickLine`. */
+  private readonly phrase: Phrase = (pack) => {
+    if (pack.options.length === 0) return "";
+    const [vi, en] = pack.options[this.pickLine(pack)];
+    return L(vi, en);
   };
   /**
    * Shows a bubble (unless one waiting for an answer, or an urgent one, is in the way). `why` marks it as an
