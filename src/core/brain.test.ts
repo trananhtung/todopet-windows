@@ -6,6 +6,7 @@ import { L, setLang } from "./l10n";
 import { demoLife, type LifeState } from "./life";
 import * as lines from "./lines";
 import { defaultPrefs, type Prefs } from "./prefs";
+import { everyOption } from "./variety";
 
 const MIN = 60_000;
 const at = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m).getTime();
@@ -359,17 +360,19 @@ describe("Brain and forgiving streaks", () => {
     try {
       expect(brain.getSnapshot().life.xp).toBe(320);
       await laterThanHello(brain, clock);
-      expect(brain.getSnapshot().bubble?.text).toContain("I grew up: Teen");
+      const text = brain.getSnapshot().bubble?.text ?? "";
+      expect(everyOption((say) => lines.levelUp(2, say)).some((grew) => text.includes(grew)), text).toBe(true);
     } finally {
       brain.stop();
     }
   });
 
   it("a growth note waiting to be told keeps the line it picked", async () => {
-    // Guards nothing while `levelUp` has one line (a one-line pack is never stored); it bites once the pack grows.
     const { brain, clock } = await boot({ xp: 290, streak: 2 }, doneOn27(3));
     try {
       const picked = structuredClone(brain.getSnapshot().life.said.levelUp);
+      // Picked once, when the day closed.
+      expect(picked).toBeDefined();
       for (let i = 0; i < 4; i++) {
         clock.t += 15_000;
         brain.tick();
@@ -776,7 +779,7 @@ describe("Brain reminder gates, as reviewed", () => {
       for (const t of [...done.brain.getSnapshot().day.today, ...done.brain.getSnapshot().day.overdue]) await done.brain.complete(t);
       done.brain.dismissBubble(done.brain.getSnapshot().bubble!.id, "closed");
       await vi.waitFor(() => expect(done.brain.getSnapshot().loading).toBe(false));
-      expect(done.step()?.text).toContain("Everything's done");
+      expect(everyOption(lines.allDone)).toContain(done.step()?.text);
     } finally {
       done.brain.stop();
     }
