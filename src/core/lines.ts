@@ -466,8 +466,20 @@ export const welcomeBack = (t: TodoTask, say: Phrase) =>
     [`Bạn về rồi! Chỗ bạn dừng là ${q(t)} đó 📍`, `Welcome back! You left off at ${q(t)} 📍`],
     [`Bạn về rồi! Mình mừng ghê. Tiếp ${q(t)} nhé? 🐾`, `Welcome back! So happy to see you. On with ${q(t)}? 🐾`],
   ] });
-export const soon = (t: TodoTask, minutes: number, say: Phrase) => say({ key: "soon", options: [[`⏰ ${minutes} phút nữa: ${q(t)}`, `⏰ In ${minutes} min: ${q(t)}`]] });
-export const dueNow = (t: TodoTask, say: Phrase) => say({ key: "dueNow", options: [[`⏰ Đến giờ rồi: ${q(t)}!`, `⏰ It's time: ${q(t)}!`]] });
+export const soon = (t: TodoTask, minutes: number, say: Phrase) =>
+  say({ key: "soon", options: [
+    [`⏰ ${minutes} phút nữa: ${q(t)}`, `⏰ In ${minutes} min: ${q(t)}`],
+    [`⏰ Còn ${minutes} phút nữa là tới ${q(t)}`, `⏰ ${q(t)} in ${minutes} min`],
+    [`⏰ Sắp tới giờ ${q(t)}: còn ${minutes} phút`, `⏰ Coming up: ${q(t)} in ${minutes} min`],
+    [`⏰ ${minutes} phút nữa có ${q(t)}, chuẩn bị dần nhé`, `⏰ ${q(t)} in ${minutes} min, time to get ready`],
+  ] });
+export const dueNow = (t: TodoTask, say: Phrase) =>
+  say({ key: "dueNow", options: [
+    [`⏰ Đến giờ rồi: ${q(t)}!`, `⏰ It's time: ${q(t)}!`],
+    [`⏰ Tới giờ ${q(t)} rồi nè`, `⏰ Time for ${q(t)}`],
+    [`⏰ Bây giờ là lúc làm ${q(t)}`, `⏰ Now's the time for ${q(t)}`],
+    [`⏰ ${q(t)} đến giờ rồi, mình cổ vũ nha`, `⏰ It's ${q(t)} time, I'm cheering for you`],
+  ] });
 
 /** Every focus line says how long the session is ("25 minutes"). */
 export function focusStart(t: TodoTask | null, minutes: number, say: Phrase): string {
@@ -571,7 +583,12 @@ export const meetingSoon = (e: CalEvent, minutes: number, related: TodoTask[] = 
  * before it (`breather` minutes, at most 5), and then a short one is suggested.
  */
 export const meetingOver = (e: CalEvent, next: CalEvent | null = null, breather = 5, say: Phrase) =>
-  say({ key: "meetingOver", options: [[`“${shortText(e.title)}” xong rồi. Có gì cần ghi lại không?`, `“${shortText(e.title)}” is over. Anything to capture?`]] }) +
+  say({ key: "meetingOver", options: [
+    [`“${shortText(e.title)}” xong rồi. Có gì cần ghi lại không?`, `“${shortText(e.title)}” is over. Anything to capture?`],
+    [`“${shortText(e.title)}” kết thúc rồi. Có việc gì mới cần thêm không? 📝`, `“${shortText(e.title)}” is over. Any new tasks to add? 📝`],
+    [`Họp xong “${shortText(e.title)}” rồi. Ghi nhanh vài ý trước khi quên nhé ✍️`, `“${shortText(e.title)}” is over. Jot down a few notes before they fade ✍️`],
+    [`Hết “${shortText(e.title)}” rồi, thở phào nào. Có gì cần nhớ không? 🫶`, `“${shortText(e.title)}” is over, deep breath. Anything to remember? 🫶`],
+  ] }) +
   (next
     ? `\n${L(
         `“${shortText(next.title)}” bắt đầu lúc ${timeString(next.start)} — nghỉ ${breather} phút trước nhé?`,
@@ -741,26 +758,59 @@ export const switchToStarter = (minutesIn: number) =>
 
 export const starterStart = (t: TodoTask | null, minutes = 2, say: Phrase) =>
   t
-    ? say({ key: "starterStart.task", options: [[`Chỉ ${minutes} phút thôi cho ${q(t)}. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")} on ${q(t)}. Open it and see, that's all 🌱`]] })
-    : say({ key: "starterStart", options: [[`Chỉ ${minutes} phút thôi. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")}. Open it and see, that's all 🌱`]] });
+    ? say({ key: "starterStart.task", options: [
+        [`Chỉ ${minutes} phút thôi cho ${q(t)}. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")} on ${q(t)}. Open it and see, that's all 🌱`],
+        [`Thử ${minutes} phút với ${q(t)} thôi, không cần làm xong 🌱`, `Just try ${n(minutes, "minute")} on ${q(t)}, no need to finish 🌱`],
+        [`${minutes} phút khởi động cho ${q(t)}. Mở ra là đã thắng rồi 🚪`, `A warm-up of ${n(minutes, "minute")} for ${q(t)}. Opening it is already a win 🚪`],
+        [`Chỉ ${minutes} phút với ${q(t)}, rồi mình tính tiếp nha ⏱`, `Only ${n(minutes, "minute")} with ${q(t)}, then we'll see ⏱`],
+      ] })
+    : say({ key: "starterStart", options: [
+        [`Chỉ ${minutes} phút thôi. Mở ra xem là được rồi 🌱`, `Just ${n(minutes, "minute")}. Open it and see, that's all 🌱`],
+        [`${minutes} phút khởi động thôi. Bắt đầu nhỏ xíu cũng được 🌱`, `Just ${n(minutes, "minute")} to warm up. Tiny starts count 🌱`],
+        [`Hẹn ${minutes} phút nhé, chỉ cần bắt đầu là được ⏱`, `${n(minutes, "minute")}, that's all. Starting is the whole job ⏱`],
+      ] });
 
 export const starterEnd = (t: TodoTask | null, say: Phrase) =>
   t
-    ? say({ key: "starterEnd.task", options: [[`Xong 2 phút rồi, bạn đã bắt đầu ${q(t)}! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?`, `Two minutes done, you've started ${q(t)}! 🌱 Keep going with a full session, or stop here for now?`]] })
-    : say({ key: "starterEnd", options: [["Xong 2 phút rồi, bạn đã bắt đầu! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?", "Two minutes done, you've started! 🌱 Keep going with a full session, or stop here for now?"]] });
+    ? say({ key: "starterEnd.task", options: [
+        [`Xong 2 phút rồi, bạn đã bắt đầu ${q(t)}! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?`, `Two minutes done, you've started ${q(t)}! 🌱 Keep going with a full session, or stop here for now?`],
+        [`Bạn đã bắt đầu ${q(t)} rồi đó! Làm tiếp một phiên, hay dừng ở đây? 🌱`, `You've started ${q(t)}! Another full session, or stop here? 🌱`],
+        [`Khởi động xong! ${q(t)} đã nhúc nhích rồi. Đi tiếp không? 🚀`, `Warm-up done! ${q(t)} is moving. Keep going? 🚀`],
+        [`Bước khó nhất với ${q(t)} qua rồi. Tiếp hay nghỉ, tuỳ bạn nhé 🙂`, `The hardest step on ${q(t)} is behind you. Go on or stop, your call 🙂`],
+      ] })
+    : say({ key: "starterEnd", options: [
+        ["Xong 2 phút rồi, bạn đã bắt đầu! 🌱 Làm tiếp một phiên đầy đủ, hay dừng ở đây nhé?", "Two minutes done, you've started! 🌱 Keep going with a full session, or stop here for now?"],
+        ["Bạn đã bắt đầu rồi đó! Làm tiếp một phiên, hay dừng ở đây? 🌱", "You've started! Another full session, or stop here? 🌱"],
+        ["Khởi động xong rồi! Đi tiếp hay nghỉ, tuỳ bạn 🙂", "Warm-up done! Go on or stop, your call 🙂"],
+      ] });
 
 export const starterGone = (t: TodoTask | null, say: Phrase) =>
   t
-    ? say({ key: "starterGone", options: [[`Xong 2 phút rồi, và ${q(t)} cũng đã xong! 🌱`, `Two minutes done, and ${q(t)} is already off your list! 🌱`]] })
+    ? say({ key: "starterGone", options: [
+        [`Xong 2 phút rồi, và ${q(t)} cũng đã xong! 🌱`, `Two minutes done, and ${q(t)} is already off your list! 🌱`],
+        [`Ồ, ${q(t)} xong luôn rồi kìa! Khởi động hiệu quả ghê 🎉`, `Oh, ${q(t)} is already done! What a warm-up 🎉`],
+        [`Hết giờ khởi động, mà ${q(t)} đã xong luôn rồi. Tuyệt quá 🌟`, `Warm-up over, and ${q(t)} is already done. Amazing 🌟`],
+      ] })
     : starterEnd(null, say);
 
-export const starterEnough = (say: Phrase) => say({ key: "starterEnough", options: [["Hay lắm, bắt đầu là phần khó nhất 🌱 Lần sau sẽ dễ hơn.", "Nice, starting is the hardest part 🌱 It gets easier next time."]] });
+export const starterEnough = (say: Phrase) =>
+  say({ key: "starterEnough", options: [
+    ["Hay lắm, bắt đầu là phần khó nhất 🌱 Lần sau sẽ dễ hơn.", "Nice, starting is the hardest part 🌱 It gets easier next time."],
+    ["Bắt đầu được là giỏi rồi. Lần sau mình làm tiếp nha 🌱", "Getting started is already great. We'll pick it up next time 🌱"],
+    ["Dừng ở đây cũng tốt. Bạn đã bắt đầu, phá băng rồi đó 🧊", "Stopping here is fine. You started, and that broke the ice 🧊"],
+    ["Một khởi đầu nhỏ vẫn là khởi đầu. Mình tự hào về bạn 💛", "A small start is still a start. I'm proud of you 💛"],
+  ] });
 
 // Postponed tasks
 
 export function stuck(s: StuckTask, mood: Mood, say: Phrase): string {
   if (mood === "angry") {
-    return say({ key: "stuck.angry", options: [[`${q(s.task)} chờ ${s.days} ngày rồi. Để mình giúp chia thành từng bước nhỏ nhé? ✂️`, `${q(s.task)} has waited ${s.days} days. Want help splitting it into tiny steps? ✂️`]] });
+    return say({ key: "stuck.angry", options: [
+      [`${q(s.task)} chờ ${s.days} ngày rồi. Để mình giúp chia thành từng bước nhỏ nhé? ✂️`, `${q(s.task)} has waited ${s.days} days. Want help splitting it into tiny steps? ✂️`],
+      [`${q(s.task)} đợi ${s.days} ngày rồi. Mình giúp chia thành bước tí hon nhé? ✂️`, `${q(s.task)} has waited ${s.days} days. Let me help break it into tiny steps? ✂️`],
+      [`${s.days} ngày rồi ${q(s.task)} vẫn chưa động. Bước nhỏ nhất là gì, mình làm cùng nhé? 🧩`, `${s.days} days and ${q(s.task)} hasn't budged. What's the smallest step? Let's do it together 🧩`],
+      [`Mình lo cho ${q(s.task)} quá (${s.days} ngày). Chia nhỏ ra là dễ thở hơn liền 🌬️`, `I'm worried about ${q(s.task)} (${s.days} days). Splitting it up makes it much easier 🌬️`],
+    ] });
   }
   return say({ key: "stuck", options: [
     [
@@ -771,14 +821,22 @@ export function stuck(s: StuckTask, mood: Mood, say: Phrase): string {
       `Mình thấy ${q(s.task)} cứ bị dời mãi (${s.days} ngày). Bước nhỏ nhất để bắt đầu là gì?`,
       `${q(s.task)} keeps getting postponed (${s.days} days). What's the tiniest first step?`,
     ],
+    [`${q(s.task)} đã chờ ${s.days} ngày rồi. Mình chia nhỏ ra cho dễ nhé? ✂️`, `${q(s.task)} has waited ${s.days} days. Shall we break it into small steps? ✂️`],
+    [`Dời ${q(s.task)} ${s.days} ngày rồi, chắc nó hơi khó nhằn. Bước đầu tiên là gì nhỉ? 🧩`, `${q(s.task)} has been moved for ${s.days} days, it must be tricky. What's the first step? 🧩`],
+    [`${q(s.task)} cứ trôi mãi (${s.days} ngày). Thử 2 phút xem sao? 🌱`, `${q(s.task)} keeps drifting (${s.days} days). How about trying it for 2 minutes? 🌱`],
+    [`Mình thấy ${q(s.task)} bị dời ${s.days} ngày. Không sao, mình cùng gỡ nó ra nhé 🤝`, `I see ${q(s.task)} has been put off for ${s.days} days. That's okay, let's untangle it together 🤝`],
   ] });
 }
 
 export const splitDone = (count: number, first: string, say: Phrase) =>
-  say({ key: "splitDone", options: [[
-    `Đã chia thành ${count} bước ✂️ Bắt đầu với “${shortText(first)}” nhé — chỉ 15–30 phút thôi!`,
-    `Split into ${count} steps ✂️ Start with “${shortText(first)}” — just 15–30 minutes!`,
-  ]] });
+  say({ key: "splitDone", options: [
+    [
+      `Đã chia thành ${count} bước ✂️ Bắt đầu với “${shortText(first)}” nhé — chỉ 15–30 phút thôi!`,
+      `Split into ${count} steps ✂️ Start with “${shortText(first)}” — just 15–30 minutes!`,
+    ],
+    [`Xong, ${count} bước nhỏ. Bước đầu tiên: “${shortText(first)}”, nhẹ nhàng thôi ✂️`, `Done: ${count} small steps. First up: “${shortText(first)}”, nice and easy ✂️`],
+    [`Đã chia ${count} bước. “${shortText(first)}” chỉ cần 15–30 phút thôi 🌱`, `Split into ${count} steps. “${shortText(first)}” takes just 15–30 minutes 🌱`],
+  ] });
 
 export const deleted = (t: TodoTask) => L(`Đã xoá ${q(t)} 🗑 Danh sách gọn hơn rồi!`, `Deleted ${q(t)} 🗑 One less thing on your list!`);
 

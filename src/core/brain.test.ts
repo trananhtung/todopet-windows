@@ -207,7 +207,7 @@ describe("Brain with the demo backend", () => {
     const steps = await brain.suggestSteps(stuck);
     expect(steps.length).toBeGreaterThanOrEqual(3);
     expect(await brain.split(stuck, steps, true)).toBe(true);
-    expect(brain.getSnapshot().bubble?.text).toContain(`Split into ${steps.length} steps`);
+    expect(brain.getSnapshot().bubble?.text).toMatch(new RegExp(`${steps.length} (small )?steps`));
     const step = brain.getSnapshot().day.today.find((x) => x.parentId === "3");
     expect(step?.content).toBe(steps[0]);
   });
@@ -1106,7 +1106,7 @@ describe("Brain and the nudge budget", () => {
       b = step(0);
       expect(b?.text).toContain("Meeting in 4 min");
       b = step(0);
-      expect(b?.text).toContain("In 4 min");
+      expect(b?.text).toMatch(/in 4 min/i);
       expect(left()).toBe(7);
       brain.dismissBubble(b!.id, "closed");
       // Late in the day: every reminder costs one, the end-of-day review costs nothing.
@@ -1688,7 +1688,8 @@ describe("Brain v0.4: meeting bookends", () => {
     try {
       const left = r.brain.getSnapshot().nudgesLeft;
       const b = r.step(0);
-      expect(b?.text).toBe("“Team sync” is over. Anything to capture?");
+      // Any of its lines, alone in the bubble (no next meeting, so no breather).
+      expect(b?.text).toMatch(/^“Team sync” is over[^\n]*$/);
       expect(titles(b)).toEqual(["＋ Next step", "Nothing"]);
       expect(b?.kind).toBeUndefined();
       expect(b?.urgent).toBe(false);
@@ -2767,7 +2768,7 @@ describe("Brain v0.4 review: the 2-minute starter, the breather and the related 
       r.clock.t += 2 * MIN + 1000;
       r.brain.tick();
       const b = r.brain.getSnapshot().bubble!;
-      expect(b.text).toContain("Two minutes done");
+      expect(b.text).toMatch(/done/i);
       expect(titles(b)).toEqual(["That's enough"]);
     } finally {
       r.brain.stop();

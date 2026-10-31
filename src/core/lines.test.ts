@@ -153,6 +153,9 @@ const FILLED = new Set<string>([
   "dirty", "cleaned", "cleaned.clean",
   // Batch 6: focus and breaks.
   "focusStart.task", "focusStart", "focusEnd.task", "focusEnd", "breakStart", "breakEnd", "backToWork", "welcomeBack", "voice.hungry",
+  // Batch 7: two-minute starters, postponed tasks, meetings.
+  "starterStart.task", "starterStart", "starterEnd.task", "starterEnd", "starterGone", "starterEnough", "stuck", "stuck.angry", "splitDone",
+  "soon", "dueNow", "meetingOver",
 ]);
 /** Keys that shipped (0.7.1) with more than one option. A pack never shrinks: an option's index is its identity. */
 const SHIPPED: Record<string, number> = {
