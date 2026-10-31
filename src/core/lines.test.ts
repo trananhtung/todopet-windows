@@ -116,6 +116,42 @@ const KEYS = [
   "newWeek.recap", "newWeek",
 ];
 
+/**
+ * Calls every line that fills in a count with a count of 1, as the brain can: a target of 1, a first-day streak…
+ * (A task is postponed after 2 days at least, so `stuck` is left out.)
+ */
+function sayWithOne(say: Phrase): void {
+  lines.morning(at(8), 0, 1, T, 1, null, say);
+  lines.morning(at(8), 1, 1, T, 1, { frog: T, note: null }, say);
+  lines.morning(at(8), 1, 1, T, 1, null, say);
+  for (const mood of MOODS) {
+    lines.plan(mood, 0, 1, say);
+    lines.nudge(mood, T, 1, say);
+    lines.overdue(mood, 1, 1, say);
+    lines.distraction(mood, "⟦A⟧", 1, T, say);
+  }
+  lines.overdue("normal", 0, 1, say);
+  const base = { completed: 2, target: 3, sound: "⟦S⟧", frog: false, stuck: false, hour: 11, weekday: 3 };
+  for (const over of [{ completed: 1, target: 1 }, { completed: 1 }, { completed: 1, hour: 7 }, { completed: 1, weekday: 5, hour: 16 }]) lines.done(T, { ...base, ...over }, say);
+  lines.review(1, 1, 1, null, say);
+  lines.review(1, 1, 0, null, say);
+  lines.soon(T, 1, say);
+  lines.focusStart(T, 1, say);
+  lines.focusStart(null, 1, say);
+  lines.focusEnd(T, 1, say);
+  lines.focusEnd(null, 1, say);
+  lines.breakStart(1, say);
+  lines.planComplete(1, T, say);
+  lines.planComplete(1, null, say);
+  lines.meetingOver(meeting("⟦E⟧", 10), meeting("⟦F⟧", 11), 1, say);
+  lines.starterStart(T, 1, say);
+  lines.starterStart(null, 1, say);
+  lines.splitDone(1, "⟦F⟧", say);
+  lines.streak(1, say);
+  lines.dirty(1, say);
+  lines.newWeek({ key: "2026-10-26", done: 1, stickers: 1, trips: 1 }, say);
+}
+
 /** Options per key once v0.8's eight batches are in (SPEC v0.8 §1, Targets): one entry per key of `KEYS`. */
 const TARGETS: Record<string, number> = {
   "greeting.morning": 4, "greeting.midday": 4, "greeting.afternoon": 4, "greeting.evening": 4,
@@ -201,6 +237,29 @@ describe("the packs every varied line goes through", () => {
   it("has a target for exactly the keys of the table, and every key reaches it", () => {
     expect(Object.keys(TARGETS).sort()).toEqual([...KEYS].sort());
     for (const p of packs) expect(p.options.length, p.key).toBeGreaterThanOrEqual(TARGETS[p.key]);
+  });
+
+  it("says one task, one day, one minute: never a plural after 1", () => {
+    const pluralAfterOne = /(?<![\d/])\b1 (?:[a-z-]+ )?(?:tasks|days|things|spots|steps|minutes|hours|layers|stickers|trips|sessions)\b/;
+    const english: string[] = [];
+    sayWithOne((p) => {
+      for (const [, en] of p.options) english.push(`${p.key}: ${en}`);
+      return "";
+    });
+    expect(english.filter((text) => pluralAfterOne.test(text))).toEqual([]);
+  });
+
+  it("says only what is true where it is said", () => {
+    // Pairs a key with words its situation can't back: one task takes a layer of dirt off, not all of it; a break can
+    // end with no task left; Friday lines run till midnight; the review comes before the workday is over.
+    const untrue: Record<string, RegExp> = {
+      dirty: /clean|sạch/i,
+      breakEnd: /next task is waiting|việc tiếp theo đang chờ/i,
+      "done.friday": /afternoon|chiều/i,
+      "review.empty": /^Hết giờ làm rồi/,
+    };
+    for (const p of packs)
+      if (p.key in untrue) for (const [vi, en] of p.options) for (const text of [vi, en]) expect(text, `${p.key}: ${text}`).not.toMatch(untrue[p.key]);
   });
 
   it("never doubles the pet's own exclamation mark (\"mochi!\", \"rawr!\")", () => {

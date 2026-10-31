@@ -33,7 +33,7 @@ Filled in: `{done}/{planned}` done of planned, `{left}` tasks left, `{day}` the 
 | `review.clear` | 3 | Hôm nay gọn gàng ghê: {done}/{planned} việc. Mình tổng kết ngày nha? 🌇 | A tidy day: {done}/{planned} done. Wrap up the day? 🌇 | mới |
 | `review.clear` | 4 | Xong {done}/{planned} việc, không còn gì phải dời. Tổng kết ngày thôi nào 🌙 | {done}/{planned} done, nothing left to move. Time to wrap up the day 🌙 | mới |
 | `review.empty` | 2 | Gần hết giờ làm, danh sách hôm nay trống rồi. Tổng kết ngày nhẹ nhàng nhé? 🌙 | Nearly end of day, and the list is empty. A gentle wrap-up? 🌙 | mới |
-| `review.empty` | 3 | Hết giờ làm rồi, không còn việc nào chờ. Mình tổng kết ngày nha 🍃 | Workday's nearly over, nothing waiting. Let's wrap up the day 🍃 | mới |
+| `review.empty` | 3 | Sắp hết giờ làm, không còn việc nào chờ. Mình tổng kết ngày nha 🍃 | Workday's nearly over, nothing waiting. Let's wrap up the day 🍃 | mới; sửa sau review: the review comes before the workday ends |
 | `lateNight` | 2 | Khuya lắm rồi, mai mình làm tiếp nhé. Ngủ ngon 🌙 | It's very late, let's continue tomorrow. Sleep well 🌙 | mới |
 | `lateNight` | 3 | Mình díp mắt rồi… bạn cũng nghỉ đi nha 😪 | My eyes are closing… you should rest too 😪 | mới |
 | `lateNight` | 4 | Đêm rồi đó. Việc còn lại để mai, sức khoẻ trước nha 🛌 | It's night now. The rest can wait for tomorrow, health first 🛌 | mới |
