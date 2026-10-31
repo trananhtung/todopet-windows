@@ -32,7 +32,7 @@ Filled in: `{planned}` planned so far, `{target}` today's target, `{open}` tasks
 | `greeting.evening` | 3 | Chào buổi tối! Mình ở đây, nhẹ nhàng thôi nhé 🕯️ | Good evening! I'm here, let's keep it gentle 🕯️ | mới |
 | `greeting.evening` | 4 | Chào buổi tối! Trời tối rồi, nhớ nghỉ ngơi nha ⭐ | Good evening! It's dark out, remember to rest ⭐ | mới |
 | `morning.plan` | 2 | Hôm nay mình chọn {target} việc nhé? Đang có {planned}/{target} 📝 | Shall we pick {target} tasks today? {planned}/{target} so far 📝 | mới |
-| `morning.plan` | 3 | Kế hoạch hôm nay: {planned}/{target} việc. Thêm vài việc nữa nha ✍️ | Today's plan: {planned}/{target} tasks. A few more to add ✍️ | mới |
+| `morning.plan` | 3 | Kế hoạch hôm nay: {planned}/{target} việc. Thêm nốt cho đủ nha ✍️ | Today's plan: {planned}/{target} tasks. Let's fill the rest ✍️ | mới; sửa sau review: "a few" can be more than the target needs |
 | `morning.plan` | 4 | Mới lên {planned}/{target} việc thôi. Cùng chọn nốt nhé? 🗂️ | Just {planned}/{target} planned. Pick the rest together? 🗂️ | mới |
 | `morning.plan` | 5 | Mình lên kế hoạch cho hôm nay nha: {planned}/{target} việc rồi 📋 | Let's plan today: {planned}/{target} tasks so far 📋 | mới |
 | `morning.plan` | 6 | Hôm nay việc gì quan trọng nhất? Mới có {planned}/{target} việc 🤔 | What matters most today? {planned}/{target} planned 🤔 | mới |

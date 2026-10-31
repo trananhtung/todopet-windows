@@ -26,7 +26,7 @@ becomes "it", for one task.
 | `nudge.normal` | 6 | Một phiên tập trung cho “{next}” không? Mình ngồi canh 🛡️ | A focus session for “{next}”? I'll keep watch 🛡️ | mới |
 | `nudge.normal` | 7 | Bước kế tiếp: “{next}”. Chỉ cần mở ra xem thôi cũng được 👀 | Next step: “{next}”. Even just opening it counts 👀 | mới |
 | `nudge.normal` | 8 | Mình nghĩ giờ hợp để làm “{next}” đó ✍️ | Feels like a good moment for “{next}” ✍️ | mới |
-| `nudge.happy` | 3 | Bạn đang vào guồng rồi! “{next}” tiếp nhé 🚀 | You're in the zone! “{next}” next? 🚀 | mới |
+| `nudge.happy` | 3 | Bạn đang vào guồng rồi! “{next}” tiếp nhé 🚀 | You've got a rhythm going! “{next}” next? 🚀 | mới; sửa sau review: "the zone" is flow in this app, when no nudge shows |
 | `nudge.happy` | 4 | Nhịp đẹp quá! Nhân tiện xử luôn “{next}” nha 😎 | Great rhythm! Might as well take on “{next}” 😎 | mới |
 | `nudge.happy` | 5 | Đà này mà làm “{next}” là chuẩn luôn ✨ | With this momentum, “{next}” is perfect timing ✨ | mới |
 | `nudge.happy` | 6 | Vui ghê! Mình đi tiếp với “{next}” nhé 🎶 | This is fun! On to “{next}” 🎶 | mới |
@@ -50,7 +50,7 @@ becomes "it", for one task.
 | `overdue` | 5 | Có {n} việc quá hạn. Bạn chọn nhé: hôm nay, hoặc dời sang mai để bắt đầu lại 📅 | {n} overdue tasks. Your call: today, or move them for a fresh start tomorrow 📅 | mới |
 | `overdue` | 6 | {n} việc quá hạn đang đợi. Gom vào hôm nay, hay sang mai bắt đầu lại nhẹ nhàng? 🍃 | {n} overdue tasks waiting. Fold them into today, or a gentle fresh start tomorrow? 🍃 | mới |
 | `overdue.worried` | 1 | {n} việc quá hạn đang chờ. Mình giúp nhé: dời vào hôm nay, hay sang mai bắt đầu lại? 😟 | {n} overdue tasks waiting. I can help: move them to today, or a fresh start tomorrow? 😟 | sửa (cũ: "{n} việc quá hạn đang chờ… 😟 Để mình giúp: dời vào hôm nay, hoặc dời hết sang mai để bắt đầu lại." / "{n} overdue tasks waiting… 😟 Let me help: move them to today, or clear them to tomorrow for a fresh start.") |
-| `overdue.worried` | 2 | {n} việc quá hạn làm mình hơi lo. Sang mai bắt đầu lại cho nhẹ nhé? 😟 | {n} overdue tasks have me a bit worried. A fresh start tomorrow, maybe? 😟 | mới |
+| `overdue.worried` | 2 | {n} việc quá hạn làm mình hơi lo. Sang mai bắt đầu lại cho nhẹ nhé? 😟 | {n} overdue tasks have (has, for one) me a bit worried. A fresh start tomorrow, maybe? 😟 | mới |
 | `overdue.worried` | 3 | Mình thấy {n} việc quá hạn. Đừng lo: làm hôm nay, hoặc sang mai bắt đầu lại 🤝 | I see {n} overdue tasks. Don't worry: today, or a fresh start tomorrow 🤝 | mới |
 | `overdue.worried` | 4 | {n} việc quá hạn đang chờ. Sang mai bắt đầu lại cũng là lựa chọn hay đó 🌱 | {n} overdue tasks waiting. A fresh start tomorrow is a fine choice too 🌱 | mới |
 | `overdue.repeating` | 1 | {n} việc lặp lại đang quá hạn. Chúng tự quay lại theo lịch, nên cứ thong thả 🔁 | {n} repeating tasks are overdue. They come back on schedule, so no rush 🔁 | sửa (cũ: "{n} việc lặp lại đang quá hạn 🔁 Chúng tự quay lại theo lịch, nên xong lần này khi bạn rảnh là được." / "{n} repeating tasks are overdue 🔁 They come back on their own schedule, so just tick this one off when you can.") |

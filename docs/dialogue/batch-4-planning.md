@@ -22,7 +22,7 @@ Filled in: `{k}` tasks still to pick, `{planned}` planned so far, `{target}` tod
 | `plan.normal` | 3 | Hôm nay mới lên {planned}/{target} việc. Thêm {k} việc nữa cho đủ nhé 📋 | {planned}/{target} planned so far. {k} more to round out the day 📋 | mới |
 | `plan.normal` | 4 | Cùng chọn {k} việc cho hôm nay nha? Mình đợi bạn ✍️ | Shall we pick {k} tasks for today? I'll wait ✍️ | mới |
 | `plan.normal` | 5 | Kế hoạch hôm nay còn trống {k} chỗ. Việc nào đáng làm nhất? 🤔 | Today's plan has {k} open spots. What matters most? 🤔 | mới |
-| `plan.normal` | 6 | Mục tiêu {target} việc, mới có {planned}. Thêm vài việc vào hôm nay nhé 🗂️ | Aiming for {target}, {planned} so far. Add a few to today? 🗂️ | mới |
+| `plan.normal` | 6 | Mục tiêu {target} việc, mới có {planned}. Thêm {k} việc vào hôm nay nhé 🗂️ | Aiming for {target}, {planned} so far. Add {k} more to today? 🗂️ | mới; sửa sau review: "a few" can be more than the target needs |
 | `plan.annoyed` | 3 | Mình hơi lo hôm nay chưa có kế hoạch rõ. Chọn {k} việc thôi là được 🌱 | I'm a bit worried today has no clear plan. Just {k} tasks will do 🌱 | mới |
 | `plan.annoyed` | 4 | Chưa đủ {target} việc cho hôm nay ({planned}/{target}). Mình cùng chọn nhé? 🤝 | Not quite {target} for today yet ({planned}/{target}). Pick some together? 🤝 | mới |
 | `plan.annoyed` | 5 | Không cần hoàn hảo đâu. Thêm {k} việc nhỏ là hôm nay ổn rồi 🍃 | No need to be perfect. {k} small tasks and today's set 🍃 | mới |
