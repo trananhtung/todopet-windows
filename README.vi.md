@@ -4,7 +4,7 @@
 
 <p align="center">
 Thú cưng trên màn hình Windows 10/11, sống trên thanh tác vụ, đọc việc trong <a href="https://todoist.com">Todoist</a>,
-<b>cổ vũ khi bạn làm việc</b> và <b>lo lắng (rồi giúp bạn) khi mọi thứ chậm lại</b>. Giờ có tới <b>25 loài</b>.<br>
+<b>cổ vũ khi bạn làm việc</b> và <b>lo lắng (rồi giúp bạn) khi mọi thứ chậm lại</b>. Giờ có tới <b>26 loài</b>.<br>
 <a href="README.md">English</a> · Tiếng Việt · Bản Windows của <a href="https://github.com/trananhtung/todopet">TodoPet cho macOS</a>
 </p>
 
@@ -12,7 +12,7 @@ Thú cưng trên màn hình Windows 10/11, sống trên thanh tác vụ, đọc 
 
 ## Có gì mới trên Windows
 
-- **24 bạn thay vì 1.** Mochi (bánh mochi tai mèo gốc), Mèo, Shiba, Thỏ, Cáo, Gấu trúc, Chim cánh cụt, Ếch, Chuột hamster, Kỳ giông, Chuột lang nước, Vịt con, Gấu trúc đỏ, Rái cá, Nhím, Gấu koala, Hà mã lùn, Hải cẩu con, Cú con, Cừu non và Heo con có sẵn từ đầu, cộng thêm **Ong nhỏ** (mở khoá sau 20 việc), **Rồng con** (mở khoá khi giữ chuỗi 7 ngày) và **Kỳ lân** (mở khoá sau 50 việc). Mỗi loài có dáng, kiểu đi (nảy, nhảy, lạch bạch, bay lơ lửng, lon ton) và tiếng kêu riêng; tất cả đều có tâm trạng, lớn lên, đói, bẩn, phụ kiện và màn ăn mừng. Chọn trong **Cài đặt → Pet**.
+- **26 bạn thay vì 1.** Mochi (bánh mochi tai mèo gốc), Mèo, Shiba, Thỏ, Cáo, Gấu trúc, Chim cánh cụt, Ếch, Chuột hamster, Kỳ giông, Chuột lang nước, Vịt con, Gấu trúc đỏ, Rái cá, Nhím, Gấu koala, Hà mã lùn, Hải cẩu con, Cú con, Cừu non, Heo con, Bảnh Bao và Yaoyiyao có sẵn từ đầu, cộng thêm **Ong nhỏ** (mở khoá sau 20 việc), **Rồng con** (mở khoá khi giữ chuỗi 7 ngày) và **Kỳ lân** (mở khoá sau 50 việc). Mỗi loài có dáng, kiểu đi (nảy, nhảy, lạch bạch, bay lơ lửng, lon ton) và tiếng kêu riêng; tất cả đều có tâm trạng, lớn lên, đói, bẩn, phụ kiện và màn ăn mừng. Chọn trong **Cài đặt → Pet**.
 - **Tích hợp Windows.** Sống trên thanh tác vụ của màn hình chính; chuột bấm xuyên qua mọi chỗ trừ pet, bong bóng và bảng việc. Biểu tượng khay hệ thống hiện tâm trạng và tiến độ (`😊 2/3`, `🍅 18:42`), **Ctrl+Alt+T** để thêm việc từ bất kỳ đâu, khởi động cùng Windows, và tự ẩn khi bạn chơi game, xem video hay trình chiếu toàn màn hình. Nhẹ cho pin: pet ngừng vẽ khi máy khoá hoặc màn hình tắt, và khi bật tiết kiệm pin thì đứng yên cho tới khi bạn tương tác.
 - **Lịch nào cũng được.** Dán đường link ICS (Google Calendar "Địa chỉ bí mật ở định dạng iCal", Outlook "Xuất bản lịch", iCloud). Cuộc họp lặp lại và các buổi bị dời đều được xử lý.
 
