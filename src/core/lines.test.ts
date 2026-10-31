@@ -116,10 +116,7 @@ const KEYS = [
   "newWeek.recap", "newWeek",
 ];
 
-/**
- * Options per key when every batch of v0.8 is in (SPEC v0.8 §1, Targets). A key counts once it is in `FILLED`; every
- * batch adds its keys there, and the last one checks them all.
- */
+/** Options per key once v0.8's eight batches are in (SPEC v0.8 §1, Targets): one entry per key of `KEYS`. */
 const TARGETS: Record<string, number> = {
   "greeting.morning": 4, "greeting.midday": 4, "greeting.afternoon": 4, "greeting.evening": 4,
   "morning.plan": 6, "morning.frogPicked": 6, "morning.frog": 6,
@@ -138,36 +135,11 @@ const TARGETS: Record<string, number> = {
   tripOffer: 5, tripStart: 4, "tripBack.souvenir": 3, "tripBack.stories": 3, "tripBack.early": 3, tripStayed: 3,
   tip: 14, "voice.cheer": 6, "voice.grumble": 4, "voice.angry": 4, "voice.block": 3, "voice.hungry": 3,
 };
-/** The keys whose batch is in: they must reach their target. */
-const FILLED = new Set<string>([
-  // Batch 1: finishing a task, by context.
-  "done", "done.target", "done.stuck", "done.frog", "done.first", "done.early", "done.friday",
-  // Batch 2: finishing the day's plan, and the pet's rewards.
-  "allDone", "planComplete.next", "planComplete", "voice.cheer", "combo", "golden", "levelUp", "streak", "hungry", "hungry.starving",
-  // Batch 3: nudges and overdue tasks.
-  "nudge.normal", "nudge.happy", "nudge.annoyed", "nudge.angry", "overdue", "overdue.worried", "overdue.repeating", "voice.grumble", "voice.angry",
-  // Batch 4: planning the day, and distractions.
-  "plan.normal", "plan.annoyed", "plan.angry", "distraction", "distraction.angry", "grumble", "parade", "block", "voice.block",
-  // Batch 5: greetings, the morning line, and baths.
-  "greeting.morning", "greeting.midday", "greeting.afternoon", "greeting.evening", "morning.plan", "morning.frogPicked", "morning.frog",
-  "dirty", "cleaned", "cleaned.clean",
-  // Batch 6: focus and breaks.
-  "focusStart.task", "focusStart", "focusEnd.task", "focusEnd", "breakStart", "breakEnd", "backToWork", "welcomeBack", "voice.hungry",
-  // Batch 7: two-minute starters, postponed tasks, meetings.
-  "starterStart.task", "starterStart", "starterEnd.task", "starterEnd", "starterGone", "starterEnough", "stuck", "stuck.angry", "splitDone",
-  "soon", "dueNow", "meetingOver",
-  // Batch 8: the day's end, the week, trips, tips.
-  "review", "review.clear", "review.empty", "lateNight", "newWeek.recap", "newWeek", "tripOffer", "tripStart",
-  "tripBack.souvenir", "tripBack.stories", "tripBack.early", "tripStayed", "tip",
-]);
 /** Keys that shipped (0.7.1) with more than one option. A pack never shrinks: an option's index is its identity. */
 const SHIPPED: Record<string, number> = {
   "plan.normal": 2, "plan.annoyed": 2, "plan.angry": 2,
   "nudge.normal": 2, "nudge.happy": 2, "nudge.annoyed": 2, "nudge.angry": 2,
   distraction: 2, grumble: 2, stuck: 2, done: 4, "voice.cheer": 2, "voice.grumble": 2, tip: 6,
-};
-/** Shipped options that break a rule below, each until the batch that rewrites it (`key#index` → why). */
-const UNTIL_REVIEWED: Record<string, string> = {
 };
 
 const markers = (s: string) => [...s.matchAll(/⟦.⟧/g)].map((m) => m[0]).sort();
@@ -217,7 +189,6 @@ describe("the packs every varied line goes through", () => {
   it("keeps lines short: done lines at most 60 characters, the rest 90, before a title is filled in", () => {
     for (const p of packs)
       p.options.forEach((option, i) => {
-        if (`${p.key}#${i}` in UNTIL_REVIEWED) return;
         const max = p.key === "done" || p.key.startsWith("done.") ? 60 : 90;
         for (const text of option) expect(bare(text), `${p.key}#${i}: ${text}`).toBeLessThanOrEqual(max);
       });
@@ -227,9 +198,9 @@ describe("the packs every varied line goes through", () => {
     for (const p of packs) expect(p.options.length, p.key).toBeGreaterThanOrEqual(SHIPPED[p.key] ?? 1);
   });
 
-  it("gives every key a target, and the filled ones reach it", () => {
-    for (const key of KEYS) expect(TARGETS[key], key).toBeGreaterThanOrEqual(1);
-    for (const p of packs) if (FILLED.has(p.key)) expect(p.options.length, p.key).toBeGreaterThanOrEqual(TARGETS[p.key]);
+  it("has a target for exactly the keys of the table, and every key reaches it", () => {
+    expect(Object.keys(TARGETS).sort()).toEqual([...KEYS].sort());
+    for (const p of packs) expect(p.options.length, p.key).toBeGreaterThanOrEqual(TARGETS[p.key]);
   });
 
   it("says the most specific done line", () => {
