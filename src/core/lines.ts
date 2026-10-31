@@ -81,8 +81,8 @@ export function morning(now: Date, plannedCount: number, openCount: number, next
   if (plannedCount < target) {
     // Every option shows how many are planned against the target.
     text = `${g} ${say({ key: "morning.plan", options: [
-      [`Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc thôi 📝`, `What are our ${target} things today? Only ${plannedCount}/${target} planned so far 📝`],
-      [`Hôm nay mình chọn ${target} việc nhé? Đang có ${plannedCount}/${target} 📝`, `Shall we pick ${target} tasks today? ${plannedCount}/${target} so far 📝`],
+      [`Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc thôi 📝`, `What are our ${n(target, "thing")} today? Only ${plannedCount}/${target} planned so far 📝`],
+      [`Hôm nay mình chọn ${target} việc nhé? Đang có ${plannedCount}/${target} 📝`, `Shall we pick ${n(target, "task")} today? ${plannedCount}/${target} so far 📝`],
       [`Kế hoạch hôm nay: ${plannedCount}/${target} việc. Thêm vài việc nữa nha ✍️`, `Today's plan: ${plannedCount}/${target} tasks. A few more to add ✍️`],
       [`Mới lên ${plannedCount}/${target} việc thôi. Cùng chọn nốt nhé? 🗂️`, `Just ${plannedCount}/${target} planned. Pick the rest together? 🗂️`],
       [`Mình lên kế hoạch cho hôm nay nha: ${plannedCount}/${target} việc rồi 📋`, `Let's plan today: ${plannedCount}/${target} tasks so far 📋`],
@@ -93,20 +93,20 @@ export function morning(now: Date, plannedCount: number, openCount: number, next
     text = `${g} ${
       picked
         ? say({ key: "morning.frogPicked", options: [
-            [`Hôm nay có ${openCount} việc. Con ếch bạn đã chọn từ trước: ${q(next)} 🐸`, `${openCount} tasks today. The frog you picked before you left: ${q(next)} 🐸`],
-            [`Hôm nay có ${openCount} việc. Bắt đầu với con ếch bạn đã chọn: ${q(next)} 🐸`, `${openCount} tasks today. Start with the frog you picked: ${q(next)} 🐸`],
+            [`Hôm nay có ${openCount} việc. Con ếch bạn đã chọn từ trước: ${q(next)} 🐸`, `${n(openCount, "task")} today. The frog you picked before you left: ${q(next)} 🐸`],
+            [`Hôm nay có ${openCount} việc. Bắt đầu với con ếch bạn đã chọn: ${q(next)} 🐸`, `${n(openCount, "task")} today. Start with the frog you picked: ${q(next)} 🐸`],
             [`Bạn đã chọn ${q(next)} làm con ếch hôm nay. Mình bắt đầu nhé? 🐸`, `You picked ${q(next)} as today's frog. Shall we start? 🐸`],
-            [`${openCount} việc đang chờ, mở màn bằng con ếch bạn chọn: ${q(next)} 🎬`, `${openCount} tasks waiting, opening with the frog you picked: ${q(next)} 🎬`],
+            [`${openCount} việc đang chờ, mở màn bằng con ếch bạn chọn: ${q(next)} 🎬`, `${n(openCount, "task")} waiting, opening with the frog you picked: ${q(next)} 🎬`],
             [`Đúng như bạn đã chọn hôm trước: ${q(next)} đi đầu nha 🐸`, `Just as you picked last time: ${q(next)} goes first 🐸`],
             [`Con ếch bạn tự chọn đang chờ: ${q(next)}. Ăn nó trước nha 🐸`, `The frog you picked is waiting: ${q(next)}. Eat it first 🐸`],
           ] })
         : say({ key: "morning.frog", options: [
-            [`Hôm nay có ${openCount} việc. Ăn con ếch trước: ${q(next)} 🐸`, `${openCount} tasks today. Eat the frog first: ${q(next)} 🐸`],
-            [`Hôm nay có ${openCount} việc. Con ếch hôm nay: ${q(next)} 🐸`, `${openCount} tasks today. Today's frog: ${q(next)} 🐸`],
-            [`${openCount} việc cho hôm nay. Ếch trước: ${q(next)}, phần còn lại dễ thở hơn 🐸`, `${openCount} tasks for today. Frog first: ${q(next)}, then the rest gets easier 🐸`],
-            [`Có ${openCount} việc nè. Mình xử con ếch ${q(next)} trước nhé? 🐸`, `${openCount} tasks here. Shall we tackle the frog, ${q(next)}, first? 🐸`],
+            [`Hôm nay có ${openCount} việc. Ăn con ếch trước: ${q(next)} 🐸`, `${n(openCount, "task")} today. Eat the frog first: ${q(next)} 🐸`],
+            [`Hôm nay có ${openCount} việc. Con ếch hôm nay: ${q(next)} 🐸`, `${n(openCount, "task")} today. Today's frog: ${q(next)} 🐸`],
+            [`${openCount} việc cho hôm nay. Ếch trước: ${q(next)}, phần còn lại dễ thở hơn 🐸`, `${n(openCount, "task")} for today. Frog first: ${q(next)}, then the rest gets easier 🐸`],
+            [`Có ${openCount} việc nè. Mình xử con ếch ${q(next)} trước nhé? 🐸`, `${n(openCount, "task")} here. Shall we tackle the frog, ${q(next)}, first? 🐸`],
             [`Con ếch to nhất hôm nay là ${q(next)}. Bắt đầu từ nó nha 🐸`, `Today's biggest frog is ${q(next)}. Let's start there 🐸`],
-            [`${openCount} việc hôm nay, ếch ${q(next)} đi đầu. Mình cổ vũ bạn 🐸`, `${openCount} tasks today, with the frog ${q(next)} up first. I'm cheering for you 🐸`],
+            [`${openCount} việc hôm nay, ếch ${q(next)} đi đầu. Mình cổ vũ bạn 🐸`, `${n(openCount, "task")} today, with the frog ${q(next)} up first. I'm cheering for you 🐸`],
           ] })
     }`;
   } else {
@@ -145,7 +145,7 @@ export function plan(mood: Mood, plannedCount: number, target: number, say: Phra
     ] });
   }
   return say({ key: "plan.normal", options: [
-    [`Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc 📝`, `What are our ${target} things today? ${plannedCount}/${target} planned 📝`],
+    [`Hôm nay mình làm ${target} việc gì nào? Mới có ${plannedCount}/${target} việc 📝`, `What are our ${n(target, "thing")} today? ${plannedCount}/${target} planned 📝`],
     [`Chọn ${k} việc quan trọng nhất cho hôm nay nhé ✍️`, `Pick the ${k} most important tasks for today ✍️`],
     [`Hôm nay mới lên ${plannedCount}/${target} việc. Thêm ${k} việc nữa cho đủ nhé 📋`, `${plannedCount}/${target} planned so far. ${k} more to round out the day 📋`],
     [`Cùng chọn ${k} việc cho hôm nay nha? Mình đợi bạn ✍️`, `Shall we pick ${n(k, "task")} for today? I'll wait ✍️`],
@@ -219,7 +219,7 @@ export function overdue(mood: Mood, movable: number, repeating = 0, say: Phrase)
     return say({ key: "overdue.repeating", options: [
       [
         `${repeating} việc lặp lại đang quá hạn. Chúng tự quay lại theo lịch, nên cứ thong thả 🔁`,
-        `${tasks} ${repeating === 1 ? "is" : "are"} overdue. They come back on schedule, so no rush 🔁`,
+        `${tasks} ${repeating === 1 ? "is" : "are"} overdue. ${repeating === 1 ? "It comes" : "They come"} back on schedule, so no rush 🔁`,
       ],
       [`Quá hạn: ${repeating} việc lặp lại. Không sao, lịch sẽ mang lượt sau đến 🔁`, `Overdue: ${tasks}. No stress, the schedule will bring the next round 🔁`],
       [`${repeating} việc lặp lại đang trễ một chút. Xong khi nào tiện là được nha 🔁`, `${tasks} running a bit late. Tick off whenever it suits you 🔁`],
@@ -320,7 +320,7 @@ export function done(t: TodoTask, c: DoneContext, say: Phrase): string {
   if (completed === target) {
     return say({ key: "done.target", options: [
       [`Đủ ${target} việc rồi!!! Bạn là nhất 🏆`, `That's ${target}!!! You're the best 🏆`],
-      [`Chạm mốc ${target} việc hôm nay rồi! Tự hào về bạn ghê 🏆`, `${target} tasks today, target hit! So proud of you 🏆`],
+      [`Chạm mốc ${target} việc hôm nay rồi! Tự hào về bạn ghê 🏆`, `${n(target, "task")} today, target hit! So proud of you 🏆`],
       [`${cry} Đủ chỉ tiêu ${target} việc rồi nè 🎊`, `${cry} That's the ${target}-task goal, done 🎊`],
       [`Mục tiêu ${target} việc: xong! Thêm nữa là thưởng thôi 🌟`, `Goal of ${target}: done! Anything more is a bonus 🌟`],
       [`Đủ ${target} việc! Hôm nay thắng rồi nha 🌈`, `All ${target} done! Today's a win 🌈`],
@@ -369,7 +369,7 @@ export function done(t: TodoTask, c: DoneContext, say: Phrase): string {
   }
   if (c.weekday === 5 && c.hour >= 15) {
     return say({ key: "done.friday", options: [
-      ["Chiều thứ Sáu mà vẫn xong việc, bạn đỉnh thật 🎉", "Friday afternoon and still getting it done, wow 🎉"],
+      ["Thứ Sáu rồi mà vẫn xong việc, bạn đỉnh thật 🎉", "Friday, and still getting it done, wow 🎉"],
       [`Xong ${q(t)}! Cuối tuần đang vẫy tay kìa 👋`, `${q(t)} done! The weekend is waving at you 👋`],
       [`Thứ Sáu khép lại đẹp quá (${completed}/${target}) 🌇`, `A lovely way to wrap up Friday (${completed}/${target}) 🌇`],
       [`${cry} Một việc nữa trước cuối tuần 🍹`, `${cry} One more before the weekend 🍹`],
@@ -429,7 +429,7 @@ export const review = (completed: number, plannedCount: number, left: number, da
         : say({ key: "review.empty", options: [
             ["Sắp hết giờ làm. Danh sách hôm nay đã trống. Mình tổng kết ngày nhé?", "Almost end of day, and the list is clear. Wrap up the day?"],
             ["Gần hết giờ làm, danh sách hôm nay trống rồi. Tổng kết ngày nhẹ nhàng nhé? 🌙", "Nearly end of day, and the list is empty. A gentle wrap-up? 🌙"],
-            ["Hết giờ làm rồi, không còn việc nào chờ. Mình tổng kết ngày nha 🍃", "Workday's nearly over, nothing waiting. Let's wrap up the day 🍃"],
+            ["Sắp hết giờ làm, không còn việc nào chờ. Mình tổng kết ngày nha 🍃", "Workday's nearly over, nothing waiting. Let's wrap up the day 🍃"],
           ] })
     : say({ key: "review", options: [
         [
@@ -556,25 +556,25 @@ export const breakEnd = (say: Phrase) =>
     ["Nghỉ xong rồi! Mình quay lại nhẹ nhàng nhé 🌱", "Break's done! Let's ease back in 🌱"],
     ["Ting! Hết giờ nghỉ. Sẵn sàng chưa? 🔔", "Ding! Break time's over. Ready? 🔔"],
     ["Nạp năng lượng xong rồi, mình tiếp tục thôi ⚡", "Recharged! Let's carry on ⚡"],
-    ["Hết giờ nghỉ rồi nè. Việc tiếp theo đang chờ đó 🙂", "That's the break. Your next task is waiting 🙂"],
+    ["Hết giờ nghỉ rồi nè. Sẵn sàng cho việc tiếp chưa? 🙂", "That's the break. Ready for what's next? 🙂"],
   ] });
 export const added = (title: string) => L(`Đã thêm “${shortText(title)}” ✔︎`, `Added “${shortText(title)}” ✔︎`);
 
 export function planComplete(target: number, next: TodoTask | null, say: Phrase): string {
   if (next) {
     return say({ key: "planComplete.next", options: [
-      [`Đủ ${target} việc cho hôm nay rồi! Bắt đầu với ${q(next)} nhé 🐸`, `${target} tasks planned! Start with ${q(next)} 🐸`],
-      [`Kế hoạch ${target} việc xong rồi! Mở đầu bằng ${q(next)} nhé 🐸`, `Your ${target} tasks are set! Open with ${q(next)} 🐸`],
-      [`Đủ ${target} việc, kế hoạch gọn gàng. Bắt đầu từ ${q(next)} thôi 🚀`, `${target} tasks, a tidy plan. Let's start with ${q(next)} 🚀`],
+      [`Đủ ${target} việc cho hôm nay rồi! Bắt đầu với ${q(next)} nhé 🐸`, `${n(target, "task")} planned! Start with ${q(next)} 🐸`],
+      [`Kế hoạch ${target} việc xong rồi! Mở đầu bằng ${q(next)} nhé 🐸`, `Your ${n(target, "task")} ${target === 1 ? "is" : "are"} set! Open with ${q(next)} 🐸`],
+      [`Đủ ${target} việc, kế hoạch gọn gàng. Bắt đầu từ ${q(next)} thôi 🚀`, `${n(target, "task")}, a tidy plan. Let's start with ${q(next)} 🚀`],
       [`Lên kế hoạch xong! Việc đầu tiên: ${q(next)} 🎯`, `Plan done! First up: ${q(next)} 🎯`],
-      [`${target} việc đã vào hàng. ${q(next)} đứng đầu nè 🐸`, `${target} tasks lined up. ${q(next)} goes first 🐸`],
+      [`${target} việc đã vào hàng. ${q(next)} đứng đầu nè 🐸`, `${n(target, "task")} lined up. ${q(next)} goes first 🐸`],
       [`Tuyệt, có kế hoạch rồi! Thử bắt tay vào ${q(next)} nhé 💪`, `Great, the plan's ready! Try getting into ${q(next)} 💪`],
     ] });
   }
   return say({ key: "planComplete", options: [
-    [`Đủ ${target} việc cho hôm nay rồi! 🐸`, `${target} tasks planned for today! 🐸`],
-    [`Kế hoạch ${target} việc cho hôm nay đã sẵn sàng 📋`, `Today's plan of ${target} tasks is ready 📋`],
-    [`Đủ ${target} việc rồi! Mình sẵn sàng cùng bạn 💪`, `${target} tasks planned! I'm ready when you are 💪`],
+    [`Đủ ${target} việc cho hôm nay rồi! 🐸`, `${n(target, "task")} planned for today! 🐸`],
+    [`Kế hoạch ${target} việc cho hôm nay đã sẵn sàng 📋`, `Today's plan of ${n(target, "task")} is ready 📋`],
+    [`Đủ ${target} việc rồi! Mình sẵn sàng cùng bạn 💪`, `${n(target, "task")} planned! I'm ready when you are 💪`],
     ["Kế hoạch xong xuôi. Từng việc một thôi nhé 🌱", "Plan all set. One task at a time 🌱"],
   ] });
 }
@@ -856,10 +856,10 @@ export const splitDone = (count: number, first: string, say: Phrase) =>
   say({ key: "splitDone", options: [
     [
       `Đã chia thành ${count} bước ✂️ Bắt đầu với “${shortText(first)}” nhé — chỉ 15–30 phút thôi!`,
-      `Split into ${count} steps ✂️ Start with “${shortText(first)}” — just 15–30 minutes!`,
+      `Split into ${n(count, "step")} ✂️ Start with “${shortText(first)}” — just 15–30 minutes!`,
     ],
-    [`Xong, ${count} bước nhỏ. Bước đầu tiên: “${shortText(first)}”, nhẹ nhàng thôi ✂️`, `Done: ${count} small steps. First up: “${shortText(first)}”, nice and easy ✂️`],
-    [`Đã chia ${count} bước. “${shortText(first)}” chỉ cần 15–30 phút thôi 🌱`, `Split into ${count} steps. “${shortText(first)}” takes just 15–30 minutes 🌱`],
+    [`Xong, ${count} bước nhỏ. Bước đầu tiên: “${shortText(first)}”, nhẹ nhàng thôi ✂️`, `Done: ${n(count, "small step")}. First up: “${shortText(first)}”, nice and easy ✂️`],
+    [`Đã chia ${count} bước. “${shortText(first)}” chỉ cần 15–30 phút thôi 🌱`, `Split into ${n(count, "step")}. “${shortText(first)}” takes just 15–30 minutes 🌱`],
   ] });
 
 export const deleted = (t: TodoTask) => L(`Đã xoá ${q(t)} 🗑 Danh sách gọn hơn rồi!`, `Deleted ${q(t)} 🗑 One less thing on your list!`);
@@ -914,22 +914,23 @@ export const levelUp = (s: StageIndex, say: Phrase) =>
 export const unlocked = (items: Accessory[]) => L("🎁 Mở khoá: ", "🎁 Unlocked: ") + items.map((a) => `${accessoryEmoji(a)} ${accessoryName(a)}`).join(", ");
 export const speciesUnlocked = (emoji: string, name: string) =>
   L(`🥚 Bạn mới mở khoá một bạn mới: ${emoji} ${name}! Đổi trong Cài đặt nhé.`, `🥚 New friend unlocked: ${emoji} ${name}! Switch in Settings.`);
-export const streak = (n: number, say: Phrase) =>
+/** `days`: the streak before today, which doesn't count yet. */
+export const streak = (days: number, say: Phrase) =>
   say({ key: "streak", options: [
-    [`🔥 Chuỗi ${n} ngày — giữ nhé!`, `🔥 ${n}-day streak — keep it going!`],
-    [`🔥 ${n} ngày liền rồi, mình nhớ từng ngày đó!`, `🔥 ${n} days in a row, and I remember every one!`],
-    [`🔥 Chuỗi ${n} ngày, đều đặn ghê`, `🔥 A ${n}-day streak, so steady`],
-    [`🔥 Ngày thứ ${n} liên tiếp. Hôm nay mình đi tiếp nhé?`, `🔥 Day ${n} in a row. Shall we keep going today?`],
-    [`🔥 ${n} ngày không đứt quãng, bạn kiên trì thật`, `🔥 ${n} days without a break, you really stick with it`],
-    [`🔥 ${n} ngày rồi! Mình vui vì được đồng hành cùng bạn`, `🔥 ${n} days! I'm glad to be on this with you`],
+    [`🔥 Chuỗi ${days} ngày — giữ nhé!`, `🔥 ${days}-day streak — keep it going!`],
+    [`🔥 ${days} ngày liền rồi, mình nhớ từng ngày đó!`, `🔥 ${n(days, "day")} in a row, and I remember every one!`],
+    [`🔥 Chuỗi ${days} ngày, đều đặn ghê`, `🔥 A ${days}-day streak, so steady`],
+    [`🔥 ${days} ngày liên tiếp rồi. Hôm nay mình thêm một ngày nhé?`, `🔥 ${n(days, "day")} in a row. Shall we add today?`],
+    [`🔥 ${days} ngày không đứt quãng, bạn kiên trì thật`, `🔥 ${n(days, "day")} without a break, you really stick with it`],
+    [`🔥 ${days} ngày rồi! Mình vui vì được đồng hành cùng bạn`, `🔥 ${n(days, "day")}! I'm glad to be on this with you`],
   ] });
 export const dirty = (dirt: number, say: Phrase) =>
   say({ key: "dirty", options: [
     [`🛁 Mình hơi lấm lem (lỡ ${dirt} ngày). Xong 1 việc là mình được tắm nè!`, `🛁 I'm a bit grubby (${n(dirt, "missed day")}). Finish one task and I get a bath!`],
     [`🛁 Mình dính bụi ${dirt} ngày rồi. Một việc xong là mình được tắm`, `🛁 Dusty after ${n(dirt, "missed day")}. One finished task and I'm in the bath`],
-    [`🛁 Lỡ ${dirt} ngày nên mình hơi bẩn. Xong một việc là sạch ngay`, `🛁 A bit grubby after ${n(dirt, "missed day")}. One task and I'm clean again`],
+    [`🛁 Lỡ ${dirt} ngày nên mình hơi bẩn. Xong một việc là được tắm`, `🛁 A bit grubby after ${n(dirt, "missed day")}. One task and I get a bath`],
     [`🛁 Mình lấm lem sau ${dirt} ngày nè. Xong một việc là tắm cho mình nhé?`, `🛁 All smudgy after ${n(dirt, "missed day")}. Finish a task to give me a bath?`],
-    [`🛁 ${dirt} ngày chưa tắm rồi đó. Một việc nhỏ thôi là mình sạch`, `🛁 ${n(dirt, "missed day")} without a bath. One small task is all I need to get clean`],
+    [`🛁 ${dirt} ngày chưa tắm rồi đó. Một việc nhỏ thôi là mình được tắm`, `🛁 ${n(dirt, "missed day")} without a bath. One small task gets me in the tub`],
   ] });
 
 // Forgiving streaks: one kind word the morning after, never a scolding. `when` is "yesterday" / "3 days ago".

@@ -66,7 +66,7 @@ Options 1–4 of `done` and option 1 of `done.target` are the lines already ship
 | `done.early` | 3 | Buổi sáng hiệu quả quá! ({done}/{target}) 🌄 | What a productive morning! ({done}/{target}) 🌄 | mới |
 | `done.early` | 4 | {sound}! Chim dậy sớm có… việc xong sớm 🐦 | {sound}! The early bird gets… things done 🐦 | mới |
 | `done.early` | 5 | Xong việc trước 9 giờ, cả ngày rộng rãi hẳn 🌤️ | Done before 9, the whole day opens up 🌤️ | mới |
-| `done.friday` | 1 | Chiều thứ Sáu mà vẫn xong việc, bạn đỉnh thật 🎉 | Friday afternoon and still getting it done, wow 🎉 | mới |
+| `done.friday` | 1 | Thứ Sáu rồi mà vẫn xong việc, bạn đỉnh thật 🎉 | Friday, and still getting it done, wow 🎉 | mới; sửa sau review: Friday lines run till midnight |
 | `done.friday` | 2 | Xong “{title}”! Cuối tuần đang vẫy tay kìa 👋 | “{title}” done! The weekend is waving at you 👋 | mới |
 | `done.friday` | 3 | Thứ Sáu khép lại đẹp quá ({done}/{target}) 🌇 | A lovely way to wrap up Friday ({done}/{target}) 🌇 | mới |
 | `done.friday` | 4 | {sound}! Một việc nữa trước cuối tuần 🍹 | {sound}! One more before the weekend 🍹 | mới |

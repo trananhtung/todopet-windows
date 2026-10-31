@@ -746,7 +746,11 @@ The extra lines of the bubble (golden treat, combo, level up, chest…) are appe
   the rest varies: the greeting's time of day ("Chào buổi sáng!" / "Good morning!"…), "Bạn về rồi!" / "Welcome
   back!", an English meeting check-in's "“…” is over", the review's "end of day", "wrap up" and move-to-day
   question ("tổng kết", "dời hết sang …?"), an overdue line's fresh start, a picked frog's "picked", and the
-  minutes of focus, break and starter lines. Spoken lines (`voice.*`) carry no "!" and no emoji.
+  minutes of focus, break and starter lines. Spoken lines (`voice.*`) carry no emoji, and no "!" except the cheers
+  (`voice.cheer`). The extra lines under a done line and the morning greeting (combo, golden treat, growing up,
+  streak, bath) keep a leading icon (🔥 ✨ ⬆️ 🛁) so they read as a list. English says "1 task", "1 day" for one,
+  and a line never says what its situation can't back (one task takes one layer of dirt off, not all of it; a
+  break can end with no task left; Friday lines run till midnight).
 - Out of scope: chest, craft and wrap-up lines (in `chests.ts`, `craft.ts`, `wrapup.ts`), labels, errors, updates.
 
 #### Phases
@@ -771,7 +775,8 @@ The extra lines of the bubble (golden treat, combo, level up, chest…) are appe
   no empty or duplicate string in a pack; the same `${…}` placeholders filled in both languages (checked by passing
   marker values); the same numbers and times in both languages; one pack size per key wherever it is said; never fewer
   options than the key shipped with; length limits per the voice rules, measured with the title (app, place) left out;
-  each key's option count is at least its target, for the keys whose batch is in (phase 2).
+  each key's option count is at least its target, and the targets name exactly the keys; no plural after a count
+  of 1 (every counting line called with 1); no voice's own "!" doubled; the "only what is true" pairs above.
 - Brain: finishing 15 tasks in a day gives 15 different `done` lines; every completion bubble made through the pet
   still has Undo, whatever its context; the saved life, after a day with a task titled with a sentinel string,
   never contains that string; the memory survives a restart (saved and loaded back).

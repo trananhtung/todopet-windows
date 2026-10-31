@@ -41,7 +41,7 @@ task.
 | `breakEnd` | 2 | Nghỉ xong rồi! Mình quay lại nhẹ nhàng nhé 🌱 | Break's done! Let's ease back in 🌱 | mới |
 | `breakEnd` | 3 | Ting! Hết giờ nghỉ. Sẵn sàng chưa? 🔔 | Ding! Break time's over. Ready? 🔔 | mới |
 | `breakEnd` | 4 | Nạp năng lượng xong rồi, mình tiếp tục thôi ⚡ | Recharged! Let's carry on ⚡ | mới |
-| `breakEnd` | 5 | Hết giờ nghỉ rồi nè. Việc tiếp theo đang chờ đó 🙂 | That's the break. Your next task is waiting 🙂 | mới |
+| `breakEnd` | 5 | Hết giờ nghỉ rồi nè. Sẵn sàng cho việc tiếp chưa? 🙂 | That's the break. Ready for what's next? 🙂 | mới; sửa sau review: a break can end with no task left |
 | `backToWork` | 2 | Ơ, bạn làm tiếp hả? Mình dậy liền nè ☀️ | Oh, back at it? I'm awake ☀️ | mới |
 | `backToWork` | 3 | Mình thức rồi! Có gì cần cứ bảo mình nha 🙋 | I'm awake! Just tell me if you need anything 🙋 | mới |
 | `backToWork` | 4 | *dụi mắt* Mình sẵn sàng rồi đây 😊 | *rubs eyes* I'm ready 😊 | mới |

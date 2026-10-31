@@ -47,9 +47,9 @@ Filled in: `{planned}` planned so far, `{target}` today's target, `{open}` tasks
 | `morning.frog` | 5 | Con ếch to nhất hôm nay là “{next}”. Bắt đầu từ nó nha 🐸 | Today's biggest frog is “{next}”. Let's start there 🐸 | mới |
 | `morning.frog` | 6 | {open} việc hôm nay, ếch “{next}” đi đầu. Mình cổ vũ bạn 🐸 | {open} tasks today, with the frog “{next}” up first. I'm cheering for you 🐸 | mới |
 | `dirty` | 2 | 🛁 Mình dính bụi {dirt} ngày rồi. Một việc xong là mình được tắm | 🛁 Dusty after {dirt}. One finished task and I'm in the bath | mới |
-| `dirty` | 3 | 🛁 Lỡ {dirt} ngày nên mình hơi bẩn. Xong một việc là sạch ngay | 🛁 A bit grubby after {dirt}. One task and I'm clean again | mới |
+| `dirty` | 3 | 🛁 Lỡ {dirt} ngày nên mình hơi bẩn. Xong một việc là được tắm | 🛁 A bit grubby after {dirt}. One task and I get a bath | mới; sửa sau review: one task washes one layer off |
 | `dirty` | 4 | 🛁 Mình lấm lem sau {dirt} ngày nè. Xong một việc là tắm cho mình nhé? | 🛁 All smudgy after {dirt}. Finish a task to give me a bath? | mới |
-| `dirty` | 5 | 🛁 {dirt} ngày chưa tắm rồi đó. Một việc nhỏ thôi là mình sạch | 🛁 {dirt} without a bath. One small task is all I need to get clean | mới |
+| `dirty` | 5 | 🛁 {dirt} ngày chưa tắm rồi đó. Một việc nhỏ thôi là mình được tắm | 🛁 {dirt} without a bath. One small task gets me in the tub | mới; sửa sau review: one task washes one layer off |
 | `cleaned` | 2 | 🛁 Bớt lấm lem rồi nè… | 🛁 Less smudgy now… | mới |
 | `cleaned` | 3 | 🛁 Tráng sơ rồi, thêm vài việc nữa là sạch bong | 🛁 A quick rinse, a few more tasks and I'm spotless | mới |
 | `cleaned` | 4 | 🛁 Cảm ơn bạn, mình sạch hơn rồi | 🛁 Thank you, I'm cleaner already | mới |

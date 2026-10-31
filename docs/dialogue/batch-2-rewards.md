@@ -51,7 +51,7 @@ The shipped lines (option 1 of each key; options 1–2 of `voice.cheer`) stay as
 | `levelUp` | 4 | ⬆️ Lên cấp! Giờ mình là {stage} | ⬆️ Level up! Stage: {stage} | mới |
 | `streak` | 2 | 🔥 {n} ngày liền rồi, mình nhớ từng ngày đó! | 🔥 {n} days in a row, and I remember every one! | mới |
 | `streak` | 3 | 🔥 Chuỗi {n} ngày, đều đặn ghê | 🔥 A {n}-day streak, so steady | mới |
-| `streak` | 4 | 🔥 Ngày thứ {n} liên tiếp. Hôm nay mình đi tiếp nhé? | 🔥 Day {n} in a row. Shall we keep going today? | mới |
+| `streak` | 4 | 🔥 {n} ngày liên tiếp rồi. Hôm nay mình thêm một ngày nhé? | 🔥 {n} days in a row. Shall we add today? | mới; sửa sau review: today doesn't count yet |
 | `streak` | 5 | 🔥 {n} ngày không đứt quãng, bạn kiên trì thật | 🔥 {n} days without a break, you really stick with it | mới |
 | `streak` | 6 | 🔥 {n} ngày rồi! Mình vui vì được đồng hành cùng bạn | 🔥 {n} days! I'm glad to be on this with you | mới |
 | `hungry` | 2 | Mình hơi đói rồi 🍪 | I'm getting a bit hungry 🍪 | mới |
